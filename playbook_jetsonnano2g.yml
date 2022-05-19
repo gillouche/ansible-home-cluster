@@ -1,0 +1,17 @@
+---
+- hosts: jetsonnano2g
+  become: yes
+  become_method: sudo
+  roles:
+    - facts
+    - maintenance
+    - common
+    - docker
+    - pihole
+    - tmux
+    - prometheus-node-exporter
+    - prometheus
+    - grafana
+    - nginx
+    - jetson-stats
+...

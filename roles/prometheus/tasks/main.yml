@@ -1,0 +1,46 @@
+---
+# tasks file for prometheus
+
+- name: Install prometheus (Arch)
+  pacman:
+    name: prometheus
+    state: latest
+  when: ansible_distribution == 'Archlinux'
+
+- name: Install prometheus (Ubuntu/Debian)
+  apt:
+    name: prometheus
+    state: latest
+  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+
+- name: copy Prometheus main config file
+  template:
+    src: "prometheus.yml.j2"
+    dest: "/etc/prometheus/prometheus.yml"
+
+- name: Setup ARGS for systemd service
+  replace:
+    path: /etc/default/prometheus
+    regexp: '^ARGS=".*"'
+    replace: 'ARGS="--config.file=/etc/prometheus/prometheus.yml --web.listen-address=:{{ prometheus_port }} --storage.tsdb.path=/var/lib/prometheus --storage.tsdb.retention=1d"'
+
+- name: Create rules directory
+  file:
+    path: /etc/prometheus/rules/
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_group }}"
+    mode: '0755'
+    state: directory
+
+- name: copy Prometheus rules file
+  copy:
+    src: "rules.yml"
+    dest: "/etc/prometheus/rules/"
+
+- name: Enable prometheus service
+  systemd:
+    name: prometheus
+    state: restarted
+    daemon_reload: yes
+    enabled: true 
+    no_block: no

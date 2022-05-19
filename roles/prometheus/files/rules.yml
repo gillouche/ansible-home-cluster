@@ -1,0 +1,47 @@
+groups:
+  - name: cluster metrics
+    rules:
+    - record: instance:cpu_busy:avg_rate5m
+      expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+    - record: cluster:cpu_busy:avg_rate5m
+      expr: sum(instance:cpu_busy:avg_rate5m)
+
+    - record: instance:memory_total_available:remain
+      expr: node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes
+    - record: cluster:memory_total_available:remain
+      expr: sum(instance:memory_total_available:remain)
+
+    - record: instance:memory_total_available:ratio
+      expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100
+    - record: cluster:memory_total_available:ratio
+      expr: sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes) * 100
+
+    - record: instance:network_out:rate5m
+      expr: sum by (instance) (irate(node_network_transmit_bytes_total[5m]))
+    - record: cluster:network_out:rate5m
+      expr: sum(instance:network_out:rate5m)
+
+    - record: instance:network_in:rate5m
+      expr: sum by (instance) (irate(node_network_receive_bytes_total[5m]))
+    - record: cluster:network_in:rate5m
+      expr: sum(instance:network_in:rate5m)
+
+    - record: instance:disk_bytes_read:rate5m
+      expr: sum by (instance) (irate(node_disk_read_bytes_total[5m]))
+    - record: cluster:disk_bytes_read:rate5m
+      expr: sum(instance:disk_bytes_read:rate5m)
+
+    - record: instance:disk_bytes_written:rate5m
+      expr: sum by (instance) (irate(node_disk_written_bytes_total[5m]))
+    - record: cluster:disk_bytes_written:rate5m
+      expr: sum(instance:disk_bytes_written:rate5m)
+
+    - record: instance:disk_io_time:rate5m
+      expr: sum by (instance) (irate(node_disk_io_time_seconds_total[5m]))
+    - record: cluster:disk_io_time:rate5m
+      expr: sum(instance:disk_io_time:rate5m)
+
+    - record: instance:disk_space_used:ratio
+      expr: 100 - ((node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} * 100) / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"})
+    - record: cluster:disk_space_used:ratio
+      expr: 100 - ((sum(node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"}) * 100) / sum(node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"}))

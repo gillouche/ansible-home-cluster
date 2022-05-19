@@ -1,0 +1,80 @@
+---
+# tasks file for pihole
+
+- name: Create pihole directory
+  file:
+    path: "/home/{{ ansible_user }}/pihole"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    state: directory
+    mode: 0755
+
+- name: Uninstall dnsmasq
+  apt:
+    name: dnsmasq
+    state: absent
+
+- name: Disable systemd-resolved
+  systemd:
+    name: systemd-resolved
+    state: stopped
+    enabled: no
+
+- name: Set FTLCONF_REPLY_ADDR (single mode)
+  set_fact:
+    ftlconf_reply_addr4: "{{ ansible_host }}"
+    execution_mode: "single node setup"
+
+- name: Install Docker SDK for python
+  pip:
+    name: docker
+
+- name: Start/Update pihole container
+  docker_container:
+    name: "{{ pihole_container_name }}"
+    image: "{{ pihole_image }}"
+    pull: yes
+    restart_policy: unless-stopped
+    env:
+      TZ: "{{ timezone }}"
+      FTLCONF_REPLY_ADDR4: "{{ ftlconf_reply_addr4 }}"
+      WEBPASSWORD: "{{ pihole_webpassword }}"
+      PIHOLE_DNS_: "{{ pihole_dns }}"
+      DNSMASQ_LISTENING: "local"
+    dns_servers:
+      - 127.0.0.1
+      - "{{ static_dns }}"
+    network_mode: host
+    volumes:
+      - "/home/{{ ansible_user }}/pihole/pihole/:/etc/pihole/"
+      - "/home/{{ ansible_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "5"
+
+- name: Check pihole container
+  uri:
+    url: http://localhost
+  register: result
+  until: result.status == 200
+  retries: 5
+  delay: 10
+
+- name: Add cron to update gravity every day
+  cron:
+    name: "update pihole gravity"
+    minute: 0
+    hour: 0
+    job: "docker exec {{ pihole_container_name }} pihole updateGravity"
+
+- name: Remove old image versions
+  docker_prune:
+    images: yes
+    images_filters:
+      dangling: false
+
+- name: INFORMATION
+  debug:
+    msg:
+      - "DNSv4: {{ ftlconf_reply_addr4 }}"

@@ -1,0 +1,5 @@
+dependencies: 
+  - role: common
+    when: common_was_executed is not defined
+  - role: prometheus
+    when: prometheus_was_executed is not defined

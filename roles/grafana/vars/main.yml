@@ -1,0 +1,40 @@
+---
+# vars file for grafana
+grafana_version: 8.5.2
+grafana_port: 3000
+grafana_user: grafana
+grafana_group: grafana
+grafana_admin_user: admin
+grafana_admin_password: admin
+
+grafana_app_mode: production
+
+# Files & Paths
+grafana_conf_path: "/etc/grafana"
+grafana_data_path: "/var/lib/grafana"
+grafana_log_path: "/var/log/grafana"
+grafana_plugins_path: "{{ grafana_data_path }}/plugins"
+grafana_dashboards_path: "{{ grafana_data_path }}/dashboards"
+
+# Database
+grafana_database:
+  type: sqlite3
+  host: 127.0.0.1:3306
+  name: grafana
+  user: root
+  password: ""
+  path: grafana.dbnode_boot_time
+
+# Log
+grafana_log_mode: console file
+grafana_log_level: info
+
+# Datasource
+grafana_datasource_name: Prometheus
+grafana_datasource_type: prometheus
+grafana_datasource_url_protocol: http
+grafana_datasource_url: '{{ hostvars["jetsonnano2g"].ansible_host }}:{{ prometheus_port }}'
+grafana_datasource_basicauth: "false"
+grafana_datasource_basicauth_user:
+grafana_datasource_basicauth_password:
+grafana_datasource_default: "true"

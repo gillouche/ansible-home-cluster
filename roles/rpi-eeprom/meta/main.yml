@@ -1,0 +1,3 @@
+dependencies: 
+  - role: common 
+    when: common_was_executed is not defined

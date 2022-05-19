@@ -1,0 +1,13 @@
+---
+- name: Execute playbook for Jetson 2g
+  import_playbook: playbook_jetsonnano2g.yml
+
+- name: Execute playbook for rpi4b8g1
+  import_playbook: playbook_rpi4b8g1.yml
+
+- name: Execute playbook for rpi4b8g2
+  import_playbook: playbook_rpi4b8g2.yml
+
+- name: Execute playbook for rpi4b8g3
+  import_playbook: playbook_rpi4b8g3.yml
+...

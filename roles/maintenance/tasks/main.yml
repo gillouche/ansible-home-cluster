@@ -1,0 +1,19 @@
+---
+# tasks file for maintenance
+- name: Update repository (Arch)
+  pacman:
+    update_cache: yes
+    upgrade: yes
+  when: ansible_distribution == 'Archlinux'
+
+- name: Update repository (Ubuntu/Debian)
+  apt:
+    autoremove: yes
+    update_cache: yes 
+    upgrade: yes 
+  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+
+- name: "Define role executed var {{ role_name }}_was_executed"
+  set_fact:
+    "{{ role_name }}_was_executed": true
+    cacheable: true

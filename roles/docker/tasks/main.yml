@@ -1,0 +1,29 @@
+---
+# tasks file for docker
+
+- name: Install docker (Arch)
+  pacman:
+    state: latest
+    name: ['docker', 'docker-compose']
+  notify: "Restart docker"
+  when: ansible_distribution == 'Archlinux'
+
+- name: Install docker (Ubuntu/Debian)
+  apt:
+    state: latest
+    name: ['docker', 'docker-compose']
+  notify: "Restart docker"
+  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+
+- name: Add target_user to docker group
+  user: 
+    name: user
+    groups: docker
+    append: yes
+
+- name: Start service
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+...

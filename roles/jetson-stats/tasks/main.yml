@@ -1,0 +1,14 @@
+---
+# tasks file for jetson-stats
+
+- name: Install jetson-stats (Ubuntu/Debian)
+  pip:
+    name: jetson-stats
+  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+
+- name: Enable service (Ubuntu/Debian)
+  systemd:
+    name: jetson_stats
+    enabled: true 
+    state: started
+  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'

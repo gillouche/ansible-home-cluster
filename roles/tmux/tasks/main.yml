@@ -1,0 +1,59 @@
+---
+# tasks file for tmux
+
+- name: Set variables
+  set_fact:
+    user_systemd_service_path: /home/{{ ansible_user }}/.config/systemd/user
+
+- name: Install tmux (Arch)
+  pacman:
+    state: latest
+    name: tmux
+  when: ansible_distribution == 'Archlinux'
+
+- name: Install tmux (Debian/Ubuntu)
+  apt:
+    name: tmux
+    state: latest
+  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+
+- name: Create directory for the systemd service user
+  file:
+    path: "{{ user_systemd_service_path }}"
+    state: directory
+    recurse: yes
+    owner: "user"
+    group: "user"
+    mode: 0755
+
+- name: Copy tmux.conf
+  copy:
+    src:  tmux.conf
+    dest: /home/{{ ansible_user }}/.tmux.conf
+    owner: "user"
+    group: "user"
+    remote_src: no
+
+- name: Copy tmux.service
+  copy:
+    src: tmux.service
+    dest: /home/{{ ansible_user }}/.config/systemd/{{ ansible_user }}/tmux.service
+    remote_src: no
+
+- name: Register uid of user
+  command: id -u user
+  register: uid
+
+- name: Start tmux service for user
+  systemd:
+    name: tmux.service
+    enabled: true 
+    scope: user
+    state: restarted
+    daemon_reload: yes
+  become_method: runas
+  become_user: "user"
+  environment:
+    XDG_RUNTIME_DIR: /run/{{ ansible_user }}/{{uid.stdout}}
+    DBUS_SESSION_BUS_ADDRESS: /run/{{ ansible_user }}/{{uid.stdout}}/bus
+...

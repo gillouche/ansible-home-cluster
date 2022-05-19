@@ -1,0 +1,14 @@
+---
+- hosts: rpi4b8g3
+  become: yes
+  become_method: sudo
+  roles:
+    - facts
+    - maintenance
+    - common
+    - arch-repo
+    - docker
+    - tmux
+    - prometheus-node-exporter
+    - rpi-eeprom
+...

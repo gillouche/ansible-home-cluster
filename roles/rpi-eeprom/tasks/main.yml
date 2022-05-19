@@ -1,0 +1,10 @@
+---
+# tasks file for rpi-eeprom
+
+- name: Install rpi-eeprom
+  pacman:
+    name: rpi-eeprom 
+    state: latest
+  when: ansible_distribution == 'Archlinux'
+
+  
