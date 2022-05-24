@@ -5,24 +5,28 @@
   pacman:
     name: prometheus
     state: latest
+  become: true
   when: ansible_distribution == 'Archlinux'
 
 - name: Install prometheus (Ubuntu/Debian)
   apt:
     name: prometheus
     state: latest
-  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+  become: true
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: copy Prometheus main config file
   template:
     src: "prometheus.yml.j2"
     dest: "/etc/prometheus/prometheus.yml"
+  become: true
 
 - name: Setup ARGS for systemd service
   replace:
     path: /etc/default/prometheus
     regexp: '^ARGS=".*"'
     replace: 'ARGS="--config.file=/etc/prometheus/prometheus.yml --web.listen-address=:{{ prometheus_port }} --storage.tsdb.path=/var/lib/prometheus --storage.tsdb.retention=1d"'
+  become: true
 
 - name: Create rules directory
   file:
@@ -31,11 +35,13 @@
     group: "{{ prometheus_group }}"
     mode: '0755'
     state: directory
+  become: true
 
 - name: copy Prometheus rules file
   copy:
     src: "rules.yml"
     dest: "/etc/prometheus/rules/"
+  become: true
 
 - name: Enable prometheus service
   systemd:
@@ -44,3 +50,4 @@
     daemon_reload: yes
     enabled: true 
     no_block: no
+  become: true

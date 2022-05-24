@@ -5,19 +5,17 @@
   locale_gen:
     name: en_US.UTF-8
     state: present
+  become: true
 
 - name: Update hostname
   hostname:
     name: "{{ inventory_hostname }}"
+  become: true
 
 - name: Set timezone
   timezone:
     name: Europe/Brussels
-
-- lineinfile: 
-    dest: /etc/hosts
-    state: absent 
-    regexp: "^10.7.1.67 jetson-2g"
+  become: true
 
 - name: Add IP address of all hosts to all hosts
   lineinfile:
@@ -25,30 +23,34 @@
     regexp: '.*{{ item }}$'
     line: "{{ hostvars[item].ansible_host }} {{item}}"
     state: present
+  become: true
   when: hostvars[item].ansible_host is defined
   with_items: "{{ groups.all }}"
 
-- name: "Create group {{ ansible_user }}"
+- name: "Create group {{ target_user }}"
   group:
-    name: "{{ ansible_user }}"
+    name: "{{ target_user }}"
     state: present
+  become: true
 
-- name: "Create user {{ ansible_user }}"
+- name: "Create user {{ target_user }}"
   user:
-    name: "{{ ansible_user }}"
-    groups: "{{ ansible_user }}"
+    name: "{{ target_user }}"
+    groups: "{{ target_user }}"
     state: present
     append: yes
+  become: true
 
 - name: Delete PS1 from bashrc
   lineinfile:
-    dest: "/home/{{ ansible_user }}/.bashrc"
+    dest: "/home/{{ target_user }}/.bashrc"
     state: absent
     regexp: "^PS1"
+  become: true
 
 - name: bashrc for user
   blockinfile:
-    path: "/home/{{ ansible_user }}/.bashrc"
+    path: "/home/{{ target_user }}/.bashrc"
     block: |
       export IP=$(ifconfig eth0 | grep "inet " | cut -d " " -f 10)
 
@@ -66,6 +68,7 @@
           . /etc/bash_completion
         fi
       fi
+  become: true
 
 - name: Install dependencies (Ubuntu/Debian)
   apt:
@@ -82,7 +85,8 @@
       - python3-pip
       - jq
       - ncdu
-  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+  become: true
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Install dependencies (Arch)
   pacman:
@@ -99,6 +103,7 @@
       - python3
       - jq
       - ncdu
+  become: true
   when: ansible_distribution == 'Archlinux'
 
 - name: "Define role executed var {{ role_name }}_was_executed"

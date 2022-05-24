@@ -1,7 +1,4 @@
----
-- hosts: jetsonnano2g
-  become: yes
-  become_method: sudo
+- hosts: master
   roles:
     - facts
     - maintenance
@@ -14,4 +11,14 @@
     - grafana
     - nginx
     - jetson-stats
-...
+
+- hosts: worker
+  roles:
+    - facts
+    - maintenance
+    - common
+    - arch-repo
+    - docker
+    - tmux
+    - prometheus-node-exporter
+    - rpi-eeprom

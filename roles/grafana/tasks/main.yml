@@ -5,6 +5,7 @@
   pacman:
     name: grafana
     state: latest
+  become: true
   when: ansible_distribution == 'Archlinux'
 
 - name: Install requirements (Ubuntu/Debian)
@@ -13,18 +14,20 @@
       - adduser
       - libfontconfig1
     state: latest
-  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+  become: true
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Download Grafana (Ubuntu/Debian)
   get_url:
     url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_arm64.deb"
     dest: "/tmp/grafana_{{ grafana_version }}_arm64.deb"
-  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Install Grafana (Ubuntu/Debian)
   apt:
     deb: "/tmp/grafana_{{ grafana_version }}_arm64.deb"
-  when: ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian'
+  become: true
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: copy Grafana main config file
   template:
@@ -32,6 +35,7 @@
     dest: "/etc/grafana/{{ item }}"
     owner: "{{ grafana_user }}"
     group: "{{ grafana_group }}"
+  become: true
   with_items:
     - grafana.ini
 
@@ -56,6 +60,7 @@
     state: started
     enabled: true 
     no_block: no
+  become: true
 
 - name: check Grafana main datasource
   uri:

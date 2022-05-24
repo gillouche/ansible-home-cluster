@@ -4,11 +4,13 @@
 - name: Install jetson-stats (Ubuntu/Debian)
   pip:
     name: jetson-stats
-  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+  become: true
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Enable service (Ubuntu/Debian)
   systemd:
     name: jetson_stats
     enabled: true 
     state: started
-  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+  become: true
+  when: ansible_facts['os_family'] == "Debian"

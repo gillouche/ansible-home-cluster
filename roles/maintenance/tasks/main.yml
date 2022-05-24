@@ -4,6 +4,7 @@
   pacman:
     update_cache: yes
     upgrade: yes
+  become: true
   when: ansible_distribution == 'Archlinux'
 
 - name: Update repository (Ubuntu/Debian)
@@ -11,7 +12,8 @@
     autoremove: yes
     update_cache: yes 
     upgrade: yes 
-  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+  become: true
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: "Define role executed var {{ role_name }}_was_executed"
   set_fact:

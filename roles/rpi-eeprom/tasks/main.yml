@@ -5,6 +5,7 @@
   pacman:
     name: rpi-eeprom 
     state: latest
+  become: true
   when: ansible_distribution == 'Archlinux'
 
   

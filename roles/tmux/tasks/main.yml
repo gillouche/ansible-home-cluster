@@ -3,19 +3,21 @@
 
 - name: Set variables
   set_fact:
-    user_systemd_service_path: /home/{{ ansible_user }}/.config/systemd/user
+    user_systemd_service_path: /home/{{ target_user }}/.config/systemd/user
 
 - name: Install tmux (Arch)
   pacman:
     state: latest
     name: tmux
+  become: true
   when: ansible_distribution == 'Archlinux'
 
 - name: Install tmux (Debian/Ubuntu)
   apt:
     name: tmux
     state: latest
-  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+  become: true
+  when: ansible_facts['os_family'] == "Debian"
 
 - name: Create directory for the systemd service user
   file:
@@ -29,7 +31,7 @@
 - name: Copy tmux.conf
   copy:
     src:  tmux.conf
-    dest: /home/{{ ansible_user }}/.tmux.conf
+    dest: /home/{{ target_user }}/.tmux.conf
     owner: "user"
     group: "user"
     remote_src: no
@@ -37,7 +39,7 @@
 - name: Copy tmux.service
   copy:
     src: tmux.service
-    dest: /home/{{ ansible_user }}/.config/systemd/{{ ansible_user }}/tmux.service
+    dest: /home/{{ target_user }}/.config/systemd/{{ target_user }}/tmux.service
     remote_src: no
 
 - name: Register uid of user
@@ -54,6 +56,6 @@
   become_method: runas
   become_user: "user"
   environment:
-    XDG_RUNTIME_DIR: /run/{{ ansible_user }}/{{uid.stdout}}
-    DBUS_SESSION_BUS_ADDRESS: /run/{{ ansible_user }}/{{uid.stdout}}/bus
+    XDG_RUNTIME_DIR: /run/{{ target_user }}/{{uid.stdout}}
+    DBUS_SESSION_BUS_ADDRESS: /run/{{ target_user }}/{{uid.stdout}}/bus
 ...

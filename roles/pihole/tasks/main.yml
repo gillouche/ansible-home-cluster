@@ -3,9 +3,9 @@
 
 - name: Create pihole directory
   file:
-    path: "/home/{{ ansible_user }}/pihole"
-    owner: "{{ ansible_user }}"
-    group: "{{ ansible_user }}"
+    path: "/home/{{ target_user }}/pihole"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
     state: directory
     mode: 0755
 
@@ -13,21 +13,25 @@
   apt:
     name: dnsmasq
     state: absent
+  become: true
 
 - name: Disable systemd-resolved
   systemd:
     name: systemd-resolved
     state: stopped
     enabled: no
+  become: true
 
 - name: Set FTLCONF_REPLY_ADDR (single mode)
   set_fact:
     ftlconf_reply_addr4: "{{ ansible_host }}"
     execution_mode: "single node setup"
+  become: true
 
 - name: Install Docker SDK for python
   pip:
     name: docker
+  become: true
 
 - name: Start/Update pihole container
   docker_container:
@@ -46,8 +50,8 @@
       - "{{ static_dns }}"
     network_mode: host
     volumes:
-      - "/home/{{ ansible_user }}/pihole/pihole/:/etc/pihole/"
-      - "/home/{{ ansible_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
+      - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
+      - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
     log_driver: json-file
     log_options:
       max-size: "10m"

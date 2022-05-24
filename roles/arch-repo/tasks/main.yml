@@ -5,6 +5,7 @@
     path: /etc/pacman.d/mirrorlist
     regexp: '^Server = http://mirror.archlinuxarm.org'
     replace: '#Server = http://mirror.archlinuxarm.org'
+  become: true
   when: ansible_distribution == 'Archlinux'
 
 - name: Uncomment german mirrors 
@@ -12,5 +13,6 @@
     path: /etc/pacman.d/mirrorlist
     regexp: "^# (Server = http://de.*)"
     replace: '\1'
+  become: true
   when: ansible_distribution == 'Archlinux'
 
