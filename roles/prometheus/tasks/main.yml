@@ -21,13 +21,6 @@
     dest: "/etc/prometheus/prometheus.yml"
   become: true
 
-- name: Setup ARGS for systemd service
-  replace:
-    path: /etc/default/prometheus
-    regexp: '^ARGS=".*"'
-    replace: 'ARGS="--config.file=/etc/prometheus/prometheus.yml --web.listen-address=:{{ prometheus_port }} --storage.tsdb.path=/var/lib/prometheus --storage.tsdb.retention=1d"'
-  become: true
-
 - name: Create rules directory
   file:
     path: /etc/prometheus/rules/
@@ -46,8 +39,7 @@
 - name: Enable prometheus service
   systemd:
     name: prometheus
-    state: restarted
+    state: started
     daemon_reload: yes
     enabled: true 
-    no_block: no
   become: true

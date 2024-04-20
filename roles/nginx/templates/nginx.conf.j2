@@ -54,11 +54,11 @@ http {
         server_name localhost;
 
         location /prometheus {
-            rewrite ^.*/prometheus$ http://{{ hostvars["jetsonnano2g"].ansible_host }}:9090 permanent;
+            rewrite ^.*/prometheus$ http://{{ hostvars["rpi5b8g1"].ansible_host }}:9090 permanent;
         }
 
         location /grafana {
-            rewrite ^.*/grafana$ http://{{ hostvars["jetsonnano2g"].ansible_host }}:3000 permanent;
+            rewrite ^.*/grafana$ http://{{ hostvars["rpi5b8g1"].ansible_host }}:3000 permanent;
         }
 
         location /pihole {
@@ -70,7 +70,7 @@ http {
         }
 
         location /netgear-router {
-            rewrite ^.*/netgear-router https://10.7.1.1 permanent;
+            rewrite ^.*/netgear-router https://192.168.0.180 permanent;
         }
     }
 }

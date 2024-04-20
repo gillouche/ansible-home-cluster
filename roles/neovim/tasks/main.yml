@@ -1,0 +1,25 @@
+---
+# tasks file for neovim
+
+- name: Install neovim (Ubuntu/Debian)
+  apt:
+    name: neovim
+    state: latest
+  become: true
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Install neovim (Arch)
+  yay:
+    name: neovim
+    state: latest
+  when: ansible_distribution == 'Archlinux'
+
+- name: Copy nvim folder to target
+  copy:
+    src: nvim
+    dest: "/home/{{ target_user }}/.config"
+
+- name: "Define role executed var {{ role_name }}_was_executed"
+  set_fact:
+    "{{ role_name }}_was_executed": true
+    cacheable: true

@@ -2,10 +2,9 @@
 # tasks file for grafana
 
 - name: Install Grafana (Arch)
-  pacman:
-    name: grafana
+  yay:
+    name: grafana-bin
     state: latest
-  become: true
   when: ansible_distribution == 'Archlinux'
 
 - name: Install requirements (Ubuntu/Debian)
@@ -32,14 +31,14 @@
 - name: copy Grafana main config file
   template:
     src: "{{ item }}.j2"
-    dest: "/etc/grafana/{{ item }}"
+    dest: "/etc/{{ item }}"
     owner: "{{ grafana_user }}"
     group: "{{ grafana_group }}"
   become: true
   with_items:
     - grafana.ini
 
-- name: ensure Grafana directories ownership and permissions
+- name: Ensure Grafana directories ownership and permissions
   file:
     path: "{{ item }}"
     owner: "{{ grafana_user }}"
@@ -55,16 +54,21 @@
 
 - name: Enable grafana service
   systemd:
-    name: grafana-server
+    name: grafana.service
     daemon_reload: true
-    state: started
+    state: restarted
     enabled: true 
-    no_block: no
   become: true
 
-- name: check Grafana main datasource
+- name: Wait for Grafana to be up
+  wait_for:
+    port: "{{ grafana_port }}"
+    delay: 5
+    timeout: 60
+
+- name: Check Grafana main datasource
   uri:
-    url: 'http://{{ hostvars["jetsonnano2g"].ansible_host }}:{{ grafana_port }}/api/datasources/1'
+    url: 'http://{{ hostvars["rpi5b8g1"].ansible_host }}:{{ grafana_port }}/api/datasources/uid/edjbjmrlkxkw0c'
     method: GET
     user: "{{ grafana_admin_user }}"
     password: "{{ grafana_admin_password }}"
@@ -75,9 +79,9 @@
   register: datasource_check
   failed_when: false
 
-- name: add Grafana main datasource
+- name: Add Grafana main datasource
   uri:
-    url: 'http://{{ hostvars["jetsonnano2g"].ansible_host }}:{{ grafana_port }}/api/datasources'
+    url: 'http://{{ hostvars["rpi5b8g1"].ansible_host }}:{{ grafana_port }}/api/datasources'
     method: POST
     user: "{{ grafana_admin_user }}"
     password: "{{ grafana_admin_password }}"
@@ -91,9 +95,9 @@
   when:
     - datasource_check.status != 200
 
-- name: create Grafana dashboards
+- name: Create Grafana dashboards
   uri:
-    url: 'http://{{ hostvars["jetsonnano2g"].ansible_host }}:{{ grafana_port }}/api/dashboards/db'
+    url: 'http://{{ hostvars["rpi5b8g1"].ansible_host }}:{{ grafana_port }}/api/dashboards/db'
     method: POST
     user: "{{ grafana_admin_user }}"
     password: "{{ grafana_admin_password }}"
@@ -101,6 +105,6 @@
     headers:
       Accept: application/json
       Content-Type: application/json
-    body: "{{ lookup('template', 'templates/dashboards/nodes.json.j2')}}"
+    body: "{{ lookup('ansible.builtin.file','nodes.json') }}"
     body_format: json
     status_code: 200

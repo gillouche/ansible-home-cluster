@@ -28,13 +28,8 @@
     execution_mode: "single node setup"
   become: true
 
-- name: Install Docker SDK for python
-  pip:
-    name: docker
-  become: true
-
 - name: Start/Update pihole container
-  docker_container:
+  community.general.docker_container:
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
     pull: yes
@@ -57,13 +52,11 @@
       max-size: "10m"
       max-file: "5"
 
-- name: Check pihole container
-  uri:
-    url: http://localhost
-  register: result
-  until: result.status == 200
-  retries: 5
-  delay: 10
+- name: Wait for pihole to be up
+  wait_for:
+    port: "80"
+    delay: 5
+    timeout: 60
 
 - name: Add cron to update gravity every day
   cron:

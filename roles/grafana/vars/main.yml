@@ -1,6 +1,6 @@
 ---
 # vars file for grafana
-grafana_version: 8.5.2
+grafana_version: 10.4.2
 grafana_port: 3000
 grafana_user: grafana
 grafana_group: grafana
@@ -33,7 +33,7 @@ grafana_log_level: info
 grafana_datasource_name: Prometheus
 grafana_datasource_type: prometheus
 grafana_datasource_url_protocol: http
-grafana_datasource_url: '{{ hostvars["jetsonnano2g"].ansible_host }}:{{ prometheus_port }}'
+grafana_datasource_url: '{{ hostvars["rpi5b8g1"].ansible_host }}:{{ prometheus_port }}'
 grafana_datasource_basicauth: "false"
 grafana_datasource_basicauth_user:
 grafana_datasource_basicauth_password:

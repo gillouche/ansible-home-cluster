@@ -1,0 +1,5 @@
+Clean jetson nano from all GUI applications by removing all packages from the file
+
+https://raw.githubusercontent.com/NVIDIA-AI-IOT/jetson-min-disk/main/assets/nvubuntu-bionic-packages_only-in-desktop.txt
+
+reinstall network-manager, openssh-server, docker and nvidia-jetpack just after

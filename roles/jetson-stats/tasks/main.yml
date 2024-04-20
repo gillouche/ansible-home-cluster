@@ -9,7 +9,7 @@
 
 - name: Enable service (Ubuntu/Debian)
   systemd:
-    name: jetson_stats
+    name: jtop.service
     enabled: true 
     state: started
   become: true

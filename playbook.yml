@@ -1,0 +1,46 @@
+- hosts: worker
+  roles:
+    - facts
+    - base
+    - aur_helper
+    - maintenance
+    - common
+    - arch-repo
+    - docker
+    - neovim
+    - tmux
+    - zsh
+    - prometheus-node-exporter
+    # - rpi-eeprom
+
+- hosts: leader
+  roles:
+    - facts
+    - base
+    - aur_helper
+    - maintenance
+    - common
+    - arch-repo
+    - docker
+    - neovim
+    - tmux
+    - zsh
+    - prometheus
+    - prometheus-node-exporter
+    - grafana
+    # - rpi-eeprom
+
+- hosts: reverseproxy
+  roles:
+    - facts
+    - base
+    - maintenance
+    - common
+    - docker
+    - neovim
+    - tmux
+    - zsh
+    - prometheus-node-exporter
+    - pihole
+    - nginx
+    - jetson-stats

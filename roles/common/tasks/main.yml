@@ -3,9 +3,50 @@
 
 - name: Set locale
   locale_gen:
-    name: en_US.UTF-8
+    name: "{{ item }}"
     state: present
   become: true
+  loop:
+    - en_US.UTF-8
+    - fr_BE.UTF-8
+    - C.UTF-8
+
+- name: Install dependencies (Ubuntu/Debian)
+  apt:
+    state: latest
+    name:
+      - curl
+      - wget
+      - git
+      - silversearcher-ag
+      - logrotate
+      - syslog-ng
+      - ranger
+      - tzdata
+      - htop
+      - python3-pip
+      - jq
+      - ncdu
+  become: true
+  when: ansible_facts['os_family'] == "Debian"
+
+- name: Install dependencies (Arch)
+  pacman:
+    state: latest
+    name:
+      - curl
+      - wget
+      - git
+      - the_silver_searcher
+      - logrotate
+      - syslog-ng
+      - ranger
+      - bpytop
+      - python-pip
+      - jq
+      - ncdu
+  become: true
+  when: ansible_distribution == 'Archlinux'
 
 - name: Update hostname
   hostname:
@@ -32,79 +73,6 @@
     name: "{{ target_user }}"
     state: present
   become: true
-
-- name: "Create user {{ target_user }}"
-  user:
-    name: "{{ target_user }}"
-    groups: "{{ target_user }}"
-    state: present
-    append: yes
-  become: true
-
-- name: Delete PS1 from bashrc
-  lineinfile:
-    dest: "/home/{{ target_user }}/.bashrc"
-    state: absent
-    regexp: "^PS1"
-  become: true
-
-- name: bashrc for user
-  blockinfile:
-    path: "/home/{{ target_user }}/.bashrc"
-    block: |
-      export IP=$(ifconfig eth0 | grep "inet " | cut -d " " -f 10)
-
-      export PS1="\[\033[0;31m\]\342\224\214\342\224\200$([[ $? != 0 ]] && echo "[\[\033[0;31m\]\342\234\227\[\033[0;37m\]]\342\224\200")[\[\033[1;97m\]\u\[\033[01;33m\]@\[\033[1;94m\]\h\[\033[01;33m\]\[\033[0;31m\]]\342\224\200\[\033[0;31m\][\[\033[1;97m\]"$IP"\[\033[0;31m\]]\342\224\200[\[\033[1;94m\]\w\[\033[0;31m\]]\n\[\033[0;31m\]\342\224\224\342\224\200\342\224\200\342\225\274 \[\033[0m\]\[\e[01;33m\]\$\[\e[0m\] "
-
-      export LS_OPTIONS='--color=auto'
-      eval "`dircolors`"
-      alias ls='ls $LS_OPTIONS'
-      alias ll='ls $LS_OPTIONS -la'
-      alias l='ls $LS_OPTIONS -lA'
-      if ! shopt -oq posix; then
-        if [ -f /usr/share/bash-completion/bash_completion ]; then
-          . /usr/share/bash-completion/bash_completion
-        elif [ -f /etc/bash_completion ]; then
-          . /etc/bash_completion
-        fi
-      fi
-  become: true
-
-- name: Install dependencies (Ubuntu/Debian)
-  apt:
-    state: latest
-    name:
-      - curl
-      - wget
-      - git
-      - silversearcher-ag
-      - logrotate
-      - ranger
-      - htop
-      - python3
-      - python3-pip
-      - jq
-      - ncdu
-  become: true
-  when: ansible_facts['os_family'] == "Debian"
-
-- name: Install dependencies (Arch)
-  pacman:
-    state: latest
-    name:
-      - curl
-      - wget
-      - git
-      - the_silver_searcher
-      - logrotate
-      - ranger
-      - bpytop
-      - python-pip
-      - python3
-      - jq
-      - ncdu
-  become: true
-  when: ansible_distribution == 'Archlinux'
 
 - name: "Define role executed var {{ role_name }}_was_executed"
   set_fact:

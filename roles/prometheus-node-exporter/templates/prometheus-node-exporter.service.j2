@@ -14,7 +14,7 @@ Type=simple
 User={{ prometheus_user }}
 Group={{ prometheus_group }}
 
-ExecStart=/opt/prometheus/node_exporter
+ExecStart=/opt/prometheus/node_exporter --collector.systemd --collector.processes
 
 [Install]
 WantedBy=multi-user.target

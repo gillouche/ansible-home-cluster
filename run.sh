@@ -8,4 +8,4 @@ else
     verbosity=""
 fi
 
-ansible-playbook -i hosts.yml --ask-become-pass site.yml ${verbosity}
+ansible-playbook -i inventory.yml playbook.yml --ask-vault-pass ${verbosity}
