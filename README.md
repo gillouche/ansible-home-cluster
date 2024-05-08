@@ -17,6 +17,7 @@ The rest of the devices configuration is done using the playbook.
 ## Install
 
 ### Run
+Vault password: playbook
 
 ```shell
 python3 -m venv venv

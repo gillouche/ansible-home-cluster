@@ -11,7 +11,6 @@
     - tmux
     - zsh
     - prometheus-node-exporter
-    # - rpi-eeprom
 
 - hosts: leader
   roles:
@@ -28,7 +27,6 @@
     - prometheus
     - prometheus-node-exporter
     - grafana
-    # - rpi-eeprom
 
 - hosts: reverseproxy
   roles:
