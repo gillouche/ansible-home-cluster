@@ -1,9 +1,22 @@
 ---
 # tasks file for aur-helper
 
+- name: Stop role on non-Arch Linux
+  meta: end_role
+  when:
+    - (ansible_facts['os_family'] | lower) != 'archlinux'
+    - (ansible_facts['distribution'] | lower) != 'archlinux'
+  become: false
+
+- name: Skip if role already executed
+  meta: end_role
+  when: (lookup('vars', role_execution_flag) | default(false)) | bool
+  become: false
+
 - name: Set variables
   set_fact:
     yay_work_dir_path: /tmp/yay/yay
+  become: false
 
 - name: Check if yay is installed
   shell:
@@ -11,29 +24,39 @@
   register: result
   ignore_errors: true
   changed_when: false
+  become: false
 
-- name: Set fact that yay is not installed 
+- name: Set fact that yay is not installed
   set_fact:
     yay_installed: false
   when: "'no yay in' in result.stderr"
+  become: false
 
-- name: Set fact that yay is installed 
+- name: Set fact that yay is installed
   set_fact:
     yay_installed: true
   when: "'no yay in' not in result.stderr"
+  become: false
 
-- name: Install fakeroot
+- name: Install build prerequisites for AUR (Arch)
   pacman:
-    name: fakeroot
-    state: latest
+    name:
+      - base-devel
+      - make
+      - git
+      - go
+      - gcc
+      - fakeroot
+    state: present
   become: true
-  when: not yay_installed
+  when: (ansible_facts['distribution'] | lower) == 'archlinux' and not yay_installed
 
 - name: Remove work dir if existing
   file:
     path: "{{ yay_work_dir_path }}"
     state: absent
   when: not yay_installed
+  become: true
 
 - name: Create working directory
   file:
@@ -44,21 +67,23 @@
     mode: 0755
     recurse: yes
   when: not yay_installed
+  become: false
 
-- name: Download PKGBUILD of yay
-  get_url:
-    url: https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=yay
-    dest: "{{ yay_work_dir_path }}/PKGBUILD"
-    owner: "{{ target_user }}"
-    group: "{{ target_user }}"
-    mode: 0644
+- name: Clone yay AUR repository (avoids bot protection on cgit)
+  git:
+    repo: https://aur.archlinux.org/yay.git
+    dest: "{{ yay_work_dir_path }}"
+    version: HEAD
+    update: yes
+  become: false
   when: not yay_installed
 
 - name: Build yay
-  shell: 
-    cmd: makepkg
+  shell:
+    cmd: makepkg --noconfirm
     chdir:  "{{ yay_work_dir_path }}"
   when: not yay_installed
+  become: false
 
 - name: Register package name
   shell:
@@ -66,6 +91,7 @@
     chdir:  "{{ yay_work_dir_path }}"
   register: yay_package_name
   when: not yay_installed
+  become: false
 
 - name: Install yay with pacman
   pacman:
@@ -74,7 +100,8 @@
   become: true
   when: not yay_installed
 
-- name: "Define role executed var {{ role_name }}_was_executed"
+- name: Mark role as executed
   set_fact:
-    "{{ role_name }}_was_executed": true
+    "{{ role_execution_flag }}": true
     cacheable: true
+  become: false

@@ -1,3 +1,10 @@
-dependencies: 
-  - role: common 
-    when: common_was_executed is not defined
+---
+galaxy_info:
+  author: ansible-home-cluster
+  description: Install and configure Docker engine and compose, add target user to docker group.
+  license: MIT
+  min_ansible_version: '2.13'
+  platforms:
+    - name: GenericLinux
+      versions: ['all']
+dependencies: []

@@ -1,6 +1,10 @@
 ---
 # tasks file for pihole
 
+- name: Skip if role already executed
+  meta: end_role
+  when: (lookup('vars', role_execution_flag) | default(false)) | bool
+
 - name: Create pihole directory
   file:
     path: "/home/{{ target_user }}/pihole"
@@ -75,3 +79,8 @@
   debug:
     msg:
       - "DNSv4: {{ ftlconf_reply_addr4 }}"
+
+- name: Mark role as executed
+  set_fact:
+    "{{ role_execution_flag }}": true
+    cacheable: true

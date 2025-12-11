@@ -1,0 +1,3 @@
+---
+# defaults for pihole role
+role_execution_flag: "pihole_was_executed"

@@ -6,7 +6,7 @@
 export SDDEV=/dev/sdd
 export SDPARTBOOT=/dev/sdd1
 export SDPARTROOT=/dev/sdd2
-export SDPARTBOOT_RPI=/dev/mmcblk0p1 
+export SDPARTBOOT_RPI=/dev/mmcblk0p1
 export SDPARTROOT_RPI=/dev/mmcblk0p2
 
 export SDMOUNT=/mnt/pi
@@ -18,7 +18,7 @@ export RPI_MODEL=$1
 
 if [ -z $RPI_MODEL ]; then
    echo "Model argument must be provided. Possible values: 4g, 8g"
-   exit -1
+   exit 1
 fi
 
 echo "Umount $SDMOUNT"

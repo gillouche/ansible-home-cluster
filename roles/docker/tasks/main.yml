@@ -1,24 +1,20 @@
 ---
 # tasks file for docker
 
+- name: Skip if role already executed
+  meta: end_role
+  when: (lookup('vars', role_execution_flag) | default(false)) | bool
+
 - name: Install docker (Arch)
   pacman:
     state: latest
     name: ['docker', 'docker-compose']
   notify: "Restart docker"
   become: true
-  when: ansible_distribution == 'Archlinux'
-
-- name: Install docker (Ubuntu/Debian)
-  apt:
-    state: latest
-    name: ['docker', 'docker-compose']
-  notify: "Restart docker"
-  become: true
-  when: ansible_facts['os_family'] == "Debian"
+  when: (ansible_facts['distribution'] | lower) == 'archlinux'
 
 - name: Add target_user to docker group
-  user: 
+  user:
     name: "{{ target_user }}"
     groups: docker
     append: yes
@@ -30,4 +26,8 @@
     state: started
     enabled: yes
   become: true
-...
+
+- name: Mark role as executed
+  set_fact:
+    "{{ role_execution_flag }}": true
+    cacheable: true

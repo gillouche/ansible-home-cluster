@@ -1,0 +1,3 @@
+---
+# defaults for utils role
+role_execution_flag: "common_was_executed"

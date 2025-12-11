@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   author: ansible-home-cluster
-  description: Install and configure AUR helper (yay) for target user.
+  description: Common utilities/packages for hosts in the cluster.
   license: MIT
   min_ansible_version: '2.13'
   platforms:

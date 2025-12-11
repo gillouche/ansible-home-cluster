@@ -1,10 +1,12 @@
 ---
 galaxy_info:
   author: ansible-home-cluster
-  description: Install and configure AUR helper (yay) for target user.
+  description: Base OS setup (locale, hostname, timezone, hosts, groups).
   license: MIT
   min_ansible_version: '2.13'
   platforms:
     - name: GenericLinux
       versions: ['all']
-dependencies: []
+dependencies:
+  - role: facts
+    when: facts_was_executed is not defined

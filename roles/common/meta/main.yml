@@ -1,4 +1,0 @@
-dependencies: 
-  - role: maintenance
-    when: maintenance_was_executed is not defined
-  

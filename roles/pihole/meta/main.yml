@@ -1,3 +1,12 @@
-dependencies: 
+---
+galaxy_info:
+  author: ansible-home-cluster
+  description: Deploy and configure Pi-hole in Docker.
+  license: MIT
+  min_ansible_version: '2.13'
+  platforms:
+    - name: GenericLinux
+      versions: ['all']
+dependencies:
   - role: docker
     when: docker_was_executed is not defined

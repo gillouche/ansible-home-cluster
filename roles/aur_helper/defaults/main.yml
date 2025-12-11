@@ -1,0 +1,3 @@
+---
+# defaults for aur_helper role
+role_execution_flag: "aur_helper_was_executed"

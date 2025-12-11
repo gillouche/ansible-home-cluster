@@ -1,0 +1,13 @@
+---
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      # Ensure every file ends with a single newline
+      - id: end-of-file-fixer
+      # Convert CRLF/Mixed endings to LF
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: trailing-whitespace
+      - id: check-yaml

@@ -1,0 +1,50 @@
+all:
+  hosts:
+    rpi4b8g1:
+      ansible_host: 192.168.0.76
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi4b8g2:
+      ansible_host: 192.168.0.77
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi4b8g3:
+      ansible_host: 192.168.0.78
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi4b8g4:
+      ansible_host: 192.168.0.79
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi5b8g1:
+      ansible_host: 192.168.0.80
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi5b16g1ssd:
+      ansible_host: 192.168.0.13
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi5b16g2ssd:
+      ansible_host: 192.168.0.19
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi5b16g3ssd:
+      ansible_host: 192.168.0.155
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi5b16g4:
+      ansible_host: 192.168.0.201
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi5b16g5:
+      ansible_host: 192.168.0.217
+      ansible_ssh_user: alarm
+      target_user: alarm
+    rpi5b16g6:
+      ansible_host: 192.168.0.227
+      ansible_ssh_user: alarm
+      target_user: alarm
+  vars:
+    ansible_become_method: sudo
+    ansible_ssh_private_key_file: ~/.ssh/id_ed25519_local
+    ansible_connection: ssh

@@ -1,0 +1,12 @@
+---
+- name: Setup all devices
+  hosts: all
+  gather_facts: true
+  become: false
+
+  roles:
+#    - role: facts
+#    - role: os_setup
+#    - role: utils
+#    - role: aur_helper
+    - role: docker

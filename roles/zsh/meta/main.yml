@@ -1,3 +1,0 @@
-dependencies: 
-  - role: aur_helper
-    when: aur_helper_executed is not defined

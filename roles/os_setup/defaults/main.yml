@@ -1,0 +1,3 @@
+---
+# defaults for os_setup role
+role_execution_flag: "os_setup_was_executed"

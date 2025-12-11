@@ -1,16 +1,52 @@
 ---
 # tasks file for facts
-- name: Print all available facts
+
+- name: Skip if role already executed
+  meta: end_role
+  when: (lookup('vars', role_execution_flag) | default(false)) | bool
+  become: false
+
+- name: Check that the target_user variable has been provided to the playbook
+  fail:
+    msg: "The variable 'target_user' must be provided in order to run the playbook."
+  when: target_user is not defined
+  become: false
+
+- name: Print all available facts if debug verbosity 4 is enabled
   ansible.builtin.debug:
-    var: ansible_facts
+    msg:
+      - "OS Family: {{ ansible_facts['os_family'] }}"
+      - "Distribution: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+      - "Distribution Release: {{ ansible_facts['distribution_release'] }}"
+      - "Kernel: {{ ansible_facts['kernel'] }}"
+      - "Architecture: {{ ansible_facts['architecture'] }}"
+      - "Hostname: {{ ansible_facts['hostname'] }}"
+      - "FQDN: {{ ansible_facts['fqdn'] }}"
+      - "Python Version: {{ ansible_facts['python_version'] }}"
+      - "CPU Cores: {{ ansible_facts['processor_vcpus'] }}"
+      - "Memory (MB): {{ ansible_facts['memtotal_mb'] }}"
+      - "User: {{ ansible_facts['user_id'] }}"
+      - "Home Directory: {{ ansible_facts['user_dir'] }}"
     verbosity: 4
   register: result
+  become: false
 
-- name: Stop playbook after debug
-  meta: end_host
-  when: result.skipped is not defined
+- name: Print network information
+  ansible.builtin.debug:
+    msg:
+      - "Default IPv4 Address: {{ ansible_facts['default_ipv4']['address'] | default('N/A') }}"
+      - "Default Network Interface: {{ ansible_facts['default_ipv4']['interface'] | default('N/A') }}"
+      - "All IPv4 Addresses: {{ ansible_facts['all_ipv4_addresses'] }}"
+    verbosity: 4
+  become: false
 
-- name: "Define role executed var {{ role_name }}_was_executed"
+- name: Optionally stop playbook after debug (disabled by default)
+  meta: end_play
+  when: end_after_facts | default(false) | bool
+  become: false
+
+- name: Mark role as executed
   set_fact:
-    "{{ role_name }}_was_executed": true
+    "{{ role_execution_flag }}": true
     cacheable: true
+  become: false

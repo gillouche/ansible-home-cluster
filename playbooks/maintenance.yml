@@ -1,0 +1,24 @@
+---
+# Maintenance playbook
+# - On Arch Linux hosts: refresh pacman repositories and upgrade packages
+
+- name: Maintenance - Pacman refresh and upgrade on Arch Linux
+  hosts: all
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Refresh pacman database and upgrade all packages (Arch only)
+      ansible.builtin.pacman:
+        update_cache: true
+        upgrade: true
+      when:
+        - (ansible_facts['os_family'] | lower) == 'archlinux' or
+          (ansible_facts['distribution'] | lower) == 'archlinux'
+
+    - name: Skip maintenance on non-Arch hosts
+      ansible.builtin.debug:
+        msg: "Skipping pacman maintenance on non-Arch host: {{ ansible_facts['distribution'] }}"
+      when:
+        - (ansible_facts['os_family'] | lower) != 'archlinux'
+        - (ansible_facts['distribution'] | lower) != 'archlinux'

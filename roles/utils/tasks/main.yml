@@ -1,0 +1,20 @@
+
+- name: Install dependencies (Arch)
+  pacman:
+    state: latest
+    name:
+      - curl
+      - git
+      - the_silver_searcher
+      - logrotate
+      - syslog-ng
+      - bpytop
+      - jq
+      - ncdu
+  become: true
+  when: (ansible_facts['distribution'] | lower) == 'archlinux'
+
+- name: Mark role as executed
+  set_fact:
+    "{{ role_execution_flag }}": true
+    cacheable: true

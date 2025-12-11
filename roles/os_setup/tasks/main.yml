@@ -1,0 +1,52 @@
+---
+# tasks file for os_setup
+
+- name: Skip if role already executed
+  meta: end_role
+  when: (lookup('vars', role_execution_flag) | default(false)) | bool
+
+- name: Ensure Ansible remote tmp exists with safe perms
+  ansible.builtin.file:
+    path: /tmp/.ansible-tmp
+    state: directory
+    mode: "1777"
+    owner: root
+    group: root
+  become: true
+
+- name: Set locale
+  locale_gen:
+    name: "en_GB.UTF-8"
+    state: present
+  become: true
+
+- name: Update hostname
+  hostname:
+    name: "{{ inventory_hostname }}"
+  become: true
+
+- name: Set timezone
+  timezone:
+    name: Europe/Brussels
+  become: true
+
+- name: Add IP address of all hosts to all hosts
+  lineinfile:
+    dest: /etc/hosts
+    regexp: '.*{{ item }}$'
+    line: "{{ hostvars[item].ansible_host }} {{item}}"
+    state: present
+  become: true
+  when: hostvars[item].ansible_host is defined
+  with_items: "{{ groups.all }}"
+
+- name: "Create group {{ target_user }}"
+  group:
+    name: "{{ target_user }}"
+    state: present
+  become: true
+
+- name: Mark role as executed
+  set_fact:
+    "{{ role_execution_flag }}": true
+    cacheable: true
