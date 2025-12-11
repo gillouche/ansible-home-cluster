@@ -13,6 +13,15 @@
   become: true
   when: (ansible_facts['distribution'] | lower) == 'archlinux'
 
+- name: Install Docker SDK dependencies for Ansible (Arch)
+  pacman:
+    state: present
+    name:
+      - python-requests
+      - python-docker
+  become: true
+  when: (ansible_facts['distribution'] | lower) == 'archlinux'
+
 - name: Add target_user to docker group
   user:
     name: "{{ target_user }}"

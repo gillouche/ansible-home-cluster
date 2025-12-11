@@ -1,3 +1,17 @@
 ---
 # defaults for pihole role
 role_execution_flag: "pihole_was_executed"
+
+# Docker image and container name
+pihole_image: "pihole/pihole:latest"
+pihole_container_name: "pihole"
+
+# Environment defaults
+pihole_web_password: "changeme"
+# Upstream DNS servers for Pi-hole inside the container (semicolon-separated per Pi-hole docs)
+pihole_dns: "1.1.1.1;8.8.8.8"
+# Secondary DNS for Docker daemon to use when starting container (host resolver fallback)
+static_dns: "1.1.1.1"
+
+# Timezone (will typically be provided globally via inventory)
+timezone: "Europe/Brussels"

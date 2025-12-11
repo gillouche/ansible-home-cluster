@@ -1,0 +1,8 @@
+---
+# handlers for pihole
+
+- name: Restart keepalived
+  ansible.builtin.service:
+    name: keepalived
+    state: restarted
+  become: true

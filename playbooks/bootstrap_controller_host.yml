@@ -1,0 +1,98 @@
+---
+# Update the controller (localhost) /etc/hosts with all inventory hosts.
+# Run this playbook separately so the sudo password requested is your local
+# computer password, not the devices'.
+
+- name: Update controller /etc/hosts with inventory hosts
+  hosts: localhost
+  gather_facts: false
+  become: true
+
+  vars:
+    # Optionally restrict which inventory group to include (default: all)
+    controller_hosts_group: "all"
+    # Controller SSH bootstrap defaults (avoid self-referential defaults)
+    default_bootstrap_user: "alarm"
+    default_bootstrap_pubkey: "{{ lookup('env','HOME') + '/.ssh/id_ed25519_local.pub' }}"
+
+  tasks:
+    - name: Build hosts block content from inventory
+      ansible.builtin.set_fact:
+        controller_hosts_block: |
+          {% for h in (groups[controller_hosts_group] | default(groups['all']) | list) %}
+          {{ hostvars[h].ansible_host | default(h) }} {{ h }}
+          {% endfor %}
+
+    - name: Ensure controller /etc/hosts contains all selected inventory hosts
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} ansible-home-cluster hosts"
+        create: false
+        block: "{{ controller_hosts_block }}"
+
+    # --- Extracted from bootstrap: controller SSH known_hosts and config ---
+
+    - name: Ensure controller ~/.ssh directory exists
+      ansible.builtin.file:
+        path: "{{ lookup('env','HOME') + '/.ssh' }}"
+        state: directory
+        mode: "0700"
+
+    - name: Ensure controller ~/.ssh/sockets directory exists (for ControlPath)
+      ansible.builtin.file:
+        path: "{{ lookup('env','HOME') + '/.ssh/sockets' }}"
+        state: directory
+        mode: "0700"
+
+    - name: Ensure SSH config for controller network defaults (192.168.0.*)
+      ansible.builtin.blockinfile:
+        path: "{{ lookup('env','HOME') + '/.ssh/config' }}"
+        create: true
+        mode: "0600"
+        marker: "# {mark} ansible-home-cluster network 192.168.0.*"
+        block: |
+          Host 192.168.0.*
+            # Keep the connection alive by sending a signal every 60 seconds
+            ServerAliveInterval 60
+            # Disconnect only after 3 failed keep-alive signals (total 180s tolerance)
+            ServerAliveCountMax 3
+            # If the connection fails initially, retry connection attempts
+            ConnectionAttempts 5
+            # (Optional) reuse existing connections to speed up subsequent sessions
+            ControlMaster auto
+            ControlPath ~/.ssh/sockets/%r@%h-%p
+            ControlPersist 600
+
+    - name: Ensure controller knows host keys (idempotent)
+      ansible.builtin.known_hosts:
+        path: "{{ lookup('env','HOME') + '/.ssh/known_hosts' }}"
+        name: "{{ hostvars[item].ansible_host | default(item) }}"
+        key: "{{ lookup('pipe', 'ssh-keyscan -T 5 -t ed25519 ' + (hostvars[item].ansible_host | default(item))) }}"
+        state: present
+        hash_host: true
+      loop: "{{ groups['all'] | default([]) }}"
+      failed_when: false
+      ignore_errors: true
+
+    - name: Resolve controller bootstrap variables
+      ansible.builtin.set_fact:
+        bootstrap_user_resolved: "{{ bootstrap_user | default(default_bootstrap_user) }}"
+        bootstrap_pubkey_resolved: "{{ bootstrap_pubkey | default(default_bootstrap_pubkey) }}"
+
+    - name: Derive private key path from provided public key
+      ansible.builtin.set_fact:
+        bootstrap_privkey: "{{ bootstrap_pubkey_resolved | regex_replace('\\.pub$','') }}"
+
+    - name: Ensure SSH config entries on controller for all hosts
+      ansible.builtin.blockinfile:
+        path: "{{ lookup('env','HOME') + '/.ssh/config' }}"
+        create: true
+        mode: "0600"
+        marker: "# {mark} ansible-home-cluster {{ item }}"
+        block: |
+          Host {{ item }} {{ hostvars[item].ansible_host | default(item) }}
+            HostName {{ hostvars[item].ansible_host | default(item) }}
+            User {{ bootstrap_user_resolved }}
+            IdentityFile {{ bootstrap_privkey }}
+            IdentitiesOnly yes
+      loop: "{{ groups['all'] | default([]) }}"

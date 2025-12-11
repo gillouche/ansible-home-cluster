@@ -1,7 +1,0 @@
----
-# vars file for pihole
-pihole_image: pihole/pihole:2024.03.2
-pihole_webpassword: pihole
-pihole_dns: "1.1.1.1;8.8.8.8"
-static_dns: "1.1.1.1"
-pihole_container_name: "pihole"

@@ -44,7 +44,34 @@ all:
       ansible_host: 192.168.0.227
       ansible_ssh_user: alarm
       target_user: alarm
+
   vars:
     ansible_become_method: sudo
     ansible_ssh_private_key_file: ~/.ssh/id_ed25519_local
     ansible_connection: ssh
+
+  children:
+    pihole_primary:
+      hosts:
+        rpi5b8g1:
+    pihole_replicas:
+      hosts:
+        rpi4b8g1:
+        rpi4b8g2:
+    pihole_cluster:
+      hosts:
+        rpi5b8g1:
+        rpi4b8g1:
+        rpi4b8g2:
+      vars:
+        # Virtual IP for Pi-hole, used by keepalived. Router DHCP stops assigning at 192.168.0.250
+        pihole_virtual_ip: 192.168.0.251
+        # Hostname of the primary Pi-hole node
+        pihole_primary_host: rpi5b8g1
+        # Pi-hole runs in Docker on all nodes (container name)
+        pihole_container_name: pihole
+        # Enable Gravity Sync for replicas
+        gravity_sync_enabled: true
+        gravity_sync_schedule: hourly
+        pihole_image: pihole/pihole:2025.11.1
+        pihole_web_password: pihole

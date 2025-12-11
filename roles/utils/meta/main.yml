@@ -7,4 +7,6 @@ galaxy_info:
   platforms:
     - name: GenericLinux
       versions: ['all']
-dependencies: []
+dependencies:
+  - role: os_setup
+    when: os_setup_was_executed is not defined

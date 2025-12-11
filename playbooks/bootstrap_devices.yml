@@ -1,76 +1,3 @@
----
-# Play 1: Controller-side preparation (runs exactly once on localhost)
-- name: Controller pre-config (known_hosts and SSH config entries)
-  hosts: localhost
-  gather_facts: false
-
-  vars:
-    # Overridable via -e from run.sh bootstrap subcommand
-    bootstrap_user: "{{ bootstrap_user | default('alarm') }}"
-    bootstrap_pubkey: "{{ bootstrap_pubkey | default(lookup('env','HOME') + '/.ssh/id_ed25519_local.pub') }}"
-
-  tasks:
-    - name: Ensure controller ~/.ssh directory exists
-      ansible.builtin.file:
-        path: "{{ lookup('env','HOME') + '/.ssh' }}"
-        state: directory
-        mode: "0700"
-
-    - name: Ensure controller ~/.ssh/sockets directory exists (for ControlPath)
-      ansible.builtin.file:
-        path: "{{ lookup('env','HOME') + '/.ssh/sockets' }}"
-        state: directory
-        mode: "0700"
-
-    - name: Ensure SSH config for controller network defaults (192.168.0.*)
-      ansible.builtin.blockinfile:
-        path: "{{ lookup('env','HOME') + '/.ssh/config' }}"
-        create: true
-        mode: "0600"
-        marker: "# {mark} ansible-home-cluster network 192.168.0.*"
-        block: |
-          Host 192.168.0.*
-            # Keep the connection alive by sending a signal every 60 seconds
-            ServerAliveInterval 60
-            # Disconnect only after 3 failed keep-alive signals (total 180s tolerance)
-            ServerAliveCountMax 3
-            # If the connection fails initially, retry connection attempts
-            ConnectionAttempts 5
-            # (Optional) reuse existing connections to speed up subsequent sessions
-            ControlMaster auto
-            ControlPath ~/.ssh/sockets/%r@%h-%p
-            ControlPersist 600
-
-    - name: Ensure controller knows host keys (idempotent)
-      ansible.builtin.known_hosts:
-        path: "{{ lookup('env','HOME') + '/.ssh/known_hosts' }}"
-        name: "{{ hostvars[item].ansible_host | default(item) }}"
-        key: "{{ lookup('pipe', 'ssh-keyscan -T 5 -t ed25519 ' + (hostvars[item].ansible_host | default(item))) }}"
-        state: present
-        hash_host: true
-      loop: "{{ groups['all'] | default([]) }}"
-      failed_when: false
-      ignore_errors: true
-
-    - name: Derive private key path from provided public key
-      ansible.builtin.set_fact:
-        bootstrap_privkey: "{{ bootstrap_pubkey | regex_replace('\\.pub$','') }}"
-
-    - name: Ensure SSH config entries on controller for all hosts
-      ansible.builtin.blockinfile:
-        path: "{{ lookup('env','HOME') + '/.ssh/config' }}"
-        create: true
-        mode: "0600"
-        marker: "# {mark} ansible-home-cluster {{ item }}"
-        block: |
-          Host {{ item }} {{ hostvars[item].ansible_host | default(item) }}
-            HostName {{ hostvars[item].ansible_host | default(item) }}
-            User {{ bootstrap_user }}
-            IdentityFile {{ bootstrap_privkey }}
-            IdentitiesOnly yes
-      loop: "{{ groups['all'] | default([]) }}"
-
-# Play 2: Target-side bootstrap (runs on all hosts)
 - name: "One-time SSH bootstrap: prepare each target (ssh dir, keypair, controller key)"
   hosts: all
   gather_facts: false
@@ -113,7 +40,7 @@
       become: false
 
     - name: Install controller public key for {{ bootstrap_user }}
-      ansible.posix.authorized_key:
+      ansible.builtin.authorized_key:
         user: "{{ bootstrap_user }}"
         state: present
         key: "{{ lookup('file', bootstrap_pubkey) }}"
@@ -143,7 +70,7 @@
       ignore_errors: true
 
     - name: Install peer keys into this device's authorized_keys
-      ansible.posix.authorized_key:
+      ansible.builtin.authorized_key:
         user: "{{ bootstrap_user }}"
         state: present
         key: "{{ (peer_pubkeys.results | selectattr('item','equalto', item) | map(attribute='content') | map('b64decode') | list | first) | default('') }}"

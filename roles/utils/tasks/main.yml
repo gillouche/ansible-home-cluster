@@ -8,6 +8,7 @@
       - the_silver_searcher
       - logrotate
       - syslog-ng
+      - cronie
       - bpytop
       - jq
       - ncdu

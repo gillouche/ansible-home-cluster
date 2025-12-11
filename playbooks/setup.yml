@@ -5,8 +5,18 @@
   become: false
 
   roles:
-#    - role: facts
+    - role: facts
 #    - role: os_setup
 #    - role: utils
 #    - role: aur_helper
+#    - role: docker
+
+# Pi-hole cluster setup runs only on the pihole_cluster group (no sudo by default)
+- name: Setup Pi-hole cluster (primary + replicas)
+  hosts: pihole_cluster
+  gather_facts: true
+  become: false
+
+  roles:
     - role: docker
+    - role: pihole

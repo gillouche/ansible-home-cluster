@@ -5,6 +5,11 @@
   meta: end_role
   when: (lookup('vars', role_execution_flag) | default(false)) | bool
 
+- name: Skip role on non-cluster hosts
+  meta: end_role
+  when: inventory_hostname not in (groups['pihole_cluster'] | default([]))
+  become: false
+
 - name: Create pihole directory
   file:
     path: "/home/{{ target_user }}/pihole"
@@ -13,41 +18,157 @@
     state: directory
     mode: 0755
 
-- name: Uninstall dnsmasq
-  apt:
-    name: dnsmasq
-    state: absent
-  become: true
+# -------------------------
+# Cluster setup (primary + replicas) and VIP with keepalived
+# -------------------------
 
-- name: Disable systemd-resolved
+- name: Determine Pi-hole cluster role for this host
+  set_fact:
+    pihole_is_primary: "{{ inventory_hostname in (groups['pihole_primary'] | default([])) }}"
+    pihole_is_replica: "{{ inventory_hostname in (groups['pihole_replicas'] | default([])) }}"
+  become: false
+
+- name: Ensure keepalived is installed (Arch)
+  pacman:
+    name: keepalived
+    state: present
+  become: true
+  when: (ansible_facts['distribution'] | lower) == 'archlinux' and inventory_hostname in (groups['pihole_cluster'] | default([]))
+
+
+- name: Render keepalived config for Pi-hole VIP
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    vip_address: "{{ pihole_virtual_ip }}"
+    vrrp_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
+    vrrp_state: "{{ 'MASTER' if pihole_is_primary | bool else 'BACKUP' }}"
+    vrrp_priority: "{{ 150 if pihole_is_primary | bool else 100 }}"
+    vrrp_auth_pass: "{{ pihole_vrrp_auth_pass | default('p1h0l3') }}"
+  notify: Restart keepalived
+  become: true
+  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
+
+- name: Enable and start keepalived
   systemd:
+    name: keepalived
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true
+  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
+
+# -------------------------
+# Replicas: keep configuration in sync with primary using Gravity Sync (Docker mode)
+# -------------------------
+
+- name: Ensure sync prerequisites on replicas (Arch)
+  pacman:
+    name:
+      - rsync
+      - git
+      - sqlite
+    state: present
+  become: true
+  when: (ansible_facts['distribution'] | lower) == 'archlinux' and (pihole_is_replica | bool)
+
+
+- name: Clone Gravity Sync on replicas
+  git:
+    repo: https://github.com/vmstan/gravity-sync.git
+    dest: /opt/gravity-sync
+    version: HEAD
+    update: yes
+  become: true
+  when: (pihole_is_replica | bool) and (gravity_sync_enabled | default(true))
+
+# -------------------------
+# Docker container runtime for Pi-hole
+# -------------------------
+
+- name: Stop and disable systemd-resolved (free port 53)
+  ansible.builtin.systemd:
     name: systemd-resolved
     state: stopped
-    enabled: no
+    enabled: false
+    masked: true
+  become: true
+  failed_when: false
+
+- name: Stop and disable dnsmasq if present (avoid port 53 conflict)
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: stopped
+    enabled: false
+  become: true
+  failed_when: false
+
+- name: Check if /etc/resolv.conf is a symlink
+  ansible.builtin.stat:
+    path: /etc/resolv.conf
+  register: resolvconf_stat
   become: true
 
-- name: Set FTLCONF_REPLY_ADDR (single mode)
-  set_fact:
-    ftlconf_reply_addr4: "{{ ansible_host }}"
-    execution_mode: "single node setup"
+- name: Remove /etc/resolv.conf symlink if managed by systemd-resolved
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: resolvconf_stat.stat.islnk | default(false)
   become: true
+
+- name: Ensure host resolv.conf has a usable upstream during startup
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ static_dns }}
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: static_dns is defined
+
+- name: Ensure Pi-hole data directories exist (host mounts)
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: 0755
+  loop:
+    - "/home/{{ target_user }}/pihole/pihole"
+    - "/home/{{ target_user }}/pihole/dnsmasq.d"
+  become: true
+
+- name: Set FTLCONF_REPLY_ADDR for Pi-hole
+  set_fact:
+    ftlconf_reply_addr4: "{{ (pihole_virtual_ip if (inventory_hostname in (groups['pihole_cluster'] | default([]))) else ansible_host) }}"
+  become: false
 
 - name: Start/Update pihole container
   community.general.docker_container:
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
-    pull: yes
-    restart_policy: unless-stopped
+    restart_policy: always
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "80:80/tcp"
+      - "443:443/tcp"
     env:
       TZ: "{{ timezone }}"
-      FTLCONF_REPLY_ADDR4: "{{ ftlconf_reply_addr4 }}"
-      WEBPASSWORD: "{{ pihole_webpassword }}"
-      PIHOLE_DNS_: "{{ pihole_dns }}"
-      DNSMASQ_LISTENING: "local"
-    dns_servers:
-      - 127.0.0.1
-      - "{{ static_dns }}"
-    network_mode: host
+      FTLCONF_webserver_api_password: "{{ pihole_web_password }}"
+      FTLCONF_dns_listeningMode: "ALL"
+      FTLCONF_dns_upstreams: "{{ pihole_dns }}"
+    healthcheck:
+      test: ["CMD-SHELL", "dig +time=2 +tries=1 @127.0.0.1 pi-hole.net >/dev/null 2>&1 || nc -z 127.0.0.1 53 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     volumes:
       - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
       - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
@@ -55,10 +176,11 @@
     log_options:
       max-size: "10m"
       max-file: "5"
+  become: false
 
-- name: Wait for pihole to be up
+- name: Wait for pihole web UI to be up
   wait_for:
-    port: "80"
+    port: 80
     delay: 5
     timeout: 60
 
@@ -68,6 +190,7 @@
     minute: 0
     hour: 0
     job: "docker exec {{ pihole_container_name }} pihole updateGravity"
+  become: true
 
 - name: Remove old image versions
   docker_prune:
@@ -75,10 +198,48 @@
     images_filters:
       dangling: false
 
-- name: INFORMATION
-  debug:
-    msg:
-      - "DNSv4: {{ ftlconf_reply_addr4 }}"
+- name: Configure Gravity Sync for Docker on replicas
+  template:
+    src: gravity-sync.conf.j2
+    dest: /opt/gravity-sync/gravity-sync.conf
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    gs_primary_host: "{{ hostvars[pihole_primary_host].ansible_host | default(pihole_primary_host) }}"
+    gs_primary_user: "{{ hostvars[pihole_primary_host].ansible_ssh_user | default(target_user) }}"
+    gs_primary_port: "{{ hostvars[pihole_primary_host].ansible_port | default(22) }}"
+    gs_container_name: "{{ pihole_container_name | default('pihole') }}"
+  become: true
+  when: (pihole_is_replica | bool) and (gravity_sync_enabled | default(true))
+
+- name: Symlink gravity-sync helper to /usr/local/bin
+  file:
+    src: /opt/gravity-sync/gravity-sync.sh
+    dest: /usr/local/bin/gravity-sync
+    state: link
+    force: true
+    owner: root
+    group: root
+  become: true
+  when: (pihole_is_replica | bool) and (gravity_sync_enabled | default(true))
+
+- name: Create cron to run Gravity Sync hourly on replicas
+  cron:
+    name: "gravity-sync hourly"
+    minute: 0
+    job: "/usr/local/bin/gravity-sync sync"
+    user: root
+  become: true
+  when: (pihole_is_replica | bool) and (gravity_sync_enabled | default(true)) and (gravity_sync_schedule | default('hourly')) == 'hourly'
+
+- name: Initial Gravity Sync run (best-effort)
+  command: /usr/local/bin/gravity-sync sync
+  register: gs_result
+  changed_when: false
+  failed_when: false
+  become: true
+  when: (pihole_is_replica | bool) and (gravity_sync_enabled | default(true))
 
 - name: Mark role as executed
   set_fact:

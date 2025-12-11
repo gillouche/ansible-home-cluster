@@ -7,4 +7,6 @@ galaxy_info:
   platforms:
     - name: GenericLinux
       versions: ['all']
-dependencies: []
+dependencies:
+  - role: utils
+    when: utils_was_executed is not defined
