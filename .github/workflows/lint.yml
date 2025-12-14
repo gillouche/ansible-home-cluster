@@ -32,6 +32,9 @@ jobs:
             uv run ansible-galaxy collection install -r requirements.yml
           fi
 
+      - name: Prepare Ansible config for lint
+        run: export ANSIBLE_CONFIG=$(pwd)/.github/workflows/ansible.cfg
+
       - name: Run ansible-lint
         run: uv run ansible-lint
 
