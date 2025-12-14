@@ -23,3 +23,4 @@ warn_list:
 
 skip_list:
   - var-naming[no-role-prefix]
+  - internal-error

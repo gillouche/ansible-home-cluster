@@ -34,10 +34,8 @@ jobs:
 
       - name: Run ansible-lint
         run: |
-          export ANSIBLE_CONFIG=$(pwd)/.github/workflows/ansible-lint.cfg
           uv run ansible-lint
 
       - name: Run yamllint
         run: |
-          export ANSIBLE_CONFIG=$(pwd)/.github/workflows/ansible-lint.cfg
           uv run yamllint .
