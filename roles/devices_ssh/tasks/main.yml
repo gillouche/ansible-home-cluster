@@ -1,0 +1,93 @@
+---
+# tasks for devices_ssh (prepare each target: ssh dir, keypair, controller key; inter-device trust)
+
+- name: Ensure ~/.ssh exists for user
+  ansible.builtin.file:
+    path: "/home/{{ devices_bootstrap_user }}/.ssh"
+    state: directory
+    owner: "{{ devices_bootstrap_user }}"
+    group: "{{ devices_bootstrap_user }}"
+    mode: "0700"
+  become: false
+
+- name: Ensure SSH keypair exists for user (ed25519)
+  community.crypto.openssh_keypair:
+    path: "/home/{{ devices_bootstrap_user }}/.ssh/id_ed25519"
+    type: ed25519
+    state: present
+    owner: "{{ devices_bootstrap_user }}"
+    group: "{{ devices_bootstrap_user }}"
+    mode: "0600"
+    comment: "{{ devices_bootstrap_user }}@{{ inventory_hostname }}"
+  become: false
+
+- name: Install controller public key for user
+  ansible.posix.authorized_key:
+    user: "{{ devices_bootstrap_user }}"
+    state: present
+    key: "{{ lookup('file', devices_bootstrap_pubkey) }}"
+    manage_dir: false
+  become: false
+
+# --- Inter-device trust: distribute peers' public keys to each device ---
+
+- name: Collect peers' public keys (from controller, delegated to each peer)
+  ansible.builtin.slurp:
+    src: "/home/{{ devices_bootstrap_user }}/.ssh/id_ed25519.pub"
+  delegate_to: "{{ item }}"
+  register: devices_peer_pubkeys
+  loop: "{{ groups['all'] | difference([inventory_hostname]) | default([]) }}"
+  ignore_errors: true
+  become: false
+
+- name: Install peer keys into this device's authorized_keys
+  ansible.posix.authorized_key:
+    user: "{{ devices_bootstrap_user }}"
+    state: present
+    key: "{{ (devices_peer_pubkeys.results | selectattr('item', 'equalto', item) |
+     map(attribute='content') | map('b64decode') | list | first) | default('') }}"
+    manage_dir: false
+  loop: "{{ groups['all'] | difference([inventory_hostname]) | default([]) }}"
+  when: (devices_peer_pubkeys.results | selectattr('item', 'equalto', item) | map(attribute='content') | list | first) is defined
+  become: false
+
+- name: Ensure known_hosts contains peers' host keys on this device (scan peers)
+  vars:
+    devices_peer_ip: "{{ hostvars[item].ansible_host | default(item) }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh-keyscan -T 5 -t ed25519 "{{ devices_peer_ip }}" 2>/dev/null
+  args:
+    executable: /bin/bash
+  register: devices_peer_scan
+  loop: "{{ groups['all'] | difference([inventory_hostname]) | default([]) }}"
+  changed_when: false
+  failed_when: false
+  become: false
+
+- name: Add scanned peer keys to known_hosts on this device (idempotent)
+  vars:
+    devices_peer_ip: "{{ hostvars[item].ansible_host | default(item) }}"
+    devices_peer_key_line: >-
+      {{ (
+           devices_peer_scan.results
+           | selectattr('item','equalto', item)
+           | map(attribute='stdout')
+           | list
+           | first
+           | default('')
+         ).splitlines()
+         | select('match', '^' ~ devices_peer_ip ~ ' ')
+         | list
+         | first
+         | default('')
+      }}
+  ansible.builtin.known_hosts:
+    path: "/home/{{ devices_bootstrap_user }}/.ssh/known_hosts"
+    name: "{{ devices_peer_ip }}"
+    key: "{{ devices_peer_key_line }}"
+    state: present
+    hash_host: true
+  loop: "{{ groups['all'] | difference([inventory_hostname]) | default([]) }}"
+  when: devices_peer_key_line | length > 0
+  become: false

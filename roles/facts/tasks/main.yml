@@ -4,8 +4,8 @@
 - name: Check that the target_user variable has been provided to the playbook
   ansible.builtin.fail:
     msg: "The variable 'target_user' must be provided in order to run the playbook."
-    when: target_user is not defined
-    become: false
+  when: target_user is not defined
+  become: false
 
 - name: Print all available facts if debug verbosity 4 is enabled
   ansible.builtin.debug:

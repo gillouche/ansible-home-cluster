@@ -1,6 +1,7 @@
 ---
 # Global variables for all hosts
 base_domain: gillouche.homelab
+target_user: alarm
 
 # Vault trust/CA distribution (controller + hosts)
 vault_install_root_ca_on_hosts: true

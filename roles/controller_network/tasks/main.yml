@@ -1,0 +1,28 @@
+---
+- name: Build hosts block content from inventory (short + FQDN)
+  ansible.builtin.set_fact:
+    controller_hosts_block: |
+      {% for h in (groups[controller_hosts_group] | default(groups['all']) | list) %}
+      {{ hostvars[h].ansible_host | default(h) }} {{ h }} {{ h }}.{{ base_domain | default('gillouche.homelab') }}
+      {% endfor %}
+
+- name: Ensure controller /etc/hosts contains all selected inventory hosts
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ansible-home-cluster hosts"
+    create: false
+    block: "{{ controller_hosts_block }}"
+  become: true
+
+- name: Set macOS DNS server to Pi-hole VIP (networksetup)
+  ansible.builtin.command: >-
+    networksetup -setdnsservers {{ controller_dns_network_service | quote }} {{ pihole_virtual_ip | default('192.168.0.251') }}
+  changed_when: true
+  when: (ansible_facts.get('os_family', '') | lower) == 'darwin'
+
+- name: Flush macOS DNS caches (mDNSResponder HUP)
+  ansible.builtin.command: >-
+    killall -HUP mDNSResponder
+  changed_when: false
+  become: true
+  when: (ansible_facts.get('os_family', '') | lower) == 'darwin'

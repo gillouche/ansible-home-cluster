@@ -1,0 +1,12 @@
+---
+# defaults for devices_network role
+
+# Desired DNS server to write into /etc/resolv.conf during bootstrap
+# Defaults to Pi-hole VIP if available, else a sane fallback
+devices_desired_dns: "{{ pihole_virtual_ip | default('192.168.0.251') }}"
+
+# Whether to actively manage /etc/resolv.conf on devices (off by default)
+devices_manage_resolv_conf: false
+
+# Whether to ensure /etc/hosts contains entries for all inventory hosts (on by default)
+devices_manage_hostsfile: true

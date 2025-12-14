@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: ansible-home-cluster
+  description: Manage controller network settings (/etc/hosts, macOS DNS) for inventory hosts
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: macOS
+      versions: ["all"]
+    - name: GenericLinux
+      versions: ["all"]
+dependencies: []

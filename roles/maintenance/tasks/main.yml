@@ -1,0 +1,16 @@
+---
+# tasks for maintenance (os package updates)
+
+- name: Refresh pacman database and upgrade all packages (Arch only)
+  community.general.pacman:
+    update_cache: true
+    upgrade: true
+  become: true
+  when:
+    - ansible_facts['distribution'] | lower == 'archlinux'
+
+- name: Skip maintenance on non-Arch hosts
+  ansible.builtin.debug:
+    msg: "Skipping pacman maintenance on non-Arch host: {{ ansible_facts['distribution'] }}"
+  when:
+    - ansible_facts['distribution'] | lower != 'archlinux'

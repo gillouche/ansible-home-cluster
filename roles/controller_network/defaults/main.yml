@@ -1,0 +1,8 @@
+---
+# defaults for controller_network role
+
+# Which inventory group to include into /etc/hosts (default: all)
+controller_hosts_group: "all"
+
+# macOS network service to adjust DNS for (change if your interface differs)
+controller_dns_network_service: "Wi-Fi"

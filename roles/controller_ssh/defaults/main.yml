@@ -1,0 +1,5 @@
+---
+controller_known_hosts_path: "{{ lookup('env', 'HOME') }}/.ssh/known_hosts"
+controller_known_hosts_timeout: 5
+default_bootstrap_user: "alarm"
+default_bootstrap_pubkey: "{{ lookup('env', 'HOME') + '/.ssh/id_ed25519_local.pub' }}"

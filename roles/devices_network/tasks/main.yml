@@ -1,0 +1,38 @@
+---
+# tasks for devices_network (per-device network bootstrap)
+
+- name: Add IP address of all hosts to /etc/hosts on each device (FQDN + short)
+  ansible.builtin.blockinfile:
+    dest: /etc/hosts
+    marker: "# {mark} ansible-home-cluster peers"
+    block: |
+      {% for h in (groups['all'] | default([])) %}
+      {% if hostvars[h].ansible_host is defined %}
+      {{ hostvars[h].ansible_host }} {{ h }} {{ h }}.{{ base_domain | default('localdomain') }}
+      {% endif %}
+      {% endfor %}
+  become: true
+  when: devices_manage_hostsfile | default(true) | bool
+
+- name: Check if /etc/resolv.conf is a symlink
+  ansible.builtin.stat:
+    path: /etc/resolv.conf
+  register: devices_resolvconf_stat
+
+- name: Remove /etc/resolv.conf symlink if present
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: devices_resolvconf_stat.stat.islnk | default(false)
+  become: true
+
+- name: Ensure /etc/resolv.conf points to desired DNS
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ devices_desired_dns }}
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: devices_manage_resolv_conf | default(false) | bool
