@@ -144,6 +144,7 @@
     - vault_tls_missing | bool
     - not (vault_enable_cluster_ca | default(false))
   become: true
+  check_mode: no
 
 - name: Ensure TLS files permissions after generation
   ansible.builtin.file:
@@ -209,6 +210,7 @@
   delegate_to: localhost
   run_once: true
   when: vault_enable_cluster_ca | bool
+  check_mode: no
 
 - name: Generate cluster CA cert if missing (controller)
   ansible.builtin.command: >-
@@ -221,6 +223,7 @@
   delegate_to: localhost
   run_once: true
   when: vault_enable_cluster_ca | bool
+  check_mode: no
 
 - name: Prepare per-node cert workspace on controller
   ansible.builtin.file:
@@ -259,6 +262,7 @@
     creates: "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.key') | expanduser }}"
   delegate_to: localhost
   when: vault_enable_cluster_ca | bool
+  check_mode: no
 
 - name: Generate per-node CSR (controller)
   ansible.builtin.command: >-
@@ -270,6 +274,7 @@
     creates: "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.csr') | expanduser }}"
   delegate_to: localhost
   when: vault_enable_cluster_ca | bool
+  check_mode: no
 
 - name: Sign per-node server cert with cluster CA (controller)
   ansible.builtin.command: >-
@@ -393,6 +398,9 @@
     name: "{{ vault_container_name }}"
     image: "{{ vault_image }}"
     restart_policy: always
+    read_only: true
+    tmpfs:
+      - /tmp
     network_mode: "{{ vault_container_network_mode }}"
     etc_hosts: "{{ vault_etc_hosts | default({}) }}"
     ports:
@@ -411,9 +419,10 @@
       - "{{ vault_data_dir }}:{{ vault_data_dir_in_container }}:rw"
       - "{{ vault_logs_dir }}:{{ vault_logs_dir_in_container }}:rw"
       - "{{ vault_bin_dir }}:/vault/bin:ro"
-    capabilities:
+    cap_drop:
+      - ALL
+    cap_add:
       - IPC_LOCK
-      - SETFCAP
     user: "{{ vault_system_uid }}:{{ vault_system_gid }}"
     force_kill: true
     # Do not force container recreation on every run, otherwise Vault reseals each time.
@@ -631,6 +640,7 @@
   when:
     - inventory_hostname == vault_leader_host
     - (vault_mounts_token | default('')) | length > 0
+  no_log: true
 
 - name: Extract raft node_id list from snapshot (leader)
   ansible.builtin.set_fact:
@@ -665,6 +675,7 @@
     - (vault_leader_ready | default(false)) | bool
     - (local_health.status | default(0)) in [501, 503]
     - (cluster_raft_nodes is not defined) or (inventory_hostname not in cluster_raft_nodes)
+  check_mode: no
 
 - name: Join peer to leader via CLI
   ansible.builtin.meta: noop
@@ -684,6 +695,7 @@
     # Allow unseal to proceed in either state so peers can join and transition to standby.
     - (local_health.status | default(0)) in [501, 503]
     - (vault_leader_ready | default(false)) | bool
+  check_mode: no
 
 - name: Verify peer health (sealed=false)
   ansible.builtin.uri:
@@ -744,6 +756,7 @@
   when:
     - inventory_hostname == vault_leader_host
     - (vault_mounts_token | default('')) | length > 0
+  no_log: true
 
 - name: Set Vault bootstrap address (first cluster node)
   ansible.builtin.set_fact:
@@ -929,6 +942,7 @@
     (ca_resp.content | default('') | length) == 0)
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 
 - name: Configure PKI URLs (issuing certs and CRL)
   ansible.builtin.uri:
@@ -946,6 +960,7 @@
   when: (vault_effective_admin_token | default('')) | length > 0
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 
 - name: Configure PKI cluster path for ACME
   ansible.builtin.uri:
@@ -962,6 +977,7 @@
   when: (vault_effective_admin_token | default('')) | length > 0
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 
 - name: Create PKI role for base domain
   ansible.builtin.uri:
@@ -983,6 +999,7 @@
   when: (vault_effective_admin_token | default('')) | length > 0
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 # Build ACME configuration request body from variables (must run before enabling)
 - name: Build ACME configuration body
   ansible.builtin.set_fact:
@@ -1016,6 +1033,7 @@
   when: (vault_effective_admin_token | default('')) | length > 0
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 
 # -------------------------------------------------------------
 # Create automation policy/token (least-privilege) and store encrypted
@@ -1062,6 +1080,7 @@
   when: (vault_mounts_token | default('')) | length > 0 and (vault_active_addr is defined)
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 
 # -------------------------------------------------------------
 # Validation: ensure ACME is enabled, cluster path is correct, and ACME directory is healthy
@@ -1173,6 +1192,7 @@
     (automation_token_stat.stat.exists | default(false))
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 
 - name: Lookup automation token TTL (if present)
   ansible.builtin.uri:
@@ -1187,6 +1207,7 @@
   when: (vault_automation_token | default('')) | length > 0 and (vault_active_addr is defined)
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 
 - name: Renew automation token if TTL below threshold and renewable
   ansible.builtin.uri:
@@ -1210,6 +1231,7 @@
     and (automation_lookup_resp.json.data.renewable | default(false))
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 
 - name: Recreate automation token when lookup failed or not renewable & near expiry
   ansible.builtin.uri:
@@ -1241,6 +1263,7 @@
     )
   delegate_to: "{{ groups['vault_cluster'][0] }}"
   run_once: true
+  no_log: true
 
 - name: Update automation token file after re-create (plaintext JSON first)
   ansible.builtin.copy:
@@ -1253,6 +1276,7 @@
     (recreate_token_resp.json.auth.client_token | default('')) | length > 0
   delegate_to: localhost
   run_once: true
+  no_log: true
 
 - name: Encrypt automation token file after re-create (controller)
   ansible.builtin.command:
@@ -1272,6 +1296,8 @@
     - recreate_token_resp is defined
   delegate_to: localhost
   run_once: true
+  no_log: true
+  check_mode: no
 
 - name: Persist automation token to controller (plaintext JSON first)
   ansible.builtin.copy:
@@ -1284,6 +1310,7 @@
     (create_token_resp.json.auth.client_token | default('')) | length > 0
   delegate_to: localhost
   run_once: true
+  no_log: true
 
 - name: Encrypt automation token file with Ansible Vault (controller)
   ansible.builtin.command:
@@ -1301,6 +1328,8 @@
     - create_token_resp is defined
   delegate_to: localhost
   run_once: true
+  no_log: true
+  check_mode: no
 
 - name: Mark automation token encrypted (marker)
   ansible.builtin.file:
@@ -1322,6 +1351,7 @@
   when: (controller_vault_password_file | default('')) | length > 0 and (init_file_stat.stat.exists | default(false))
   delegate_to: localhost
   run_once: true
+  check_mode: no
 
 - name: Fetch Vault Root CA (for trust distribution)
   ansible.builtin.uri:
@@ -1498,6 +1528,7 @@
   become: "{{ ((vault_controller_install_keychain | default('login')) == 'system') | bool }}"
   vars:
     ansible_become_password: "{{ vault_controller_become_password | default('') }}"
+  check_mode: no
 
 - name: Compute Root CA present flag (either login or system)
   ansible.builtin.set_fact:
@@ -1573,6 +1604,7 @@
   become: "{{ ((vault_controller_install_keychain | default('login')) == 'system') | bool }}"
   vars:
     ansible_become_password: "{{ vault_controller_become_password | default('') }}"
+  check_mode: no
 
 - name: Compute Cluster CA present flag (either login or system)
   ansible.builtin.set_fact:

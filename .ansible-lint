@@ -6,8 +6,7 @@ exclude_paths:
   - node_modules/
   - roles/**/files/
   - roles/**/templates/
-  - group_vars/*.vault.yml
-  - inventories/group_vars/all/controller.yml
+  - inventories/group_vars/*.vault.yml
 
 # Promote common safety/style rules
 enable_list:

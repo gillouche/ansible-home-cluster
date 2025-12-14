@@ -27,8 +27,7 @@ ignore: |
   .github/
   roles/**/files/
   roles/**/templates/
-  group_vars/*.vault.yml
-  inventories/group_vars/all/controller.yml
+  inventories/group_vars/*.vault.yml
 overrides:
   - files: "roles/vault/tasks/main.yml"
     rules:

@@ -216,10 +216,19 @@
     restart_policy: unless-stopped
     read_only: true
     cap_drop: ["ALL"]
+    capabilities:
+      - NET_BIND_SERVICE
+    user: "caddy"
     published_ports:
       - "80:80/tcp"
       - "443:443/tcp"
     volumes: "{{ reverse_proxy_caddy_volumes_list }}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     log_driver: json-file
     log_options:
       max-size: "10m"

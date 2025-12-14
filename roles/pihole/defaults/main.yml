@@ -13,6 +13,10 @@ pihole_static_dns: "1.1.1.1"
 # Timezone (will typically be provided globally via inventory)
 pihole_timezone: "Europe/Brussels"
 
+# Optional: run container as a non-root user if image supports it (empty = image default)
+# Example (uid:gid): "1000:1000" or a named user if supported by the image
+pihole_container_user: ""
+
 # Optional: custom DNS A records to publish via Pi-hole (on primary only)
 # Example:
 # pihole_custom_dns_records:

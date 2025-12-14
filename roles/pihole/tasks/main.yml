@@ -114,6 +114,9 @@
 # -------------------------
 
 - name: Manage custom DNS records via dnsmasq (address= lines)
+  when:
+    - (pihole_dns_mode | default('dnsmasq')) == 'dnsmasq'
+  become: true
   block:
     - name: Render custom DNS records file from template
       ansible.builtin.template:
@@ -130,9 +133,6 @@
         path: "/home/{{ target_user }}/pihole/dnsmasq.d/05-ansible-local-dns.conf"
         state: absent
       when: (pihole_custom_dns_records | default([])) | length == 0
-  when:
-    - (pihole_dns_mode | default('dnsmasq')) == 'dnsmasq'
-  become: true
 
 - name: Ensure keepalived conf.d directory exists
   ansible.builtin.file:
@@ -310,6 +310,14 @@
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
     restart_policy: always
+    read_only: true
+    user: "{{ (pihole_container_user | default('')) if (pihole_container_user | default('') | length) > 0 else omit }}"
+    cap_drop:
+      - ALL
+    capabilities:
+      - NET_BIND_SERVICE
+    tmpfs:
+      - /tmp
     ports:
       - "53:53/tcp"
       - "53:53/udp"
@@ -399,5 +407,6 @@
   failed_when: false
   become: true
   when: (pihole_is_replica | bool) and (gravity_sync_enabled | default(true))
+  check_mode: no
 
 ## Removed role execution flag mechanism; rely on idempotent tasks
