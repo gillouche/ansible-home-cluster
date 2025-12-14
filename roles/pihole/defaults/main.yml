@@ -17,6 +17,12 @@ pihole_timezone: "Europe/Brussels"
 # Example (uid:gid): "1000:1000" or a named user if supported by the image
 pihole_container_user: ""
 
+# Pi-hole note: Running FTL as non-root typically fails due to capabilities
+# (e.g., CAP_SETFCAP) and low-port binding. Set the DNSMASQ user explicitly
+# to root to avoid startup errors like "Unable to set capabilities".
+# Change only if you fully support rootless with proper capabilities and mounts.
+pihole_dnsmasq_user: "root"
+
 # Optional: custom DNS A records to publish via Pi-hole (on primary only)
 # Example:
 # pihole_custom_dns_records:

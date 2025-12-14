@@ -32,22 +32,97 @@
   ansible.builtin.set_fact:
     controller_known_hosts_targets: "{{ controller_known_hosts_targets | map('string') | list | unique }}"
 
-- name: SSH-keyscan targets (best-effort)
+- name: Also include FQDN selectors for each inventory host (if base_domain provided)
+  ansible.builtin.set_fact:
+    controller_known_hosts_targets: >-
+      {{
+        (
+          controller_known_hosts_targets
+        )
+        +
+        (
+          (
+            (groups['all'] | default([]))
+            | map('regex_replace', '$', '.' ~ (base_domain | default('gillouche.homelab')))
+            | list
+          )
+        )
+      | map('string')
+      | reject('equalto', '')
+      | reject('match', '^\\\\')
+      | list | unique }}
+  when: (base_domain | default('')) | length > 0
+
+# Additionally include resolved IPs for hostnames that don't define ansible_host
+# This ensures SSH lookups that select the IP (e.g., due to HostName in SSH config)
+# have a matching known_hosts entry. Resolution is performed on the controller.
+
+- name: Resolve IPs for inventory hostnames on controller (best-effort)
   ansible.builtin.command: >-
-    ssh-keyscan -T {{ controller_known_hosts_timeout }} -t ed25519 {{ controller_known_hosts_targets | join(' ') }}
-  register: controller_known_hosts_keyscan_all
+    python3 -c "import socket,sys; print(socket.gethostbyname(sys.argv[1]))" {{ item }}
+  register: controller_hostname_resolution
+  loop: "{{ groups['all'] | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
   changed_when: false
   failed_when: false
 
-- name: Add keys to known_hosts
+- name: Append resolved IPv4 addresses to targets
+  ansible.builtin.set_fact:
+    controller_known_hosts_targets: >-
+      {{
+        controller_known_hosts_targets
+        + (
+            controller_hostname_resolution.results | default([])
+            | selectattr('rc','equalto', 0)
+            | map(attribute='stdout') | map('string') | list
+            | select('match', '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$') | list
+          )
+      | map('string') | list | unique }}
+
+# Per-target scan and add: ensure entries for hostname, IP, and FQDN
+
+- name: Debug list of targets for known_hosts (controller)
+  ansible.builtin.debug:
+    var: controller_known_hosts_targets
+    verbosity: 1
+
+- name: Scan ed25519 host key for each target (suppress stderr)
+  ansible.builtin.shell: |
+    set -o pipefail
+    ssh-keyscan -T {{ controller_known_hosts_timeout }} -t ed25519 "{{ item }}" 2>/dev/null
+  args:
+    executable: /bin/bash
+  register: controller_keyscan_each
+  loop: "{{ controller_known_hosts_targets | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  failed_when: false
+
+- name: Add scanned keys to known_hosts (hashed, idempotent)
+  vars:
+    controller_target: "{{ item.item }}"
+    controller_scanned_key_line: >-
+      {{ (
+           item.stdout | default('')
+         ).splitlines()
+         | select('match', '^' ~ controller_target ~ ' ')
+         | list
+         | first
+         | default('')
+      }}
   ansible.builtin.known_hosts:
     path: "{{ controller_known_hosts_path }}"
-    name: "{{ (item.split(' ') | first) | default('') }}"
-    key: "{{ item }}"
+    name: "{{ controller_target }}"
+    key: "{{ controller_scanned_key_line }}"
     state: present
     hash_host: true
-  loop: "{{ (controller_known_hosts_keyscan_all.stdout | default('')) | splitlines() }}"
-  when: (controller_known_hosts_keyscan_all.stdout | default('')) | length > 0
+  loop: "{{ controller_keyscan_each.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: controller_scanned_key_line | length > 0
+  failed_when: false
 
 - name: Ensure controller ~/.ssh/sockets directory exists (for ControlPath)
   ansible.builtin.file:
@@ -74,15 +149,7 @@
         ControlPath ~/.ssh/sockets/%r@%h-%p
         ControlPersist 600
 
-- name: Ensure controller knows host keys (idempotent)
-  ansible.builtin.known_hosts:
-    path: "{{ lookup('env', 'HOME') + '/.ssh/known_hosts' }}"
-    name: "{{ hostvars[item].ansible_host | default(item) }}"
-    key: "{{ lookup('pipe', 'ssh-keyscan -T 5 -t ed25519 ' + (hostvars[item].ansible_host | default(item))) }}"
-    state: present
-    hash_host: true
-  loop: "{{ groups['all'] | default([]) }}"
-  failed_when: false
+# Removed secondary per-host scan to avoid duplication; covered by per-target scan above
 
 # --- Bootstrap convenience (optional) ---
 

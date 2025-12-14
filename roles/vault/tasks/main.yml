@@ -1,4 +1,10 @@
 ---
+- name: Ensure vault-cli package is installed (yay)
+  yay:
+    name: vault-cli
+    state: present
+  become: false
+
 - name: Ensure Vault system group exists (gid pinned)
   ansible.builtin.group:
     name: "{{ vault_system_group }}"

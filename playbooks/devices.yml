@@ -61,10 +61,6 @@
       tags:
         - proxy
 
-# ----------------------------------------------------
-# Optional / never-run-by-default plays
-# ----------------------------------------------------
-
 - name: Ping all devices
   hosts: all
   gather_facts: false
@@ -101,15 +97,3 @@
   roles:
     - role: devices_ssh
     - role: devices_network
-
-- name: Bootstrap controller host for SSH and network configuration
-  hosts: localhost
-  gather_facts: true
-  become: false
-  tags:
-    - never
-    - bootstrap_controller_host
-
-  roles:
-    - role: controller_network
-    - role: controller_ssh

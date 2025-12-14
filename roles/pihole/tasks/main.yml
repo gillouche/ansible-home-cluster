@@ -310,14 +310,6 @@
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
     restart_policy: always
-    read_only: true
-    user: "{{ (pihole_container_user | default('')) if (pihole_container_user | default('') | length) > 0 else omit }}"
-    cap_drop:
-      - ALL
-    capabilities:
-      - NET_BIND_SERVICE
-    tmpfs:
-      - /tmp
     ports:
       - "53:53/tcp"
       - "53:53/udp"
