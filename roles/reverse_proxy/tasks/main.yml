@@ -93,6 +93,29 @@
 # Optional resolver management on host
 # ----------------------------------------
 
+- name: Manage resolver via systemd-resolved (preferred)
+  when: reverse_proxy_manage_resolved | default(true) | bool
+  block:
+    - name: Ensure systemd-resolved config has [Resolve] section
+      ansible.builtin.blockinfile:
+        path: /etc/systemd/resolved.conf
+        marker: ";; {mark} ansible-home-cluster"
+        block: |
+          [Resolve]
+          DNS={{ reverse_proxy_resolver_ip }} {{ reverse_proxy_public_resolver }}
+          FallbackDNS=
+      become: true
+      notify: Restart systemd-resolved
+
+    - name: Ensure /etc/resolv.conf points to systemd-resolved stub
+      ansible.builtin.file:
+        src: /run/systemd/resolve/stub-resolv.conf
+        dest: /etc/resolv.conf
+        state: link
+        force: true
+      become: true
+      notify: Restart systemd-resolved
+
 - name: Check if /etc/resolv.conf is a symlink (reverse proxy)
   ansible.builtin.stat:
     path: /etc/resolv.conf
@@ -191,6 +214,8 @@
     image: "{{ reverse_proxy_image }}"
     state: started
     restart_policy: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
     published_ports:
       - "80:80/tcp"
       - "443:443/tcp"

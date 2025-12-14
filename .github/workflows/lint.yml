@@ -16,19 +16,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.14'
 
-      - name: Install linters
+      - name: Setup virtual environment
         run: |
-          python -m pip install --upgrade pip
-          pip install ansible ansible-lint yamllint
+          uv venv
+          uv sync
 
       - name: Install collections
         run: |
-          if [ -f requirements.yml ]; then ansible-galaxy collection install -r requirements.yml; fi
+          if [ -f requirements.yml ]; then uv exec .venv -- ansible-galaxy collection install -r requirements.yml; fi
 
       - name: Run ansible-lint
-        run: ansible-lint
+        run: uv exec .venv -- ansible-lint
 
       - name: Run yamllint
-        run: yamllint .
+        run: uv exec .venv -- yamllint .

@@ -24,82 +24,42 @@
     pihole_is_replica: "{{ inventory_hostname in (groups['pihole_replicas'] | default([])) }}"
   become: false
 
+- name: Assert required Pi-hole cluster variables are defined
+  ansible.builtin.assert:
+    that:
+      - pihole_virtual_ip is defined
+      - pihole_primary_host is defined
+    fail_msg: >-
+      Required variables for Pi-hole VRRP are missing. Ensure group_vars/pihole_cluster.yml
+      defines at least:
+        pihole_virtual_ip: <VIP address>
+        pihole_primary_host: <inventory hostname of primary>
+      Current inventory path: {{ inventory_file | default('unknown') }}
+  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
+  become: false
+
 - name: Ensure keepalived is installed (Arch)
   community.general.pacman:
     name: keepalived
     state: present
   become: true
 
-### Pi-hole 6: manage hosts list in /etc/pihole/pihole.toml (TOML [dns].hosts)
+### Pi-hole 6: minimally update existing /etc/pihole/pihole.toml (do not overwrite)
 
-- name: Build hosts array string from desired records
-  ansible.builtin.set_fact:
-    pihole_hosts_block: |
-      hosts = [
-      {% for rec in (pihole_custom_dns_records | default([])) %}
-        "{{ rec.ip }} {{ rec.host }}"{% if not loop.last %},{% endif %}
-      {% endfor %}
-      ]
-  when: (pihole_custom_dns_records | default([])) | length > 0
-
-- name: Ensure pihole.toml exists (minimal) when missing
-  ansible.builtin.copy:
-    dest: "{{ pihole_host_etc_dir }}/pihole.toml"
-    content: |
-      [dns]
-      {{ pihole_hosts_block | default('hosts = []') }}
-    owner: root
-    group: root
-    mode: '0644'
-    force: false
-  when: (pihole_custom_dns_records | default([])) | length > 0
-  become: false
-
-- name: Try replacing existing hosts array in pihole.toml
-  ansible.builtin.replace:
+- name: Stat pihole.toml
+  ansible.builtin.stat:
     path: "{{ pihole_host_etc_dir }}/pihole.toml"
-    regexp: '(?ms)^\s*hosts\s*=\s*\[.*?\]'
-    replace: "{{ pihole_hosts_block }}"
-  register: pihole_toml_replace
-  when: (pihole_custom_dns_records | default([])) | length > 0
+  register: pihole_toml_stat
   become: false
 
-- name: Ensure [dns] section exists in pihole.toml
-  ansible.builtin.lineinfile:
-    path: "{{ pihole_host_etc_dir }}/pihole.toml"
-    regexp: '^\[dns\]'
-    line: '[dns]'
-    insertafter: EOF
-    state: present
-  when:
-    - (pihole_custom_dns_records | default([])) | length > 0
-    - not pihole_toml_replace.changed
-  become: false
-
-- name: Insert hosts array into [dns] section when not present
-  ansible.builtin.blockinfile:
-    path: "{{ pihole_host_etc_dir }}/pihole.toml"
-    marker: "# {mark} ansible-home-cluster hosts"
-    block: "{{ pihole_hosts_block }}"
-    insertafter: '^\[dns\]'
-  when:
-    - (pihole_custom_dns_records | default([])) | length > 0
-    - not pihole_toml_replace.changed
-  become: false
-
-- name: Reload Pi-hole DNS after pihole.toml update
-  ansible.builtin.command: >-
-    docker exec {{ pihole_container_name }} pihole reloaddns
-  changed_when: false
-  when: (pihole_custom_dns_records | default([])) | length > 0
-
-- name: Ensure pihole.toml exists (for dnsmasq include flag)
+- name: Ensure pihole.toml exists (create only when missing)
   ansible.builtin.file:
     path: "{{ pihole_host_etc_dir }}/pihole.toml"
     state: touch
     owner: root
     group: root
     mode: '0644'
+  when: not (pihole_toml_stat.stat.exists | default(false))
   become: false
 
 - name: Ensure [misc] section exists in pihole.toml
@@ -112,14 +72,67 @@
   become: false
 
 - name: Enable loading of /etc/dnsmasq.d in pihole.toml (etc_dnsmasq_d = true)
-  ansible.builtin.lineinfile:
-    path: "{{ pihole_host_etc_dir }}/pihole.toml"
-    regexp: '^\s*etc_dnsmasq_d\s*='
-    line: 'etc_dnsmasq_d = true'
-    insertafter: '^\[misc\]'
-    state: present
-  notify: Restart pihole dns
-  become: false
+  block:
+    - name: Detect if etc_dnsmasq_d already true
+      ansible.builtin.command: >-
+        grep -Eq '^\s*etc_dnsmasq_d\s*=\s*true\s*$' {{ pihole_host_etc_dir }}/pihole.toml
+      register: pihole_toml_dnsmasq_true
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: Set etc_dnsmasq_d to true if set to false
+      ansible.builtin.replace:
+        path: "{{ pihole_host_etc_dir }}/pihole.toml"
+        regexp: '^(\s*etc_dnsmasq_d\s*=)\s*false\s*$'
+        replace: '\1 true'
+      when: pihole_toml_dnsmasq_true.rc != 0
+      notify: Restart pihole dns
+      become: false
+
+    - name: Detect if etc_dnsmasq_d key exists
+      ansible.builtin.command: >-
+        grep -Eq '^\s*etc_dnsmasq_d\s*=' {{ pihole_host_etc_dir }}/pihole.toml
+      register: pihole_toml_dnsmasq_key
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: Insert etc_dnsmasq_d = true under [misc] if key missing
+      ansible.builtin.lineinfile:
+        path: "{{ pihole_host_etc_dir }}/pihole.toml"
+        regexp: '^\s*etc_dnsmasq_d\s*='
+        line: 'etc_dnsmasq_d = true'
+        insertafter: '^\[misc\]'
+        state: present
+      when: pihole_toml_dnsmasq_true.rc != 0 and pihole_toml_dnsmasq_key.rc != 0
+      notify: Restart pihole dns
+      become: false
+
+# -------------------------
+# Custom DNS A records via dnsmasq.d (preferred automation mode)
+# -------------------------
+
+- name: Manage custom DNS records via dnsmasq (address= lines)
+  block:
+    - name: Render custom DNS records file from template
+      ansible.builtin.template:
+        src: dnsmasq-custom.conf.j2
+        dest: "/home/{{ target_user }}/pihole/dnsmasq.d/05-ansible-local-dns.conf"
+        owner: root
+        group: root
+        mode: '0644'
+      when: (pihole_custom_dns_records | default([])) | length > 0
+      notify: Restart pihole dns
+
+    - name: Remove custom DNS records file when list is empty
+      ansible.builtin.file:
+        path: "/home/{{ target_user }}/pihole/dnsmasq.d/05-ansible-local-dns.conf"
+        state: absent
+      when: (pihole_custom_dns_records | default([])) | length == 0
+  when:
+    - (pihole_dns_mode | default('dnsmasq')) == 'dnsmasq'
+  become: true
 
 - name: Ensure keepalived conf.d directory exists
   ansible.builtin.file:
@@ -252,12 +265,12 @@
   ansible.builtin.copy:
     dest: /etc/resolv.conf
     content: |
-      nameserver {{ static_dns }}
+      nameserver {{ pihole_static_dns }}
     owner: root
     group: root
     mode: '0644'
   become: true
-  when: static_dns is defined
+  when: pihole_static_dns is defined
 
 - name: Ensure Pi-hole data directories exist (host mounts)
   ansible.builtin.file:
@@ -285,6 +298,13 @@
   notify: Restart pihole dns
   become: true
 
+- name: Create Pi-hole Docker network when missing
+  community.docker.docker_network:
+    name: pihole_net
+    state: present
+    driver: bridge
+  become: true
+
 - name: Start/Update pihole container
   community.general.docker_container:
     name: "{{ pihole_container_name }}"
@@ -296,7 +316,7 @@
       - "8080:80/tcp"
       - "8443:443/tcp"
     env:
-      TZ: "{{ timezone }}"
+      TZ: "{{ pihole_timezone }}"
       FTLCONF_webserver_api_password: "{{ pihole_web_password }}"
       FTLCONF_dns_listeningMode: "ALL"
       FTLCONF_dns_upstreams: "{{ pihole_dns }}"
@@ -309,11 +329,13 @@
     volumes:
       - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
       - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
+    networks:
+      - name: pihole_net
     log_driver: json-file
     log_options:
       max-size: "10m"
       max-file: "5"
-  become: false
+  become: true
 
 - name: Wait for pihole web UI to be up
   ansible.builtin.wait_for:

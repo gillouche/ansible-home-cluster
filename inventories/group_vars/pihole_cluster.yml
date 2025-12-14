@@ -22,9 +22,9 @@ pihole_dns_wildcard_domains:
 
 # Optional: custom DNS A records
 pihole_custom_dns_records:
-  - host: "rpi5b16g1ssd.{{ base_domain }}"
+  - host: "rpi5b16g1ssd.{{ base_domain | default('gillouche.homelab') }}"
     ip: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-  - host: "rpi5b16g2ssd.{{ base_domain }}"
+  - host: "rpi5b16g2ssd.{{ base_domain | default('gillouche.homelab') }}"
     ip: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-  - host: "rpi5b16g3ssd.{{ base_domain }}"
+  - host: "rpi5b16g3ssd.{{ base_domain | default('gillouche.homelab') }}"
     ip: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"

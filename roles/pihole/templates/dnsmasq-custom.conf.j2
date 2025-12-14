@@ -1,0 +1,5 @@
+## Managed by Ansible — ansible-home-cluster
+## Custom A records rendered for Pi-hole dnsmasq
+{% for rec in (pihole_custom_dns_records | default([])) %}
+address=/{{ rec.host }}/{{ rec.ip }}
+{% endfor %}

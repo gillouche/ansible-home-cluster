@@ -38,8 +38,13 @@ reverse_proxy_ca_host_file: "/etc/ssl/cert.pem"
 reverse_proxy_ca_container_file: "/etc/ssl/certs/host-ca-bundle.pem"
 
 # Manage system resolver on nodes where reverse proxy runs (shared with Pi-hole)
-# If true, ensure /etc/resolv.conf prefers the Pi-hole VIP with a public fallback.
-reverse_proxy_manage_resolv_conf: true
+# Prefer systemd-resolved integration by default. When enabled, we manage
+# /etc/systemd/resolved.conf and ensure /etc/resolv.conf points to the stub.
+reverse_proxy_manage_resolved: true
+
+# Fallback option: if set to true explicitly, we will write /etc/resolv.conf
+# directly. Default is false to avoid conflicting with systemd-resolved.
+reverse_proxy_manage_resolv_conf: false
 reverse_proxy_public_resolver: "1.1.1.1"
 
 # Resolver IP to prefer on reverse proxy hosts when managing /etc/resolv.conf.

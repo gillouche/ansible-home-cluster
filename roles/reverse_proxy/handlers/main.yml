@@ -6,3 +6,11 @@
     name: keepalived
     state: restarted
   become: true
+
+- name: Restart systemd-resolved
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted
+    enabled: true
+    daemon_reload: true
+  become: true
