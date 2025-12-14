@@ -2,7 +2,7 @@
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       # Ensure every file ends with a single newline
       - id: end-of-file-fixer
@@ -11,3 +11,12 @@ repos:
         args: [--fix=lf]
       - id: trailing-whitespace
       - id: check-yaml
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: ['--maxkb=5000']
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.9.17
+    hooks:
+      - id: uv-export
+        args: [ "--frozen", "--no-hashes", "--output-file=requirements.txt" ]
