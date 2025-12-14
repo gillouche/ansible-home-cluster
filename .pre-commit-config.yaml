@@ -1,5 +1,8 @@
 ---
 
+default_language_version:
+  python: python3.14
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -19,4 +22,5 @@ repos:
     rev: 0.9.17
     hooks:
       - id: uv-export
-        args: [ "--frozen", "--no-hashes", "--output-file=requirements.txt" ]
+        language_version: python3.14
+        args: ["--frozen", "--no-hashes", "--output-file=requirements.txt"]
