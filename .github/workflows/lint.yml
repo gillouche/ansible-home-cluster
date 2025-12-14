@@ -19,20 +19,21 @@ jobs:
           python-version: '3.14'
 
       - name: Install uv
-        run: |
-          pip install uv
+        run: pip install uv
 
       - name: Setup virtual environment
         run: |
           uv venv
           uv sync
 
-      - name: Install collections
+      - name: Install Ansible collections
         run: |
-          if [ -f requirements.yml ]; then uv exec .venv -- ansible-galaxy collection install -r requirements.yml; fi
+          if [ -f requirements.yml ]; then
+            uv run ansible-galaxy collection install -r requirements.yml
+          fi
 
       - name: Run ansible-lint
-        run: uv exec .venv -- ansible-lint
+        run: uv run ansible-lint
 
       - name: Run yamllint
-        run: uv exec .venv -- yamllint .
+        run: uv run yamllint .
