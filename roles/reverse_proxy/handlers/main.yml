@@ -1,0 +1,8 @@
+---
+# handlers for reverse_proxy
+
+- name: Restart keepalived
+  ansible.builtin.service:
+    name: keepalived
+    state: restarted
+  become: true

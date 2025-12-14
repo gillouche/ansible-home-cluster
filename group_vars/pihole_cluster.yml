@@ -1,0 +1,30 @@
+---
+# Virtual IP and primary node
+pihole_virtual_ip: 192.168.0.251
+pihole_primary_host: rpi5b8g1
+
+# Enable wildcard DNS via dnsmasq to point domains to reverse proxy VIP
+pihole_dns_wildcard_enabled: true
+pihole_container_name: pihole
+
+# Replication
+gravity_sync_enabled: true
+gravity_sync_schedule: hourly
+
+# Image pin (override if needed; defaults are pinned in role too)
+pihole_image: pihole/pihole:2025.11.1
+
+# Secrets moved to pihole_cluster.vault.yml
+
+# Domains to publish (example used previously)
+pihole_dns_wildcard_domains:
+  - "pihole.{{ base_domain | default('gillouche.homelab') }}"
+
+# Optional: custom DNS A records
+pihole_custom_dns_records:
+  - host: "rpi5b16g1ssd.{{ base_domain }}"
+    ip: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+  - host: "rpi5b16g2ssd.{{ base_domain }}"
+    ip: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+  - host: "rpi5b16g3ssd.{{ base_domain }}"
+    ip: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"

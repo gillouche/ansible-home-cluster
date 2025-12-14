@@ -1,16 +1,11 @@
 ---
 # tasks file for facts
 
-- name: Skip if role already executed
-  meta: end_role
-  when: (lookup('vars', role_execution_flag) | default(false)) | bool
-  become: false
-
 - name: Check that the target_user variable has been provided to the playbook
-  fail:
+  ansible.builtin.fail:
     msg: "The variable 'target_user' must be provided in order to run the playbook."
-  when: target_user is not defined
-  become: false
+    when: target_user is not defined
+    become: false
 
 - name: Print all available facts if debug verbosity 4 is enabled
   ansible.builtin.debug:
@@ -28,7 +23,7 @@
       - "User: {{ ansible_facts['user_id'] }}"
       - "Home Directory: {{ ansible_facts['user_dir'] }}"
     verbosity: 4
-  register: result
+  register: facts_debug_result
   become: false
 
 - name: Print network information
@@ -41,12 +36,6 @@
   become: false
 
 - name: Optionally stop playbook after debug (disabled by default)
-  meta: end_play
+  ansible.builtin.meta: end_play
   when: end_after_facts | default(false) | bool
-  become: false
-
-- name: Mark role as executed
-  set_fact:
-    "{{ role_execution_flag }}": true
-    cacheable: true
   become: false

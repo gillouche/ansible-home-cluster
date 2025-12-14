@@ -1,0 +1,34 @@
+{
+# Global options
+{% if reverse_proxy_tls_mode | default('none') == 'none' %}
+    auto_https off
+{% endif %}
+
+{% if reverse_proxy_tls_mode | default('none') == 'vault_acme' %}
+    {% if reverse_proxy_acme_email %}
+        email {{ reverse_proxy_acme_email }}
+    {% endif %}
+    {% if reverse_proxy_acme_ca_url %}
+        acme_ca {{ reverse_proxy_acme_ca_url }}
+    {% endif %}
+    {% if reverse_proxy_acme_eab_kid is defined and reverse_proxy_acme_eab_hmac is defined and reverse_proxy_acme_eab_kid and reverse_proxy_acme_eab_hmac %}
+        acme_eab kid "{{ reverse_proxy_acme_eab_kid }}" hmac "{{ reverse_proxy_acme_eab_hmac }}"
+    {% endif %}
+{% endif %}
+}
+
+{% for site in reverse_proxy_sites %}
+    {{ site.host }} {
+    encode zstd gzip
+    {% if site.endpoint is defined and site.endpoint %}
+        # Redirect root to the provided endpoint (e.g., /admin)
+        @root {
+        path "/"
+        }
+        redir @root {{ site.endpoint }} 302
+    {% endif %}
+
+    # Proxy all paths to the upstream
+    reverse_proxy {{ site.upstream }}
+    }
+{% endfor %}

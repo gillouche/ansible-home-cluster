@@ -1,0 +1,61 @@
+---
+# Caddy container configuration
+reverse_proxy_container_name: "caddy"
+reverse_proxy_image: "caddy:2.10.2"
+
+# TLS settings — Vault ACME by default (no file certs)
+# Modes:
+#   vault_acme -> Caddy obtains/renews certs from Vault's ACME endpoint
+#   none       -> serve HTTP only (auto_https disabled)
+reverse_proxy_tls_mode: "vault_acme"
+
+# Vault ACME settings
+# Email used for ACME account registration in Caddy
+reverse_proxy_acme_email: ""
+# ACME directory URL served by Vault. By default, use the first host in vault_cluster.
+# You can override this in inventory if you prefer a specific node.
+reverse_proxy_acme_ca_url: >-
+  {{
+    "https://" + (hostvars[groups['vault_cluster'][0]].ansible_host if (groups['vault_cluster']|default([])) else '127.0.0.1')
+    + ":" + (hostvars[groups['vault_cluster'][0]].vault_api_port | default(8200) | string)
+    + "/v1/pki/acme/directory"
+  }}
+
+# VIP and primary host sane defaults (override in group_vars as needed)
+reverse_proxy_virtual_ip: "192.168.0.252"
+reverse_proxy_primary_host: "rpi5b8g1"
+
+# Simple default backend example (Pi-hole on same node)
+reverse_proxy_sites:
+  - host: "pihole.{{ base_domain | default('gillouche.homelab') }}"
+    upstream: "127.0.0.1:8080"
+
+# Provide Vault CA to Caddy so it can reach Vault's ACME over TLS
+# On Arch, the consolidated trust bundle is /etc/ssl/cert.pem by default.
+# We mount the host bundle read-only into the container and point SSL_CERT_FILE to it.
+reverse_proxy_mount_host_ca_bundle: true
+reverse_proxy_ca_host_file: "/etc/ssl/cert.pem"
+reverse_proxy_ca_container_file: "/etc/ssl/certs/host-ca-bundle.pem"
+
+# Manage system resolver on nodes where reverse proxy runs (shared with Pi-hole)
+# If true, ensure /etc/resolv.conf prefers the Pi-hole VIP with a public fallback.
+reverse_proxy_manage_resolv_conf: true
+reverse_proxy_public_resolver: "1.1.1.1"
+
+# Resolver IP to prefer on reverse proxy hosts when managing /etc/resolv.conf.
+# Defaults to the Pi-hole VIP if available, else falls back to the reverse proxy VIP.
+reverse_proxy_resolver_ip: "{{ pihole_virtual_ip | default(reverse_proxy_virtual_ip) }}"
+
+# Staggered start for Caddy when using ACME to reduce concurrent registration bursts
+# Enable to introduce a small randomized delay before (re)starting the Caddy container
+reverse_proxy_acme_stagger_enabled: true
+# Maximum random delay in seconds (actual delay is 1..N)
+reverse_proxy_acme_start_delay_max: 60
+
+# One-time restart toggle for play runs. Keep false by default; set to true when you
+# want the role to force-restart Caddy containers during deployment.
+reverse_proxy_restart_now: false
+
+# Ensure host-side Caddy data tree is group-readable by this group and that new
+# files inherit the group via setgid + default ACLs. The project uses 'alarm'.
+reverse_proxy_data_group: "alarm"

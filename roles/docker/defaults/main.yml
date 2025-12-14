@@ -1,3 +1,2 @@
 ---
 # defaults for docker role
-role_execution_flag: "docker_was_executed"

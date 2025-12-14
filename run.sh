@@ -131,6 +131,5 @@ else
   ansible-playbook \
     -i "$INVENTORY" \
     "$PLAYBOOK_PATH" \
-    --ask-vault-pass \
     "$@"
 fi

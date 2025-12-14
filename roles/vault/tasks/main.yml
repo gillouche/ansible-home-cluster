@@ -1,0 +1,1674 @@
+---
+- name: Ensure Vault system group exists (gid pinned)
+  ansible.builtin.group:
+    name: "{{ vault_system_group }}"
+    gid: "{{ vault_system_gid }}"
+    state: present
+    system: true
+  become: true
+
+- name: Ensure Vault system user exists (uid/gid pinned)
+  ansible.builtin.user:
+    name: "{{ vault_system_user }}"
+    uid: "{{ vault_system_uid }}"
+    group: "{{ vault_system_group }}"
+    create_home: true
+    shell: /usr/bin/nologin
+    system: true
+    state: present
+  become: true
+
+- name: Ensure base Vault directory exists in Vault user home
+  ansible.builtin.file:
+    path: "/home/{{ vault_system_user }}/vault"
+    state: directory
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "0755"
+  become: true
+
+- name: Ensure Vault home directory permits group traversal (0750)
+  ansible.builtin.file:
+    path: "/home/{{ vault_system_user }}"
+    state: directory
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "0750"
+  become: true
+
+- name: Ensure Vault config, data and TLS directories exist with proper ownership
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "{{ item.mode }}"
+  become: true
+  loop:
+    - {path: "{{ vault_config_dir }}", mode: "2750"}
+    - {path: "{{ vault_tls_dir }}", mode: "2750"}
+    - {path: "{{ vault_data_dir }}", mode: "2770"}
+    - {path: "{{ vault_logs_dir }}", mode: "2750"}
+    - {path: "{{ vault_bin_dir }}", mode: "0755"}
+
+- name: Ensure Vault data directory tree is owned by vault user (recursive)
+  ansible.builtin.file:
+    path: "{{ vault_data_dir }}"
+    state: directory
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "2770"
+    recurse: true
+  become: true
+
+- name: Ensure OpenSSL is installed (for self-signed TLS generation)
+  community.general.pacman:
+    name: openssl
+    state: present
+  become: true
+
+## Firewall management removed per user request (cluster runs on trusted LAN)
+
+- name: Check if Vault TLS cert/key exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ vault_tls_cert_path }}"
+    - "{{ vault_tls_key_path }}"
+  register: vault_tls_stats
+  become: true
+
+- name: Set fact if TLS pair missing
+  ansible.builtin.set_fact:
+    vault_tls_missing: "{{ (vault_tls_stats.results |
+     selectattr('stat.exists', 'equalto', false) | list | length) > 0 }}"
+
+- name: Enforce strict permissions on TLS private key
+  ansible.builtin.file:
+    path: "{{ vault_tls_key_path }}"
+    state: file
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "0600"
+  become: true
+  when:
+    (vault_tls_stats.results | selectattr('stat.path','equalto', vault_tls_key_path) |
+    selectattr('stat.exists','equalto', true) | list | length) > 0
+
+- name: Write OpenSSL config for self-signed cert (when missing)
+  ansible.builtin.copy:
+    dest: "{{ vault_tls_dir }}/openssl.cnf"
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "0640"
+    content: |
+      [req]
+      distinguished_name = req_distinguished_name
+      x509_extensions = v3_req
+      prompt = no
+
+      [req_distinguished_name]
+      CN = {{ inventory_hostname }}.{{ base_domain }}
+
+      [v3_req]
+      keyUsage = keyEncipherment, dataEncipherment, digitalSignature
+      extendedKeyUsage = serverAuth
+      subjectAltName = @alt_names
+
+      [alt_names]
+      DNS.1 = {{ inventory_hostname }}.{{ base_domain }}
+      IP.1  = {{ ansible_host | default(ansible_facts['default_ipv4']['address']) }}
+  when: vault_tls_missing | bool and not (vault_enable_cluster_ca | default(false))
+  become: true
+
+- name: Generate self-signed TLS cert/key for Vault (when missing)
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -nodes
+      - -newkey
+      - rsa:2048
+      - -days
+      - "3650"
+      - -keyout
+      - "{{ vault_tls_key_path }}"
+      - -out
+      - "{{ vault_tls_cert_path }}"
+      - -config
+      - "{{ vault_tls_dir }}/openssl.cnf"
+  args:
+    creates: "{{ vault_tls_cert_path }}"
+  when:
+    - vault_tls_missing | bool
+    - not (vault_enable_cluster_ca | default(false))
+  become: true
+
+- name: Ensure TLS files permissions after generation
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ vault_tls_cert_path }}", mode: "0640"}
+    - {path: "{{ vault_tls_key_path }}", mode: "0640"}
+  when: vault_tls_missing | bool and not (vault_enable_cluster_ca | default(false))
+  become: true
+
+# -------------------------------------------------------------
+# Cluster CA: generate CA and per-node server certs on controller
+# -------------------------------------------------------------
+- name: Ensure cluster CA directory exists (controller)
+  ansible.builtin.file:
+    path: "{{ vault_cluster_ca_dir_controller | expanduser }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  run_once: true
+
+# -------------------------------------------------------------
+# Firefox enterprise roots policy on macOS controller (optional)
+# -------------------------------------------------------------
+
+- name: Ensure Firefox distribution directory exists (macOS controller)
+  ansible.builtin.file:
+    path: "{{ firefox_policies_json_path | dirname }}"
+    state: directory
+    mode: "0755"
+  when:
+    - firefox_enable_enterprise_roots | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+  become: false
+
+- name: Configure Firefox to use enterprise roots (macOS controller)
+  ansible.builtin.copy:
+    dest: "{{ firefox_policies_json_path }}"
+    mode: "0644"
+    content: |
+      {
+        "policies": {
+          "Certificates": {
+            "ImportEnterpriseRoots": true
+          }
+        }
+      }
+  when:
+    - firefox_enable_enterprise_roots | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+  become: false
+
+- name: Generate cluster CA key if missing (controller)
+  ansible.builtin.command: >-
+    openssl genrsa -out "{{ vault_cluster_ca_key_controller | expanduser }}" 4096
+  args:
+    creates: "{{ vault_cluster_ca_key_controller | expanduser }}"
+  delegate_to: localhost
+  run_once: true
+  when: vault_enable_cluster_ca | bool
+
+- name: Generate cluster CA cert if missing (controller)
+  ansible.builtin.command: >-
+    openssl req -x509 -new -nodes -sha256 -days {{ vault_cluster_ca_days }}
+    -key "{{ vault_cluster_ca_key_controller | expanduser }}"
+    -subj "/CN=Vault Cluster CA"
+    -out "{{ vault_cluster_ca_cert_controller | expanduser }}"
+  args:
+    creates: "{{ vault_cluster_ca_cert_controller | expanduser }}"
+  delegate_to: localhost
+  run_once: true
+  when: vault_enable_cluster_ca | bool
+
+- name: Prepare per-node cert workspace on controller
+  ansible.builtin.file:
+    path: "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname) | expanduser }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  when: vault_enable_cluster_ca | bool
+
+- name: Render per-node OpenSSL SAN config (controller)
+  ansible.builtin.copy:
+    dest: "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.cnf') | expanduser }}"
+    mode: "0600"
+    content: |
+      [req]
+      distinguished_name = req_distinguished_name
+      req_extensions     = v3_req
+      prompt = no
+      [req_distinguished_name]
+      CN = {{ inventory_hostname }}.{{ base_domain }}
+      [v3_req]
+      keyUsage = keyEncipherment, dataEncipherment, digitalSignature
+      extendedKeyUsage = serverAuth
+      subjectAltName = @alt_names
+      [alt_names]
+      DNS.1 = {{ inventory_hostname }}.{{ base_domain }}
+      IP.1  = {{ ansible_host | default(ansible_facts['default_ipv4']['address']) }}
+  delegate_to: localhost
+  when: vault_enable_cluster_ca | bool
+
+- name: Generate per-node server key if missing (controller)
+  ansible.builtin.command: >-
+    openssl genrsa
+    -out "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.key') | expanduser }}" 2048
+  args:
+    creates: "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.key') | expanduser }}"
+  delegate_to: localhost
+  when: vault_enable_cluster_ca | bool
+
+- name: Generate per-node CSR (controller)
+  ansible.builtin.command: >-
+    openssl req -new
+    -key "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.key') | expanduser }}"
+    -out "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.csr') | expanduser }}"
+    -config "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.cnf') | expanduser }}"
+  args:
+    creates: "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.csr') | expanduser }}"
+  delegate_to: localhost
+  when: vault_enable_cluster_ca | bool
+
+- name: Sign per-node server cert with cluster CA (controller)
+  ansible.builtin.command: >-
+    openssl x509
+    -req
+    -in "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.csr') | expanduser }}"
+    -CA "{{ vault_cluster_ca_cert_controller | expanduser }}"
+    -CAkey "{{ vault_cluster_ca_key_controller | expanduser }}"
+    -CAcreateserial
+    -out "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.crt') | expanduser }}"
+    -days {{ vault_server_cert_days }} -sha256
+    -extfile "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.cnf') | expanduser }}"
+    -extensions v3_req
+  args:
+    creates: "{{ (vault_cluster_ca_dir_controller + '/' + inventory_hostname + '/server.crt') | expanduser }}"
+  delegate_to: localhost
+  when: vault_enable_cluster_ca | bool
+
+- name: Copy cluster CA and server certs to host
+  ansible.builtin.copy:
+    src: "{{ item.src | expanduser }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "0640"
+  loop:
+    - {src: "{{ vault_cluster_ca_cert_controller }}",
+       dest: "{{ vault_tls_dir }}/cluster-ca.crt"}
+    - {src: "{{ vault_cluster_ca_dir_controller }}/{{ inventory_hostname }}/server.crt",
+       dest: "{{ vault_tls_dir }}/server.crt"}
+    - {src: "{{ vault_cluster_ca_dir_controller }}/{{ inventory_hostname }}/server.key",
+       dest: "{{ vault_tls_dir }}/server.key"}
+  become: true
+  when: vault_enable_cluster_ca | bool
+
+- name: Determine bind IP (LAN) for Vault
+  ansible.builtin.set_fact:
+    vault_bind_ip: "{{ (ansible_facts['default_ipv4']['address'] if vault_bind_to_lan_ip_only | bool else '0.0.0.0') }}"
+
+- name: Build Raft peer list for leader (empty)
+  ansible.builtin.set_fact:
+    vault_raft_peers: []
+  when:
+    - groups['vault_cluster'] | default([]) | length > 0
+    - inventory_hostname == (groups['vault_cluster'][0])
+
+- name: Build Raft peer list for peers (target leader only)
+  ansible.builtin.set_fact:
+    vault_raft_peers: ["{{ (groups['vault_cluster'] | default([]))[0] }}"]
+  when:
+    - groups['vault_cluster'] | default([]) | length > 0
+    - inventory_hostname != (groups['vault_cluster'][0])
+
+- name: Ensure /etc/hosts has entries for Vault peers (FQDN -> IP)
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ansible-vault-peers"
+    block: |
+      {% for peer in (groups['vault_cluster'] | default([])) %}
+      {{ hostvars[peer].ansible_host | default(peer) }} {{ peer }} {{ peer }}.{{ base_domain }}
+      {% endfor %}
+  become: true
+
+## Build etc_hosts for docker_container (FQDN -> IP)
+
+- name: Initialize etc_hosts dict for docker_container
+  ansible.builtin.set_fact:
+    vault_etc_hosts: {}
+
+- name: Set advertised hostname for TLS SNI
+  ansible.builtin.set_fact:
+    vault_tls_sni_hostname: "{{ inventory_hostname }}.{{ base_domain }}"
+
+- name: For bridge networking, bind listener to all interfaces in container
+  ansible.builtin.set_fact:
+    vault_listener_address: "0.0.0.0"
+  when: (vault_container_network_mode | default('bridge')) == 'bridge'
+
+- name: Render Vault configuration (vault.hcl)
+  ansible.builtin.template:
+    src: vault.hcl.j2
+    dest: "{{ vault_config_dir }}/vault.hcl"
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "0640"
+  vars:
+    # Always use container-internal TLS paths (Docker-only)
+    vault_tls_cert_path: "{{ vault_tls_dir_in_container }}/server.crt"
+    vault_tls_key_path: "{{ vault_tls_dir_in_container }}/server.key"
+    # Raft storage path must point to the container's mounted data dir
+    vault_data_dir: "{{ vault_data_dir_in_container }}"
+  register: vault_cfg_template
+  become: true
+
+- name: Build etc_hosts mapping for Vault peers (FQDN -> LAN IP)
+  ansible.builtin.set_fact:
+    vault_etc_hosts: "{{ (vault_etc_hosts | default({})) |
+     combine({(item + '.' + base_domain): (hostvars[item].ansible_host | default(''))}) }}"
+  when:
+    - (groups['vault_cluster'] | default([])) | length > 0
+    - (hostvars[item].ansible_host | default('')) | length > 0
+
+- name: Write startup wrapper to tee full logs (optional)
+  ansible.builtin.copy:
+    dest: "{{ vault_bin_dir }}/start-vault.sh"
+    owner: "{{ vault_system_user }}"
+    group: "{{ vault_system_group }}"
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      set -e
+      ts="$(date +%Y%m%d-%H%M%S)"
+      log="{{ vault_logs_dir_in_container }}/startup-${ts}.log"
+      # run vault and tee full output
+      exec sh -lc 'vault server -config={{ vault_cfg_path_in_container }} 2>&1 | tee -a '"$log"
+  when: vault_enable_log_wrapper | bool
+  become: true
+
+- name: Run/Update Vault container
+  community.general.docker_container:
+    name: "{{ vault_container_name }}"
+    image: "{{ vault_image }}"
+    restart_policy: always
+    network_mode: "{{ vault_container_network_mode }}"
+    etc_hosts: "{{ vault_etc_hosts | default({}) }}"
+    ports:
+      - "{{ vault_api_port }}:8200"
+      - "{{ vault_cluster_port }}:8201"
+    command: >-
+      {{ (vault_enable_log_wrapper | bool)
+          | ternary('sh -lc \"/vault/bin/start-vault.sh\"',
+                    'server -config=' ~ vault_cfg_path_in_container) }}
+    env:
+      VAULT_DISABLE_MLOCK: "true"
+      SKIP_SETCAP: "1"
+    volumes:
+      - "{{ vault_config_dir }}/vault.hcl:{{ vault_cfg_path_in_container }}:ro"
+      - "{{ vault_tls_dir }}:{{ vault_tls_dir_in_container }}:ro"
+      - "{{ vault_data_dir }}:{{ vault_data_dir_in_container }}:rw"
+      - "{{ vault_logs_dir }}:{{ vault_logs_dir_in_container }}:rw"
+      - "{{ vault_bin_dir }}:/vault/bin:ro"
+    capabilities:
+      - IPC_LOCK
+      - SETFCAP
+    user: "{{ vault_system_uid }}:{{ vault_system_gid }}"
+    force_kill: true
+    # Do not force container recreation on every run, otherwise Vault reseals each time.
+    # Allow image/config changes to trigger a restart implicitly; default to no forced recreate.
+    recreate: "{{ vault_docker_recreate | default(false) }}"
+    log_driver: "{{ vault_docker_log_driver }}"
+    log_options:
+      max-size: "{{ vault_docker_log_max_size }}"
+      max-file: "{{ vault_docker_log_max_file }}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider --no-check-certificate --tries=1
+        https://127.0.0.1:{{ vault_api_port }}/v1/sys/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    state: started
+  become: false
+
+# -------------------------------------------------------------
+# Automatic Raft bootstrap (init + unseal + join) — auto-detect
+# -------------------------------------------------------------
+- name: Determine leader host (first in vault_cluster)
+  ansible.builtin.set_fact:
+    vault_leader_host: "{{ (groups['vault_cluster'] | default([]))[0] }}"
+    vault_leader_addr: "https://{{ (groups['vault_cluster'] | default([]))[0] }}.{{ base_domain }}:{{ vault_api_port }}"
+    vault_leader_fqdn: "{{ (groups['vault_cluster'] | default([]))[0] }}.{{ base_domain }}"
+  when: groups['vault_cluster'] | default([]) | length > 0
+
+- name: Wait for local Vault API to respond (per host)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/sys/health"
+    method: GET
+    validate_certs: false
+    status_code: [200, 429, 472, 473, 501, 503]
+  register: local_health
+  retries: 30
+  delay: 2
+  until: local_health is succeeded
+  when: true
+
+- name: Check if leader is initialized (on leader only)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/sys/health"
+    method: GET
+    validate_certs: false
+    status_code: [200, 429, 472, 473, 501, 503]
+  register: leader_health
+  when: inventory_hostname == vault_leader_host
+
+- name: Initialize Vault on leader if uninitialized
+  ansible.builtin.command: >-
+    docker exec vault sh -lc
+    "VAULT_ADDR=https://127.0.0.1:{{ vault_api_port }} VAULT_SKIP_VERIFY=true
+    vault operator init -key-shares={{ vault_unseal_shares }} -key-threshold={{ vault_unseal_threshold }} -format=json"
+  register: vault_init_cmd
+  changed_when: true
+  failed_when:
+    vault_init_cmd.rc != 0 and (vault_init_cmd.stderr | default('')) is search('already initialized') == false
+  when: inventory_hostname == vault_leader_host and (leader_health.status | default(0)) == 501
+
+- name: Ensure init export directory exists on controller
+  ansible.builtin.file:
+    path: "{{ vault_init_export_path | dirname }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  run_once: true
+  when: (vault_init_cmd is defined) and (vault_init_cmd.stdout | default('')) | length > 0
+
+- name: Persist init output to controller (JSON)
+  ansible.builtin.copy:
+    dest: "{{ vault_init_export_path }}"
+    content: "{{ vault_init_cmd.stdout }}"
+    mode: "0600"
+  when:
+    inventory_hostname == vault_leader_host and (leader_health.status | default(0)) == 501 and
+    (vault_init_cmd.stdout | default('')) | length > 0
+  delegate_to: localhost
+  run_once: true
+
+- name: Load init JSON from controller (if present)
+  ansible.builtin.stat:
+    path: "{{ vault_init_export_path }}"
+  register: init_file_stat
+  delegate_to: localhost
+  run_once: true
+  when: true
+
+- name: Read init JSON
+  ansible.builtin.slurp:
+    src: "{{ vault_init_export_path }}"
+  register: init_file_slurp
+  delegate_to: localhost
+  run_once: true
+  when: init_file_stat.stat.exists
+
+- name: Distribute unseal keys and root token to hosts (facts)
+  ansible.builtin.set_fact:
+    vault_unseal_keys_b64: "{{ (init_file_slurp.content | b64decode | from_json).unseal_keys_b64 | default([]) }}"
+    vault_root_token: "{{ (init_file_slurp.content | b64decode | from_json).root_token | default('') }}"
+    vault_unseal_keys_hex: "{{ (init_file_slurp.content | b64decode | from_json).unseal_keys_hex | default([]) }}"
+  run_once: true
+  when: init_file_stat.stat.exists
+
+# Ensure all vault hosts have the unseal keys/token facts (set_fact is host-scoped)
+- name: Distribute unseal keys and token facts to all vault hosts
+  ansible.builtin.set_fact:
+    vault_unseal_keys_b64: "{{ vault_unseal_keys_b64 }}"
+    vault_unseal_keys_hex: "{{ vault_unseal_keys_hex }}"
+    vault_root_token: "{{ vault_root_token }}"
+    cacheable: true
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['vault_cluster'] | default([]) }}"
+  run_once: true
+  when: init_file_stat.stat.exists
+
+# Fail fast and validate init/unseal inputs before attempting unseal/join
+- name: Fail if init export file is missing and no unseal keys provided via vars
+  ansible.builtin.fail:
+    msg: >-
+      Vault init export file not found at {{ vault_init_export_path }} and no unseal keys provided.
+      Provide the init JSON at that path, or set vault_unseal_keys_b64 (and optionally vault_root_token)
+      via encrypted group_vars/host_vars before running this role.
+  when:
+    - not init_file_stat.stat.exists
+    - (vault_unseal_keys_b64 | default([])) | length == 0
+  run_once: true
+
+- name: Validate unseal keys and token from init file
+  ansible.builtin.assert:
+    that:
+      - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
+      - (vault_unseal_keys_hex | default(vault_unseal_keys_b64) | length) == (vault_unseal_keys_b64 | length)
+      - (vault_root_token | default('')) | length > 0
+      - vault_unseal_keys_b64 is iterable
+      - vault_unseal_threshold | int > 0
+      - vault_unseal_threshold | int <= (vault_unseal_keys_b64 | length)
+    fail_msg: >-
+      Invalid or incomplete init data. Ensure unseal keys and root token are present.
+      Got: b64_keys={{ (vault_unseal_keys_b64 | default([])) | length }},
+      hex_keys={{ (vault_unseal_keys_hex | default([])) | length }},
+      threshold={{ vault_unseal_threshold }}, root_token_present={{ (vault_root_token | default('')) | length > 0 }}.
+  run_once: true
+  when: init_file_stat.stat.exists
+
+- name: Validate base64 format of unseal keys (best-effort)
+  ansible.builtin.assert:
+    that:
+      - item is match('^[A-Za-z0-9+/=]+$')
+    quiet: true
+    fail_msg: "Unseal key (base64) appears malformed: {{ item | default('') }}"
+  loop: "{{ (vault_unseal_keys_b64 | default([])) }}"
+  run_once: true
+  when: init_file_stat.stat.exists and (vault_unseal_keys_b64 | default([])) | length > 0
+
+- name: Unseal leader with first threshold keys
+  ansible.builtin.command: >-
+    docker exec vault sh -lc
+    "VAULT_ADDR=https://127.0.0.1:{{ vault_api_port }} VAULT_SKIP_VERIFY=true
+    vault operator unseal {{ item }}"
+  loop: "{{ vault_unseal_keys_b64[0:vault_unseal_threshold] | default([]) }}"
+  changed_when: true
+  when:
+    inventory_hostname == vault_leader_host and (vault_unseal_keys_b64 | default([])) |
+    length >= vault_unseal_threshold and (local_health.status | default(0)) in [503]
+
+- name: Wait for leader to be active or standby (unsealed)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/sys/health"
+    method: GET
+    validate_certs: false
+    status_code: [200, 429]
+  register: leader_ready
+  retries: 30
+  delay: 2
+  until: leader_ready is succeeded
+  when: inventory_hostname == vault_leader_host
+
+# Global barrier: ensure all hosts wait until leader is ready
+- name: Wait until leader is ready (global barrier)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/sys/health"
+    method: GET
+    validate_certs: false
+    status_code: [200, 429]
+  register: leader_ready_global
+  retries: 30
+  delay: 2
+  until: leader_ready_global is succeeded
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Mark leader readiness for all vault hosts
+  ansible.builtin.set_fact:
+    vault_leader_ready: true
+    cacheable: true
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['vault_cluster'] | default([]) }}"
+  run_once: true
+
+# Snapshot current Raft configuration from leader (non-blocking)
+- name: Get current raft configuration (leader snapshot)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/sys/storage/raft/configuration"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ vault_mounts_token }}"
+    validate_certs: false
+    status_code: [200]
+    return_content: true
+  register: raft_cfg_snapshot
+  failed_when: false
+  changed_when: false
+  when:
+    - inventory_hostname == vault_leader_host
+    - (vault_mounts_token | default('')) | length > 0
+
+- name: Extract raft node_id list from snapshot (leader)
+  ansible.builtin.set_fact:
+    cluster_raft_nodes: "{{ (raft_cfg_snapshot.json.configuration.servers | default([])) |
+     map(attribute='node_id') | list }}"
+  when:
+    - inventory_hostname == vault_leader_host
+    - raft_cfg_snapshot is defined
+    - (raft_cfg_snapshot.json.configuration.servers | default([])) | length >= 0
+
+- name: Distribute raft node_id list to all vault hosts
+  ansible.builtin.set_fact:
+    cluster_raft_nodes: "{{ cluster_raft_nodes | default([]) }}"
+    cacheable: true
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['vault_cluster'] | default([]) }}"
+  run_once: true
+  when: cluster_raft_nodes is defined
+
+# Try explicit raft join from peers if not yet part of the cluster
+- name: Attempt raft join from peer to leader (CLI fallback)
+  ansible.builtin.command: >-
+    docker exec vault sh -lc
+    "VAULT_ADDR=https://{{ vault_leader_fqdn }}:{{ vault_api_port }}
+    VAULT_CACERT={{ vault_tls_dir_in_container }}/cluster-ca.crt
+    vault operator raft join https://{{ vault_leader_fqdn }}:{{ vault_api_port }}"
+  register: raft_join_cmd
+  changed_when: raft_join_cmd.rc == 0 and (raft_join_cmd.stdout | default('')) is not search('already (a|part)')
+  failed_when: false
+  when:
+    - inventory_hostname != vault_leader_host
+    - (vault_leader_ready | default(false)) | bool
+    - (local_health.status | default(0)) in [501, 503]
+    - (cluster_raft_nodes is not defined) or (inventory_hostname not in cluster_raft_nodes)
+
+- name: Join peer to leader via CLI
+  ansible.builtin.meta: noop
+  when: false
+
+- name: Unseal peer with first threshold keys
+  ansible.builtin.command: >-
+    docker exec vault sh -lc
+    "VAULT_ADDR=https://127.0.0.1:{{ vault_api_port }} VAULT_SKIP_VERIFY=true
+    vault operator unseal {{ item }}"
+  loop: "{{ vault_unseal_keys_b64[0:vault_unseal_threshold] | default([]) }}"
+  changed_when: true
+  when:
+    - inventory_hostname != vault_leader_host
+    - (vault_unseal_keys_b64 | default([])) | length >= vault_unseal_threshold
+    # On peers, Vault may report 501 (uninitialized) before joining the cluster, or 503 (sealed)
+    # Allow unseal to proceed in either state so peers can join and transition to standby.
+    - (local_health.status | default(0)) in [501, 503]
+    - (vault_leader_ready | default(false)) | bool
+
+- name: Verify peer health (sealed=false)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/sys/health"
+    method: GET
+    validate_certs: false
+    status_code: [200, 429]
+  register: peer_ready
+  retries: 30
+  delay: 2
+  until: peer_ready is succeeded
+  when: inventory_hostname != vault_leader_host
+
+# TLS preflight — verify peer trusts leader certificate (helpful diagnostics)
+- name: Check for openssl availability on host (for TLS preflight)
+  ansible.builtin.command: command -v openssl
+  register: openssl_check
+  changed_when: false
+  failed_when: false
+  when:
+    - (groups['vault_cluster'] | default([])) | length > 0
+    - inventory_hostname != (groups['vault_cluster'][0])
+
+- name: TLS preflight from peer to leader (verify SAN/CA)
+  ansible.builtin.shell: |
+    set -o pipefail
+    echo | openssl s_client \
+      -connect {{ (groups['vault_cluster'] | default([]))[0] }}.{{ base_domain }}:{{ vault_api_port }} \
+      -servername {{ (groups['vault_cluster'] | default([]))[0] }}.{{ base_domain }} \
+      -CAfile {{ vault_tls_dir }}/cluster-ca.crt 2>/dev/null | \
+      openssl x509 -noout -subject -issuer -ext subjectAltName
+  args:
+    executable: /bin/sh
+  register: tls_preflight
+  changed_when: false
+  failed_when: tls_preflight.rc != 0
+  when:
+    - (groups['vault_cluster'] | default([])) | length > 0
+    - inventory_hostname != (groups['vault_cluster'][0])
+    - (openssl_check is defined and openssl_check.rc == 0)
+
+# Optional: Verify raft membership from leader when admin token is available
+- name: Wait for all peers to appear in raft configuration (leader)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/sys/storage/raft/configuration"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ vault_mounts_token }}"
+    validate_certs: false
+    status_code: [200]
+    return_content: true
+  register: raft_cfg
+  retries: 30
+  delay: 2
+  until: >-
+    (raft_cfg is succeeded) and
+    ((raft_cfg.json.configuration.servers | default([])) | length) >= ((groups['vault_cluster'] | default([])) | length)
+  when:
+    - inventory_hostname == vault_leader_host
+    - (vault_mounts_token | default('')) | length > 0
+
+- name: Set Vault bootstrap address (first cluster node)
+  ansible.builtin.set_fact:
+    vault_bootstrap_addr: "https://{{ (groups['vault_cluster'][0]) }}.{{ base_domain }}:{{ vault_api_port }}"
+  when: groups['vault_cluster'] | default([]) | length > 0
+
+- name: Wait for Vault API on bootstrap node
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/health"
+    method: GET
+    validate_certs: false
+    status_code: [200, 429, 472, 473, 501]
+  register: vault_health
+  retries: 30
+  delay: 2
+  until: vault_health is succeeded
+  when: vault_bootstrap_addr is defined
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+# Discover active leader address (so all admin ops go to the true leader)
+- name: Discover active leader address
+  ansible.builtin.uri:
+    url: "{{ vault_bootstrap_addr }}/v1/sys/leader"
+    method: GET
+    validate_certs: false
+    status_code: [200]
+    return_content: true
+  register: vault_leader_info
+  retries: 30
+  delay: 2
+  until: (vault_leader_info is succeeded) and ((vault_leader_info.json.leader_address | default('')) | length > 0)
+  when: vault_bootstrap_addr is defined
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Set active leader address fact
+  ansible.builtin.set_fact:
+    vault_active_addr: "{{ vault_leader_info.json.leader_address | default(vault_bootstrap_addr) }}"
+  when: vault_leader_info is defined
+  run_once: true
+
+- name: Compute ACME cluster path (use advertise addr if provided)
+  ansible.builtin.set_fact:
+    vault_acme_cluster_path: >-
+      {{ (((vault_acme_advertise_addr | default('')) | string) | length > 0)
+          | ternary(
+              'https://' + (vault_acme_advertise_addr | string) + ':' + (vault_api_port |
+                default(8200) | string) + '/v1/pki',
+              (vault_active_addr | default('')) + '/v1/pki'
+            )
+      }}
+  run_once: true
+
+- name: Load automation token file (controller) if present
+  ansible.builtin.stat:
+    path: "{{ vault_automation_token_path }}"
+  register: automation_token_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Load automation token JSON via include_vars (auto-decrypt if vaulted)
+  ansible.builtin.include_vars:
+    file: "{{ vault_automation_token_path }}"
+    name: automation_token_content
+  delegate_to: localhost
+  run_once: true
+  when: automation_token_stat.stat.exists
+  no_log: true
+
+- name: Set automation token fact (if available)
+  ansible.builtin.set_fact:
+    vault_automation_token: "{{ automation_token_content.token | default('') }}"
+  run_once: true
+  when: automation_token_stat.stat.exists
+  no_log: true
+
+- name: Choose effective admin token
+  ansible.builtin.set_fact:
+    vault_effective_admin_token: >-
+      {{ (vault_admin_token | default(''))
+          | ternary(vault_admin_token,
+            (vault_root_token | default(''))
+              | ternary(vault_root_token,
+                (vault_automation_token | default(''))
+              )
+            )
+      }}
+  run_once: true
+  no_log: true
+
+- name: Choose token for mounts management (prefer admin/root)
+  ansible.builtin.set_fact:
+    vault_mounts_token: >-
+      {{ (vault_admin_token | default(''))
+          | ternary(vault_admin_token,
+                    (vault_root_token | default('')))
+      }}
+  run_once: true
+  no_log: true
+
+- name: Ensure PKI secrets engine is enabled
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/sys/mounts"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ vault_mounts_token }}"
+    return_content: true
+    validate_certs: false
+  register: mounts_resp
+  when: (vault_active_addr is defined) and (vault_mounts_token | default('')) | length > 0
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+  no_log: true
+
+- name: Enable PKI at /pki (if missing)
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/sys/mounts/pki"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_mounts_token }}"
+    body_format: json
+    body:
+      type: pki
+      description: "Homelab PKI"
+    status_code: [200, 204]
+    validate_certs: false
+    follow_redirects: all
+  when:
+    (vault_mounts_token | default('')) | length > 0 and
+    (vault_active_addr is defined) and (mounts_resp.json is defined and
+    (mounts_resp.json.data | default(mounts_resp.json) | dict2items |
+    selectattr('key','equalto','pki/') | list | length) == 0)
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+  no_log: true
+
+- name: Tune PKI max TTL
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/sys/mounts/pki/tune"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_mounts_token }}"
+    body_format: json
+    body:
+      max_lease_ttl: "87600h"
+    status_code: [200, 204]
+    validate_certs: false
+    follow_redirects: all
+  when: (vault_active_addr is defined) and (vault_mounts_token | default('')) | length > 0
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+  no_log: true
+
+- name: Check if root CA exists
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/pki/ca/pem"
+    method: GET
+    return_content: true
+    status_code: [200, 204, 404]
+    validate_certs: false
+  register: ca_resp
+  when: vault_active_addr is defined
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Generate internal root CA (if missing)
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/pki/root/generate/internal"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_effective_admin_token }}"
+    body_format: json
+    body:
+      common_name: "{{ base_domain }}"
+      ttl: "87600h"
+    status_code: [200, 204]
+    validate_certs: false
+    follow_redirects: all
+  when:
+    (vault_effective_admin_token | default('')) | length > 0 and
+    (ca_resp.status == 404 or
+    (ca_resp.content | default('') | length) == 0)
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Configure PKI URLs (issuing certs and CRL)
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/pki/config/urls"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_effective_admin_token }}"
+    body_format: json
+    body:
+      issuing_certificates: "{{ vault_active_addr }}/v1/pki/ca"
+      crl_distribution_points: "{{ vault_active_addr }}/v1/pki/crl"
+    status_code: [200, 204]
+    validate_certs: false
+    follow_redirects: all
+  when: (vault_effective_admin_token | default('')) | length > 0
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Configure PKI cluster path for ACME
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/pki/config/cluster"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_effective_admin_token }}"
+    body_format: json
+    body:
+      path: "{{ vault_acme_cluster_path | default(vault_active_addr + '/v1/pki') }}"
+    status_code: [200, 204]
+    validate_certs: false
+    follow_redirects: all
+  when: (vault_effective_admin_token | default('')) | length > 0
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Create PKI role for base domain
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/pki/roles/homelab"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_effective_admin_token }}"
+    body_format: json
+    body:
+      allowed_domains:
+        - "{{ base_domain }}"
+      allow_subdomains: true
+      allow_wildcard_certificates: true
+      max_ttl: "2160h"
+      require_cn: false
+    status_code: [200, 204]
+    validate_certs: false
+    follow_redirects: all
+  when: (vault_effective_admin_token | default('')) | length > 0
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+# Build ACME configuration request body from variables (must run before enabling)
+- name: Build ACME configuration body
+  ansible.builtin.set_fact:
+    vault_acme_body: >-
+      {{
+        {
+          'enabled': (vault_acme_enabled | default(true) | bool),
+          'eab_required': (vault_acme_require_eab | default(false) | bool) | ternary('true','false'),
+          'allowed_roles': (vault_acme_allowed_roles | default(['*'])),
+          'allowed_issuers': (vault_acme_allowed_issuers | default(['*'])),
+          'default_directory_policy': (vault_acme_default_directory_policy | default('sign-verbatim')),
+          'account_key_type': (vault_acme_account_key_type | default('ec256'))
+        }
+        | combine( (vault_acme_max_ttl_seconds is defined and (vault_acme_max_ttl_seconds | string | length) > 0)
+                   | ternary({'max_ttl': (vault_acme_max_ttl_seconds | int)}, {}) )
+      }}
+  run_once: true
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+
+- name: Enable ACME on PKI (apply configured settings)
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/pki/config/acme"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_effective_admin_token }}"
+    body_format: json
+    body: "{{ vault_acme_body }}"
+    status_code: [200, 204]
+    validate_certs: false
+    follow_redirects: all
+  when: (vault_effective_admin_token | default('')) | length > 0
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+# -------------------------------------------------------------
+# Create automation policy/token (least-privilege) and store encrypted
+# -------------------------------------------------------------
+- name: Ensure automation policy exists on leader
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/sys/policies/acl/ansible_automation"
+    method: PUT
+    headers:
+      # Policy management requires admin/root; do not use the limited automation token
+      X-Vault-Token: "{{ vault_mounts_token }}"
+    body_format: json
+    body:
+      policy: |
+        # Allow read mounts and manage PKI mount
+        path "sys/mounts" {
+          capabilities = ["read", "list"]
+        }
+        path "sys/mounts/pki" {
+          capabilities = ["read", "update"]
+        }
+        # PKI configuration, roles, ACME
+        path "pki/config/*" {
+          capabilities = ["create", "update", "read"]
+        }
+        path "pki/roles/*" {
+          capabilities = ["create", "update", "read", "list"]
+        }
+        path "pki/ca" {
+          capabilities = ["read"]
+        }
+        path "pki/ca/*" {
+          capabilities = ["read"]
+        }
+        path "pki/config/urls" {
+          capabilities = ["create", "update", "read"]
+        }
+        path "pki/config/acme" {
+          capabilities = ["create", "update", "read"]
+        }
+    status_code: [200, 204]
+    validate_certs: false
+    follow_redirects: all
+  when: (vault_mounts_token | default('')) | length > 0 and (vault_active_addr is defined)
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+# -------------------------------------------------------------
+# Validation: ensure ACME is enabled, cluster path is correct, and ACME directory is healthy
+# (Vault 1.21+ does not return a Replay-Nonce header on /acme/new-nonce; clients handle nonce via JWS flows.)
+# -------------------------------------------------------------
+
+- name: Validate ACME is enabled on PKI mount
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/pki/config/acme"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ vault_effective_admin_token }}"
+    return_content: true
+    status_code: [200]
+    validate_certs: false
+  register: vault_acme_get
+  when: (vault_effective_admin_token | default('')) | length > 0
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Assert ACME is enabled on PKI
+  ansible.builtin.assert:
+    that:
+      - vault_acme_get.json is defined
+      - (vault_acme_get.json.data.enabled | default(false)) | bool
+    fail_msg: "Vault PKI ACME is not enabled as expected."
+  when: vault_acme_get is defined
+  run_once: true
+
+- name: Validate PKI cluster path matches advertised address
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/pki/config/cluster"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ vault_effective_admin_token }}"
+    return_content: true
+    status_code: [200]
+    validate_certs: false
+  register: vault_cluster_get
+  when: (vault_effective_admin_token | default('')) | length > 0
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Assert PKI cluster path is correct (ACME advertise)
+  ansible.builtin.assert:
+    that:
+      - (vault_cluster_get.json.data.path | default('')) == (vault_acme_cluster_path |
+        default(vault_active_addr + '/v1/pki'))
+    fail_msg: >-
+      Vault PKI cluster path does not match expected value.
+      Got: {{ vault_cluster_get.json.data.path | default('') }},
+      Expected: {{ vault_acme_cluster_path | default(vault_active_addr + '/v1/pki') }}
+  when: vault_cluster_get is defined
+  run_once: true
+
+- name: Query Vault ACME directory (server-side validation)
+  ansible.builtin.uri:
+    url: "{{ (vault_acme_cluster_path | default(vault_active_addr + '/v1/pki')) }}/acme/directory"
+    method: GET
+    status_code: [200]
+    return_content: true
+    validate_certs: false
+  register: vault_acme_directory
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Assert ACME directory JSON contains required keys
+  ansible.builtin.assert:
+    that:
+      - vault_acme_directory.json is defined
+      - (vault_acme_directory.json.newAccount | default('')) | length > 0
+      - (vault_acme_directory.json.newOrder | default('')) | length > 0
+      - (vault_acme_directory.json.newNonce | default('')) | length > 0
+    fail_msg: >-
+      Vault ACME directory endpoint is not healthy or missing keys.
+      Response: {{ vault_acme_directory.json | default({}) }}
+  run_once: true
+
+- name: Install helper ACME test script on Vault nodes (/usr/local/bin/vault-acme-test.sh)
+  ansible.builtin.copy:
+    src: vault-acme-test.sh
+    dest: /usr/local/bin/vault-acme-test.sh
+    owner: root
+    group: root
+    mode: "0755"
+  when: inventory_hostname in (groups['vault_cluster'] | default([]))
+  become: true
+
+- name: Create automation token if missing
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/auth/token/create"
+    method: POST
+    headers:
+      # Token creation requires admin/root; do not use the limited automation token
+      X-Vault-Token: "{{ vault_mounts_token }}"
+    body_format: json
+    body:
+      policies: ["ansible_automation"]
+      ttl: "{{ vault_automation_token_ttl }}"
+      renewable: "{{ vault_automation_token_renewable | ternary(true, false) }}"
+    return_content: true
+    status_code: [200]
+    validate_certs: false
+    follow_redirects: all
+    register: create_token_resp
+  when:
+    (vault_mounts_token | default('')) | length > 0 and
+    (vault_active_addr is defined) and not
+    (automation_token_stat.stat.exists | default(false))
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Lookup automation token TTL (if present)
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/auth/token/lookup-self"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_automation_token }}"
+    return_content: true
+    status_code: [200, 403]
+    validate_certs: false
+  register: automation_lookup_resp
+  when: (vault_automation_token | default('')) | length > 0 and (vault_active_addr is defined)
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Renew automation token if TTL below threshold and renewable
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/auth/token/renew-self"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_automation_token }}"
+    body_format: json
+    body:
+      increment: "{{ vault_automation_token_ttl }}"
+    return_content: true
+    status_code: [200]
+    validate_certs: false
+    follow_redirects: all
+  register: automation_renew_resp
+  when: >-
+    (automation_lookup_resp is defined)
+    and (automation_lookup_resp.status | default(0)) == 200
+    and ((automation_lookup_resp.json.data.ttl | default(0)) | int) <=
+      (vault_automation_token_renew_threshold_seconds | int)
+    and (automation_lookup_resp.json.data.renewable | default(false))
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Recreate automation token when lookup failed or not renewable & near expiry
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/auth/token/create"
+    method: POST
+    headers:
+      # Token creation requires admin/root; do not use the limited automation token
+      X-Vault-Token: "{{ vault_mounts_token }}"
+    body_format: json
+    body:
+      policies: ["ansible_automation"]
+      ttl: "{{ vault_automation_token_ttl }}"
+      renewable: "{{ vault_automation_token_renewable | ternary(true, false) }}"
+    return_content: true
+    status_code: [200]
+    validate_certs: false
+    follow_redirects: all
+  register: recreate_token_resp
+  when: >-
+    (vault_mounts_token | default('')) | length > 0 and (vault_active_addr is defined) and (
+      (automation_lookup_resp is not defined) or
+      (automation_lookup_resp.status | default(0)) == 403 or
+      (
+        (automation_lookup_resp.status | default(0)) == 200 and
+        ((automation_lookup_resp.json.data.ttl | default(0)) | int) <=
+        (vault_automation_token_renew_threshold_seconds | int) and
+        not (automation_lookup_resp.json.data.renewable | default(false))
+      )
+    )
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+- name: Update automation token file after re-create (plaintext JSON first)
+  ansible.builtin.copy:
+    dest: "{{ vault_automation_token_path }}"
+    content: "{{ {'token': (recreate_token_resp.json.auth.client_token | default(''))} | to_nice_json }}"
+    mode: "0600"
+  when:
+    (recreate_token_resp is defined) and
+    (recreate_token_resp.json is defined) and
+    (recreate_token_resp.json.auth.client_token | default('')) | length > 0
+  delegate_to: localhost
+  run_once: true
+
+- name: Encrypt automation token file after re-create (controller)
+  ansible.builtin.command:
+    argv:
+      - ansible-vault
+      - encrypt
+      - --vault-password-file
+      - "{{ controller_vault_password_file }}"
+      - "{{ vault_automation_token_path }}"
+  args:
+    creates: "{{ vault_automation_token_path }}.encrypted.marker"
+  register: encrypt_token_recreate
+  changed_when: encrypt_token_recreate.rc == 0
+  failed_when: false
+  when:
+    - (controller_vault_password_file | default('')) | length > 0
+    - recreate_token_resp is defined
+  delegate_to: localhost
+  run_once: true
+
+- name: Persist automation token to controller (plaintext JSON first)
+  ansible.builtin.copy:
+    dest: "{{ vault_automation_token_path }}"
+    content: "{{ {'token': (create_token_resp.json.auth.client_token | default(''))} | to_nice_json }}"
+    mode: "0600"
+  when:
+    (create_token_resp is defined) and
+    (create_token_resp.json is defined) and
+    (create_token_resp.json.auth.client_token | default('')) | length > 0
+  delegate_to: localhost
+  run_once: true
+
+- name: Encrypt automation token file with Ansible Vault (controller)
+  ansible.builtin.command:
+    argv:
+      - ansible-vault
+      - encrypt
+      - --vault-password-file
+      - "{{ controller_vault_password_file }}"
+      - "{{ vault_automation_token_path }}"
+  register: encrypt_token_cmd
+  changed_when: encrypt_token_cmd.rc == 0
+  failed_when: false
+  when:
+    - (controller_vault_password_file | default('')) | length > 0
+    - create_token_resp is defined
+  delegate_to: localhost
+  run_once: true
+
+- name: Mark automation token encrypted (marker)
+  ansible.builtin.file:
+    path: "{{ vault_automation_token_path }}.encrypted.marker"
+    state: touch
+    mode: "0600"
+  when: (encrypt_token_cmd is defined) and (encrypt_token_cmd.rc | default(1)) == 0
+  delegate_to: localhost
+  run_once: true
+
+- name: Encrypt init JSON if not yet encrypted (controller)
+  ansible.builtin.shell: >-
+    set -o pipefail
+    if ! head -n1 {{ vault_init_export_path | quote }} | grep -q ANSIBLE_VAULT; then
+      ansible-vault encrypt --vault-password-file {{ controller_vault_password_file | quote }} {{ vault_init_export_path | quote }};
+    fi
+  changed_when: false
+  failed_when: false
+  when: (controller_vault_password_file | default('')) | length > 0 and (init_file_stat.stat.exists | default(false))
+  delegate_to: localhost
+  run_once: true
+
+- name: Fetch Vault Root CA (for trust distribution)
+  ansible.builtin.uri:
+    url: "{{ vault_active_addr }}/v1/pki/ca/pem"
+    method: GET
+    return_content: true
+    validate_certs: false
+  register: vault_root_ca_pem
+  when: vault_active_addr is defined
+  delegate_to: "{{ groups['vault_cluster'][0] }}"
+  run_once: true
+
+## -------------------------------------------------------------
+## Root CA trust distribution to managed hosts (Arch Linux) and controller (macOS)
+## -------------------------------------------------------------
+
+- name: Build CA trust targets (all managed hosts)
+  ansible.builtin.set_fact:
+    ca_trust_targets: "{{ groups['all'] | default([]) | unique }}"
+  run_once: true
+
+- name: Distribute Vault Root CA to Arch Linux nodes (all)
+  ansible.builtin.copy:
+    dest: "/etc/ca-certificates/trust-source/anchors/vault-root-ca.pem"
+    content: "{{ vault_root_ca_pem.content }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - vault_install_root_ca_on_hosts | default(false) | bool
+    - (vault_root_ca_pem is defined) and (vault_root_ca_pem.content | default('')) | length > 0
+  become: true
+  delegate_to: "{{ item }}"
+  loop: "{{ ca_trust_targets }}"
+  run_once: true
+
+- name: Update CA trust on Arch Linux nodes (best-effort)
+  ansible.builtin.shell:
+    cmd: update-ca-trust || update-ca-trust extract || true
+  changed_when: false
+  failed_when: false
+  when:
+    - vault_install_root_ca_on_hosts | default(false) | bool
+    - (vault_root_ca_pem is defined) and (vault_root_ca_pem.content | default('')) | length > 0
+  become: true
+  delegate_to: "{{ item }}"
+  loop: "{{ ca_trust_targets }}"
+  run_once: true
+
+# Optional: also install the Cluster CA used by Vault server certificates
+- name: Check for Cluster CA on controller
+  ansible.builtin.stat:
+    path: "{{ vault_cluster_ca_cert_controller | expanduser }}"
+  register: cluster_ca_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Read Cluster CA from controller
+  ansible.builtin.slurp:
+    src: "{{ vault_cluster_ca_cert_controller | expanduser }}"
+  register: cluster_ca_slurp
+  when: cluster_ca_stat.stat.exists
+  delegate_to: localhost
+  run_once: true
+
+- name: Distribute Vault Cluster CA to Arch Linux nodes (all)
+  ansible.builtin.copy:
+    dest: "/etc/ca-certificates/trust-source/anchors/vault-cluster-ca.pem"
+    content: "{{ cluster_ca_slurp.content | b64decode }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - vault_install_root_ca_on_hosts | default(false) | bool
+    - (cluster_ca_stat is defined and cluster_ca_stat.stat.exists)
+  become: true
+  delegate_to: "{{ item }}"
+  loop: "{{ ca_trust_targets }}"
+  run_once: true
+
+- name: Update CA trust on nodes after Cluster CA install (best-effort)
+  ansible.builtin.shell:
+    cmd: update-ca-trust || update-ca-trust extract || true
+  changed_when: false
+  failed_when: false
+  when:
+    - vault_install_root_ca_on_hosts | default(false) | bool
+    - (cluster_ca_stat is defined and cluster_ca_stat.stat.exists)
+  become: true
+  delegate_to: "{{ item }}"
+  loop: "{{ ca_trust_targets }}"
+  run_once: true
+
+# Optional: install CA on the controller (macOS)
+- name: Write CA to temp on controller (macOS)
+  ansible.builtin.copy:
+    dest: "/tmp/vault-root-ca.pem"
+    content: "{{ vault_root_ca_pem.content }}"
+    mode: "0644"
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (vault_root_ca_pem is defined) and (vault_root_ca_pem.content | default('')) | length > 0
+  delegate_to: localhost
+  run_once: true
+
+- name: Determine login keychain path (macOS)
+  ansible.builtin.command: security login-keychain
+  register: controller_login_kc
+  changed_when: false
+  failed_when: false
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+
+- name: Set controller keychain facts (macOS)
+  ansible.builtin.set_fact:
+    controller_login_keychain: '{{ (controller_login_kc.stdout | default("") | trim |
+     regex_replace("^\"(.*)\"$","\\1")) | default(lookup("env","HOME") ~ "/Library/Keychains/login.keychain-db", true)
+     }}'
+    controller_target_keychain: '{{
+      "/Library/Keychains/System.keychain" if (vault_controller_install_keychain |
+       default("login")) == "system"
+      else ((controller_login_kc.stdout | default("") | trim | regex_replace("^\"(.*)\"$","\\1")) |
+       default(lookup("env","HOME") ~ "/Library/Keychains/login.keychain-db", true))
+    }}'
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+
+- name: Verify Root CA in login keychain (controller)
+  ansible.builtin.command: >-
+    security find-certificate -a -c "{{ base_domain }}" {{ controller_login_keychain |
+    default(lookup('env','HOME') ~ '/Library/Keychains/login.keychain-db') }}
+  changed_when: false
+  failed_when: false
+  register: verify_root_ca_login
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+
+- name: Verify Root CA in system keychain (controller)
+  ansible.builtin.command: >-
+    security find-certificate -a -c "{{ base_domain }}" /Library/Keychains/System.keychain
+  changed_when: false
+  failed_when: false
+  register: verify_root_ca_system
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+
+- name: Add CA to macOS keychain (controller)
+  ansible.builtin.command: >-
+    security add-trusted-cert -d -r trustRoot -p ssl -k
+    {{ controller_target_keychain | default(lookup('env','HOME') ~ '/Library/Keychains/login.keychain-db') }}
+    /tmp/vault-root-ca.pem
+  changed_when: false
+  failed_when: false
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (
+      (vault_controller_install_keychain | default('login')) == 'system'
+      and (verify_root_ca_system.stdout | default('')) | length == 0
+      )
+      or (
+      (vault_controller_install_keychain | default('login')) != 'system'
+      and (verify_root_ca_login.stdout | default('')) | length == 0
+      )
+  delegate_to: localhost
+  run_once: true
+  become: "{{ ((vault_controller_install_keychain | default('login')) == 'system') | bool }}"
+  vars:
+    ansible_become_password: "{{ vault_controller_become_password | default('') }}"
+
+- name: Compute Root CA present flag (either login or system)
+  ansible.builtin.set_fact:
+    root_ca_present: >-
+      {{
+        ((verify_root_ca_login.stdout | default('')) |
+        length > 0) or ((verify_root_ca_system.stdout |
+        default('')) | length > 0)
+      }}
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+
+- name: Write Cluster CA to temp on controller (macOS)
+  ansible.builtin.copy:
+    dest: "/tmp/vault-cluster-ca.pem"
+    content: "{{ cluster_ca_slurp.content | b64decode }}"
+    mode: "0644"
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (cluster_ca_stat is defined and cluster_ca_stat.stat.exists)
+  delegate_to: localhost
+  run_once: true
+
+- name: Verify Cluster CA in login keychain (controller)
+  ansible.builtin.command: >-
+    security find-certificate -a -c "Vault Cluster CA"
+    {{
+      controller_login_keychain |
+      default(lookup('env','HOME') ~ '/Library/Keychains/login.keychain-db')
+    }}
+  changed_when: false
+  failed_when: false
+  register: verify_cluster_ca_login
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (cluster_ca_stat is defined and cluster_ca_stat.stat.exists)
+  delegate_to: localhost
+  run_once: true
+
+- name: Verify Cluster CA in system keychain (controller)
+  ansible.builtin.command: >-
+    security find-certificate -a -c "Vault Cluster CA" /Library/Keychains/System.keychain
+  changed_when: false
+  failed_when: false
+  register: verify_cluster_ca_system
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (cluster_ca_stat is defined and cluster_ca_stat.stat.exists)
+  delegate_to: localhost
+  run_once: true
+
+- name: Add Cluster CA to macOS keychain (controller)
+  ansible.builtin.command: >-
+    security add-trusted-cert -d -r trustRoot -p ssl -k
+    {{ controller_target_keychain |
+    default(lookup('env','HOME') ~ '/Library/Keychains/login.keychain-db') }}
+    /tmp/vault-cluster-ca.pem
+  changed_when: false
+  failed_when: false
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (cluster_ca_stat is defined and cluster_ca_stat.stat.exists)
+    - (
+      (vault_controller_install_keychain | default('login')) == 'system' and (verify_cluster_ca_system.stdout | default('')) | length == 0
+      )
+      or (
+      (vault_controller_install_keychain | default('login')) != 'system' and (verify_cluster_ca_login.stdout | default('')) | length == 0
+      )
+  delegate_to: localhost
+  run_once: true
+  become: "{{ ((vault_controller_install_keychain | default('login')) == 'system') | bool }}"
+  vars:
+    ansible_become_password: "{{ vault_controller_become_password | default('') }}"
+
+- name: Compute Cluster CA present flag (either login or system)
+  ansible.builtin.set_fact:
+    cluster_ca_present: >-
+      {{
+        ((verify_cluster_ca_login.stdout | default('')) | length > 0)
+        or
+        ((verify_cluster_ca_system.stdout | default('')) | length > 0)
+      }}
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (cluster_ca_stat is defined and cluster_ca_stat.stat.exists)
+  delegate_to: localhost
+  run_once: true
+
+- name: Fallback install Root CA to System keychain if missing (controller)
+  ansible.builtin.command: >-
+    security add-trusted-cert -d -r trustRoot -p ssl -k /Library/Keychains/System.keychain /tmp/vault-root-ca.pem
+  become: true
+  changed_when: false
+  failed_when: false
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (verify_root_ca_system.stdout | default('')) | length == 0
+    - (verify_root_ca_login.stdout | default('')) | length == 0
+    - (vault_controller_install_keychain | default('login')) == 'login'
+  delegate_to: localhost
+  run_once: true
+  vars:
+    ansible_become_password: "{{ vault_controller_become_password | default('') }}"
+
+- name: Fallback install Cluster CA to System keychain if missing (controller)
+  ansible.builtin.command: >-
+    security add-trusted-cert -d -r trustRoot -p ssl -k /Library/Keychains/System.keychain /tmp/vault-cluster-ca.pem
+  become: true
+  changed_when: false
+  failed_when: false
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (cluster_ca_stat is defined and cluster_ca_stat.stat.exists)
+    - (verify_cluster_ca_system.stdout | default('')) | length == 0
+    - (verify_cluster_ca_login.stdout | default('')) | length == 0
+    - (vault_controller_install_keychain | default('login')) == 'login'
+  delegate_to: localhost
+  run_once: true
+  vars:
+    ansible_become_password: "{{ vault_controller_become_password | default('') }}"
+
+- name: Skipped fallback to System keychain (missing controller sudo password)
+  ansible.builtin.debug:
+    msg: >-
+      Skipping System keychain install on controller because vault_controller_become_password is unset.
+      Either set vault_controller_install_keychain: system in inventory (and provide sudo),
+      or keep login keychain (default). Current curl 000 may persist until a System keychain install succeeds.
+  when:
+    - vault_trust_ca_on_controller | default(false) | bool
+    - (vault_controller_install_keychain | default('login')) == 'login'
+    - ((verify_root_ca_system.stdout | default('')) | length == 0 and (verify_root_ca_login.stdout | default('')) | length == 0)
+      or ((verify_cluster_ca_system.stdout | default('')) | length == 0 and (verify_cluster_ca_login.stdout | default('')) | length == 0)
+    - (vault_controller_become_password | default('')) | length == 0
+  delegate_to: localhost
+  run_once: true
+
+# -------------------------------------------------------------
+# Controller-side CA bundle for Homebrew curl and other tools
+# -------------------------------------------------------------
+
+- name: Ensure CA bundle directory exists on controller
+  ansible.builtin.file:
+    path: "{{ (vault_controller_ca_bundle_path | expanduser) | dirname }}"
+    state: directory
+    mode: "0700"
+  when: vault_controller_create_ca_bundle | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+
+- name: Build controller CA bundle content (Cluster CA + PKI Root CA)
+  ansible.builtin.set_fact:
+    controller_ca_bundle_content: |
+      {% if cluster_ca_stat is defined and cluster_ca_stat.stat.exists %}
+      {{ (cluster_ca_slurp.content | b64decode) | trim }}
+      {% endif %}
+      {% if vault_root_ca_pem is defined and (vault_root_ca_pem.content | default('')) | length > 0 %}
+      {{ (vault_root_ca_pem.content) | trim }}
+      {% endif %}
+  when: vault_controller_create_ca_bundle | default(false) | bool
+  delegate_to: localhost
+  run_once: true
+
+- name: Write controller CA bundle (PEM)
+  ansible.builtin.copy:
+    dest: "{{ vault_controller_ca_bundle_path | expanduser }}"
+    content: "{{ controller_ca_bundle_content | default('') | trim }}\n"
+    mode: "0600"
+  when:
+    - vault_controller_create_ca_bundle | default(false) | bool
+    - (controller_ca_bundle_content | default('')) | length > 0
+  delegate_to: localhost
+  run_once: true

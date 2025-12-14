@@ -1,0 +1,49 @@
+---
+extends: default
+
+rules:
+  line-length:
+    max: 140
+    level: warning
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off', 'yes', 'no']
+    level: warning
+  indentation:
+    indent-sequences: consistent
+  document-start:
+    present: true
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+
+ignore: |
+  .venv/
+  collections/
+  .github/
+  roles/**/files/
+  roles/**/templates/
+  group_vars/*.vault.yml
+  inventories/group_vars/all/controller.yml
+overrides:
+  - files: "roles/vault/tasks/main.yml"
+    rules:
+      line-length:
+        max: 220
+        level: warning
+      braces: disable
+      brackets: disable
+      colons: disable
+      trailing-spaces: disable
+  - files: "roles/reverse_proxy/tasks/main.yml"
+    rules:
+      line-length:
+        max: 180
+        level: warning
+  - files: "inventories/inventory.yml"
+    rules:
+      braces: disable

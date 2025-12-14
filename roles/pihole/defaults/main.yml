@@ -1,9 +1,6 @@
 ---
-# defaults for pihole role
-role_execution_flag: "pihole_was_executed"
-
-# Docker image and container name
-pihole_image: "pihole/pihole:latest"
+# Docker image and container name (pinned by default; override in group_vars if needed)
+pihole_image: "pihole/pihole:2025.11.1"
 pihole_container_name: "pihole"
 
 # Environment defaults
@@ -11,7 +8,50 @@ pihole_web_password: "changeme"
 # Upstream DNS servers for Pi-hole inside the container (semicolon-separated per Pi-hole docs)
 pihole_dns: "1.1.1.1;8.8.8.8"
 # Secondary DNS for Docker daemon to use when starting container (host resolver fallback)
-static_dns: "1.1.1.1"
+pihole_static_dns: "1.1.1.1"
 
 # Timezone (will typically be provided globally via inventory)
-timezone: "Europe/Brussels"
+pihole_timezone: "Europe/Brussels"
+
+# Optional: custom DNS A records to publish via Pi-hole (on primary only)
+# Example:
+# pihole_custom_dns_records:
+#   - host: "primary.pihole.{{ base_domain }}"
+#     ip: "192.168.0.252"  # reverse proxy VIP
+#   - host: "replica1.pihole.{{ base_domain }}"
+#     ip: "192.168.0.252"
+pihole_custom_dns_records: []
+
+# Host path that is bind-mounted to /etc/pihole inside the container
+# Default matches the volumes mapping in the role (host: /home/<user>/pihole/pihole -> /etc/pihole)
+pihole_host_etc_dir: "/home/{{ target_user }}/pihole/pihole"
+
+# Host path that is bind-mounted to /etc/dnsmasq.d inside the container
+pihole_host_dnsmasq_dir: "/home/{{ target_user }}/pihole/dnsmasq.d"
+
+# DNS record management mode:
+# - 'cli'     : use `pihole -a addcustomdns` / `removecustomdns` (appears in UI)
+# - 'dnsmasq' : write address= lines into /etc/dnsmasq.d/05-ansible-local-dns.conf
+pihole_dns_mode: "dnsmasq"
+
+################################################################################
+# Wildcard DNS to Reverse Proxy VIP (dnsmasq)
+# - Disabled by default.
+# - When enabled, creates dnsmasq entries that map the configured domains and
+#   their subdomains to the reverse proxy VIP (Caddy/keepalived), so that any
+#   host under those domains resolves to the VIP.
+################################################################################
+
+# Turn on to manage wildcard records via dnsmasq
+pihole_dns_wildcard_enabled: false
+
+# Domains to wildcard-map to the reverse proxy VIP. Each entry produces:
+#   address=/DOMAIN/{{ pihole_reverse_proxy_vip }}
+# By default:
+#  - the base homelab domain (e.g., gillouche.homelab)
+#  - the pihole subtree (pihole.gillouche.homelab) for multi-label hosts
+pihole_dns_wildcard_domains:
+  - "{{ base_domain | default('gillouche.homelab') }}"
+
+# Reverse proxy VIP used for wildcard DNS (defaults to global reverse_proxy_virtual_ip)
+pihole_reverse_proxy_vip: "{{ reverse_proxy_virtual_ip | default('192.168.0.252') }}"

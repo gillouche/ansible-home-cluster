@@ -7,6 +7,4 @@ galaxy_info:
   platforms:
     - name: GenericLinux
       versions: ['all']
-dependencies:
-  - role: facts
-    when: facts_was_executed is not defined
+dependencies: []

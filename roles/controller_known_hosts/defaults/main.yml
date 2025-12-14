@@ -1,0 +1,3 @@
+---
+controller_known_hosts_path: "{{ lookup('env', 'HOME') }}/.ssh/known_hosts"
+controller_known_hosts_timeout: 5

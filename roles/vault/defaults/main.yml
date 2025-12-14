@@ -1,0 +1,146 @@
+---
+vault_container_network_mode: "bridge"
+vault_published_ports:
+  - "8200:8200/tcp"
+  - "8201:8201/tcp"
+
+# Container-internal paths (for config/TLS/data mounts)
+vault_cfg_path_in_container: "/vault/config/vault.hcl"
+vault_tls_dir_in_container: "/vault/tls"
+vault_data_dir_in_container: "/vault/data"
+vault_logs_dir_in_container: "/vault/logs"
+
+# Host logs directory (bind-mounted) to persist container app logs if Vault writes to /vault/logs
+vault_logs_dir: "/home/{{ vault_system_user }}/vault/logs"
+
+# Host bin directory to store startup wrapper (bind-mounted)
+vault_bin_dir: "/home/{{ vault_system_user }}/vault/bin"
+
+# Docker logging options (persist stdout/stderr via json-file)
+# For deep debugging, you can increase size and keep a single file
+vault_docker_log_driver: "json-file"
+vault_docker_log_max_size: "1g"
+vault_docker_log_max_file: "1"
+
+# Container user (match image user/gid semantics)
+vault_container_user: "{{ vault_system_uid }}:{{ vault_system_gid }}"
+
+# Write full startup logs to files inside the container via a wrapper (tee)
+# Enabled by default to capture complete logs from process start.
+vault_enable_log_wrapper: true
+
+# Optional admin token (otherwise the role will prefer the stored automation token,
+# or fall back to root token from vault-init.json when needed for initial setup)
+vault_admin_token: ""
+
+# Recreate container on image/config change (docker task toggle)
+vault_docker_recreate: false
+
+# Extra entries to inject into the container's /etc/hosts (docker etc_hosts)
+vault_etc_hosts: {}
+
+# You can override these per environment if needed.
+# When unset, the role will use Vault defaults where appropriate.
+vault_acme_enabled: true
+vault_acme_account_key_type: "ec256"   # ec256 | ec384 | rsa2048 | rsa4096
+vault_acme_allowed_roles:
+  - "*"
+vault_acme_allowed_issuers:
+  - "*"
+vault_acme_default_directory_policy: "sign-verbatim"
+# Max TTL for ACME-issued certs (in seconds). Leave empty to keep Vault default (90d).
+vault_acme_max_ttl_seconds: ""
+
+# Validation and recovery controls for ACME nonce behavior
+# If true, when ACME new-nonce validation fails, the role will temporarily
+# disable then re-enable ACME (with configured settings) and retry validation.
+vault_acme_reconfigure: false
+
+# How many times to try fetching a Replay-Nonce header during validation
+vault_acme_nonce_validate_attempts: 3
+
+# Seconds to wait between attempts when validating the Replay-Nonce header
+vault_acme_nonce_validate_delay: 2
+
+# When true, fail the play if Replay-Nonce header cannot be validated.
+# When false (default), emit a warning and continue after retries.
+vault_acme_nonce_strict: false
+
+
+# ---------------------------------------------
+# Automatic Raft bootstrap values (always active via state detection)
+vault_unseal_shares: 3
+vault_unseal_threshold: 2
+# Where to store the init payload on the controller (owner-only perms are used)
+vault_init_export_path: "~/.local/share/ansible-home-cluster/vault-init.json"
+
+# ---------------------------------------------
+# Cluster CA for secure inter-node TLS (Raft join)
+# ---------------------------------------------
+# Controller-side paths for the cluster CA keypair
+vault_enable_cluster_ca: true
+vault_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
+vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/cluster-ca.pem"
+vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/cluster-ca.key"
+# Certificate validity (days)
+vault_cluster_ca_days: 3650
+vault_server_cert_days: 1825
+
+# Automation token storage on controller (encrypted via Ansible Vault if configured)
+vault_automation_token_path: "~/.local/share/ansible-home-cluster/vault-ansible-token.json"
+
+# Automation token parameters
+vault_automation_token_ttl: "720h"           # 30 days
+vault_automation_token_renewable: true        # allow renewal
+# Renew when remaining TTL is below this threshold (in seconds). Default: 7 days
+vault_automation_token_renew_threshold_seconds: 604800
+
+
+# -------------------------------------------------------------
+# ACME advertise address for Vault PKI cluster (optional)
+# -------------------------------------------------------------
+# By default, the role configures Vault PKI's cluster path to the active leader
+# address discovered from /v1/sys/leader. On clusters where reverse proxy (Caddy)
+# runs on the same nodes as Pi-hole and internal DNS is required, redirects to the
+# leader hostname may fail if the system resolver doesn't know the internal zone.
+#
+# Set this to a stable address (e.g., Vault VIP/LAN IP) to advertise an IP-based
+# cluster path for ACME, avoiding internal DNS dependency during ACME flows.
+# Example: "192.168.0.13"
+vault_acme_advertise_addr: ""
+
+
+# Listener bind address inside the container. Default to 0.0.0.0 so peers can reach it.
+# You may override to a specific LAN IP if desired.
+vault_listener_address: "0.0.0.0"
+
+# -------------------------------------------------------------
+# Root CA trust distribution
+# -------------------------------------------------------------
+# Whether to install/update the Vault Root CA on all managed hosts (inventory 'all').
+# Defaults to false; enable in inventory to apply to your fleet.
+vault_install_root_ca_on_hosts: false
+
+# Whether to install the Vault Root CA on the controller (localhost). macOS is supported.
+# Defaults to false; enable in inventory to apply on your Mac.
+vault_trust_ca_on_controller: false
+
+# macOS keychain to target when installing the CA on the controller.
+# login (default) doesn’t require sudo; system requires sudo.
+vault_controller_install_keychain: "login"
+
+# Optional: sudo password to allow installing CA into the System keychain on macOS
+# Leave empty by default; set via inventory or Ansible Vault if you want the role
+# to automatically elevate when falling back to System keychain on the controller.
+vault_controller_become_password: ""
+
+# Controller-side CA bundle for tools that don't use macOS Keychain (e.g., Homebrew curl)
+# When enabled, a PEM bundle containing both the Vault Cluster CA and PKI Root CA will be
+# written to this path on the controller (localhost).
+vault_controller_create_ca_bundle: true
+vault_controller_ca_bundle_path: "~/.local/share/ansible-home-cluster/ca-bundle.pem"
+
+# Firefox (macOS controller) — enable trusting system keychain in Firefox via policy
+# When true, Ansible will install a policies.json enabling ImportEnterpriseRoots
+vault_firefox_enable_enterprise_roots: false
+vault_firefox_policies_json_path: "~/Library/Application Support/Firefox/distribution/policies.json"

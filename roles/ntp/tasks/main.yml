@@ -1,0 +1,18 @@
+---
+# tasks for ntp role (Arch Linux NTP daemon)
+
+- name: Ensure ntp package is installed (Arch)
+  community.general.pacman:
+    name: ntp
+    state: present
+  become: true
+  when: (ansible_facts['distribution'] | lower) == 'archlinux'
+
+- name: Enable and start ntpd.service (Arch)
+  ansible.builtin.systemd:
+    name: ntpd.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: (ansible_facts['distribution'] | lower) == 'archlinux'

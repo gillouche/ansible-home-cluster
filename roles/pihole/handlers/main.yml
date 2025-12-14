@@ -6,3 +6,8 @@
     name: keepalived
     state: restarted
   become: true
+
+- name: Restart pihole dns
+  ansible.builtin.command: docker exec {{ pihole_container_name }} pihole reloaddns
+  become: false
+  changed_when: false

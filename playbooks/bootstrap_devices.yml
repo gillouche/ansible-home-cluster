@@ -1,8 +1,9 @@
+---
 - name: "One-time SSH bootstrap: prepare each target (ssh dir, keypair, controller key)"
   hosts: all
   gather_facts: false
-  strategy: free
   serial: 4
+  become: false
 
   vars:
     # Overridable via -e from run.sh bootstrap subcommand
@@ -11,15 +12,16 @@
     # Keep bootstrap quick and avoid long hangs on offline hosts
     ansible_ssh_timeout: 10
     # Additional SSH args for faster failure and fewer retries on first contact
-    ansible_ssh_common_args: "-o ConnectTimeout=10 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
+    ansible_ssh_common_args: "-o ConnectTimeout=10 -o ConnectionAttempts=1
+     -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
 
   tasks:
     - name: Update hostname
-      hostname:
+      ansible.builtin.hostname:
         name: "{{ inventory_hostname }}"
       become: true
 
-    - name: Ensure ~/.ssh exists for {{ bootstrap_user }}
+    - name: Ensure ~/.ssh exists for user
       ansible.builtin.file:
         path: "/home/{{ bootstrap_user }}/.ssh"
         state: directory
@@ -28,7 +30,7 @@
         mode: "0700"
       become: false
 
-    - name: Ensure SSH keypair exists for {{ bootstrap_user }} (ed25519)
+    - name: Ensure SSH keypair exists for user (ed25519)
       community.crypto.openssh_keypair:
         path: "/home/{{ bootstrap_user }}/.ssh/id_ed25519"
         type: ed25519
@@ -39,44 +41,47 @@
         comment: "{{ bootstrap_user }}@{{ inventory_hostname }}"
       become: false
 
-    - name: Install controller public key for {{ bootstrap_user }}
-      ansible.builtin.authorized_key:
+    - name: Install controller public key for user
+      ansible.posix.authorized_key:
         user: "{{ bootstrap_user }}"
         state: present
         key: "{{ lookup('file', bootstrap_pubkey) }}"
         manage_dir: false
       become: false
 
-# Play 3: Inter-device trust (each device trusts all peers' keys, config and known_hosts)
+
 - name: "One-time SSH bootstrap: inter-device trust setup"
   hosts: all
   gather_facts: false
-  strategy: free
   serial: 4
+  become: false
 
   vars:
     bootstrap_user: "{{ ansible_user | default('alarm') }}"
     ansible_ssh_timeout: 10
-    ansible_ssh_common_args: "-o ConnectTimeout=10 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
+    ansible_ssh_common_args: "-o ConnectTimeout=10 -o ConnectionAttempts=1
+     -o ServerAliveInterval=5 -o ServerAliveCountMax=2"
 
   tasks:
     - name: Collect peers' public keys (from controller, delegated to each peer)
       ansible.builtin.slurp:
         src: "/home/{{ bootstrap_user }}/.ssh/id_ed25519.pub"
       delegate_to: "{{ item }}"
-      become: false
       register: peer_pubkeys
       loop: "{{ groups['all'] | difference([inventory_hostname]) | default([]) }}"
       ignore_errors: true
+      become: false
 
     - name: Install peer keys into this device's authorized_keys
-      ansible.builtin.authorized_key:
+      ansible.posix.authorized_key:
         user: "{{ bootstrap_user }}"
         state: present
-        key: "{{ (peer_pubkeys.results | selectattr('item','equalto', item) | map(attribute='content') | map('b64decode') | list | first) | default('') }}"
+        key: "{{ (peer_pubkeys.results | selectattr('item', 'equalto', item) |
+         map(attribute='content') | map('b64decode') | list | first) | default('') }}"
         manage_dir: false
       loop: "{{ groups['all'] | difference([inventory_hostname]) | default([]) }}"
-      when: (peer_pubkeys.results | selectattr('item','equalto', item) | map(attribute='content') | list | first) is defined
+      when: (peer_pubkeys.results | selectattr('item', 'equalto', item) |
+        map(attribute='content') | list | first) is defined
       become: false
 
     - name: Ensure known_hosts contains peers' host keys on this device (scan peers)
@@ -137,3 +142,33 @@
             IdentitiesOnly yes
           {% endfor %}
       become: false
+
+- name: "One-time network bootstrap: point device DNS to Pi-hole VIP"
+  hosts: all
+  gather_facts: false
+  become: true
+
+  vars:
+    # Use the cluster VIP when available, otherwise fall back to the desired default
+    desired_dns_server: "{{ pihole_virtual_ip | default('192.168.0.251') }}"
+
+  tasks:
+    - name: Check if /etc/resolv.conf is a symlink
+      ansible.builtin.stat:
+        path: /etc/resolv.conf
+      register: device_resolvconf_stat
+
+    - name: Remove /etc/resolv.conf symlink if present
+      ansible.builtin.file:
+        path: /etc/resolv.conf
+        state: absent
+      when: device_resolvconf_stat.stat.islnk | default(false)
+
+    - name: Ensure /etc/resolv.conf points to Pi-hole VIP
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: |
+          nameserver {{ desired_dns_server }}
+        owner: root
+        group: root
+        mode: "0644"

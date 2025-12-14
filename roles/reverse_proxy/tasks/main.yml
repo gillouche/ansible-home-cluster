@@ -1,0 +1,202 @@
+---
+# tasks for reverse_proxy (Caddy + keepalived VIP)
+
+# ----------------------------------------
+# Keepalived (VIP) for reverse proxy
+# ----------------------------------------
+
+- name: Ensure keepalived is installed (Arch)
+  community.general.pacman:
+    name: keepalived
+    state: present
+  become: true
+  when: (ansible_facts['distribution'] | lower) == 'archlinux'
+
+- name: Determine reverse proxy role for this host
+  ansible.builtin.set_fact:
+    reverse_proxy_is_primary: "{{ inventory_hostname in (groups['reverse_proxy_primary'] | default([])) }}"
+  become: false
+
+- name: Ensure keepalived conf.d directory exists (reverse proxy)
+  ansible.builtin.file:
+    path: /etc/keepalived/conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Check if keepalived main config exists (reverse proxy)
+  ansible.builtin.stat:
+    path: /etc/keepalived/keepalived.conf
+  register: reverse_proxy_keepalived_main
+  become: true
+
+- name: Create minimal keepalived main config with include if missing (reverse proxy)
+  ansible.builtin.copy:
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      global_defs {
+        enable_script_security
+      }
+      include /etc/keepalived/conf.d/*.conf
+  when: not reverse_proxy_keepalived_main.stat.exists
+  become: true
+
+- name: Ensure keepalived main config includes conf.d (reverse proxy)
+  ansible.builtin.lineinfile:
+    path: /etc/keepalived/keepalived.conf
+    regexp: '^\s*include\s+/etc/keepalived/conf\.d/\*\.conf\s*$'
+    line: 'include /etc/keepalived/conf.d/*.conf'
+    state: present
+    insertbefore: EOF
+  become: true
+
+- name: Warn if VRRP auth password is not set (keepalived will be skipped)
+  ansible.builtin.debug:
+    msg: >-
+      reverse_proxy_vrrp_auth_pass is undefined or too short (<12). Skipping keepalived VRRP configuration on this host.
+      Define it in group_vars/reverse_proxy_cluster.vault.yml and encrypt with ansible-vault for HA VIP.
+  when: (reverse_proxy_vrrp_auth_pass is not defined) or ((reverse_proxy_vrrp_auth_pass | length) < 12)
+  become: false
+
+- name: Render reverse proxy VRRP instance into conf.d
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/conf.d/reverse-proxy.conf
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    vip_address: "{{ reverse_proxy_virtual_ip }}"
+    vrrp_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
+    vrrp_state: "{{ 'MASTER' if reverse_proxy_is_primary | bool else 'BACKUP' }}"
+    vrrp_priority: "{{ 150 if reverse_proxy_is_primary | bool else 100 }}"
+    vrrp_auth_pass: "{{ reverse_proxy_vrrp_auth_pass }}"
+  notify: Restart keepalived
+  become: true
+  when: (reverse_proxy_vrrp_auth_pass is defined) and ((reverse_proxy_vrrp_auth_pass | length) >= 12)
+
+- name: Enable and start keepalived
+  ansible.builtin.systemd:
+    name: keepalived
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true
+  when: (reverse_proxy_vrrp_auth_pass is defined) and ((reverse_proxy_vrrp_auth_pass | length) >= 12)
+
+# ----------------------------------------
+# Optional resolver management on host
+# ----------------------------------------
+
+- name: Check if /etc/resolv.conf is a symlink (reverse proxy)
+  ansible.builtin.stat:
+    path: /etc/resolv.conf
+  register: reverse_proxy_resolvconf_stat
+  become: true
+  when: reverse_proxy_manage_resolv_conf | default(false) | bool
+
+- name: Remove /etc/resolv.conf symlink if managed by systemd-resolved (reverse proxy)
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: (reverse_proxy_manage_resolv_conf | default(false) | bool) and (reverse_proxy_resolvconf_stat.stat.islnk | default(false))
+  become: true
+
+- name: Ensure /etc/resolv.conf uses Pi-hole VIP with public fallback (reverse proxy)
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ reverse_proxy_resolver_ip }}
+      nameserver {{ reverse_proxy_public_resolver }}
+    owner: root
+    group: root
+    mode: '0644'
+  when: reverse_proxy_manage_resolv_conf | default(false) | bool
+  become: true
+
+# ----------------------------------------
+# Caddy reverse proxy using Docker
+# ----------------------------------------
+
+- name: Ensure reverse-proxy directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0755'
+  loop:
+    - "/home/{{ target_user }}/reverse-proxy"
+    - "/home/{{ target_user }}/reverse-proxy/data"
+  become: true
+
+- name: Build Caddyfile from reverse_proxy_sites
+  ansible.builtin.copy:
+    dest: "/home/{{ target_user }}/reverse-proxy/Caddyfile"
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: '0644'
+    content: |
+      {% if reverse_proxy_tls_mode | default('vault_acme') == 'vault_acme' %}
+      {
+        email {{ reverse_proxy_acme_email | default('noreply@local') }}
+        acme_ca {{ reverse_proxy_acme_ca_url }}
+        {% if reverse_proxy_mount_host_ca_bundle | default(true) %}
+        env SSL_CERT_FILE={{ reverse_proxy_ca_container_file | default('/etc/ssl/certs/host-ca-bundle.pem') }}
+        {% endif %}
+      }
+      {% endif %}
+
+      {% for site in reverse_proxy_sites | default([]) %}
+      {{ site.host }} {
+        reverse_proxy {{ site.upstream }}
+      }
+      {% endfor %}
+  become: true
+
+- name: Ensure host CA bundle exists if it will be mounted
+  ansible.builtin.stat:
+    path: "{{ reverse_proxy_ca_host_file | default('/etc/ssl/cert.pem') }}"
+  register: reverse_proxy_host_ca_stat
+  become: true
+  when: reverse_proxy_mount_host_ca_bundle | default(true)
+
+- name: Build Caddy container volumes list
+  ansible.builtin.set_fact:
+    reverse_proxy_caddy_volumes_list: >-
+      {{
+        [
+          "/home/" ~ target_user ~ "/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro",
+          "/home/" ~ target_user ~ "/reverse-proxy/data:/data"
+        ]
+        +
+        (
+          [ (reverse_proxy_ca_host_file |
+            default('/etc/ssl/cert.pem')) ~ ":" ~ (reverse_proxy_ca_container_file |
+            default('/etc/ssl/certs/host-ca-bundle.pem')) ~ ":ro" ]
+          if (reverse_proxy_mount_host_ca_bundle | default(true)) and (reverse_proxy_host_ca_stat.stat.exists |
+            default(false))
+          else []
+        )
+      }}
+
+- name: Run Caddy reverse proxy container
+  community.general.docker_container:
+    name: "{{ reverse_proxy_container_name }}"
+    image: "{{ reverse_proxy_image }}"
+    state: started
+    restart_policy: unless-stopped
+    published_ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+    volumes: "{{ reverse_proxy_caddy_volumes_list }}"
+    log_driver: json-file
+    log_options:
+      max-size: "10m"
+      max-file: "5"
+  become: false

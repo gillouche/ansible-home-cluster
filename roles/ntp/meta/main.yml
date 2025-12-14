@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: ansible-home-cluster
+  description: Install and enable Arch Linux NTP daemon (ntpd)
+  license: MIT
+  min_ansible_version: '2.13'
+  platforms:
+    - name: ArchLinux
+      versions: ['all']
+dependencies: []

@@ -1,0 +1,50 @@
+---
+- name: Ensure controller ~/.ssh directory exists
+  ansible.builtin.file:
+    path: "{{ lookup('env', 'HOME') }}/.ssh"
+    state: directory
+    mode: "0700"
+
+- name: Initialize known_hosts file with safe permissions (if missing)
+  ansible.builtin.file:
+    path: "{{ controller_known_hosts_path }}"
+    state: touch
+    mode: "0600"
+
+- name: Build list of host targets (ip + hostname when defined)
+  ansible.builtin.set_fact:
+    controller_known_hosts_targets: >-
+      {{
+        (
+          groups['all'] | map('extract', hostvars) |
+          list |
+          map('extract', 'ansible_host') |
+          select('defined') |
+          list
+        )
+        +
+        (
+          groups['all'] | list
+        )
+      }}
+
+- name: De-duplicate targets and normalize
+  ansible.builtin.set_fact:
+    controller_known_hosts_targets: "{{ controller_known_hosts_targets | map('string') | list | unique }}"
+
+- name: SSH-keyscan targets (best-effort)
+  ansible.builtin.command: >-
+    ssh-keyscan -T {{ controller_known_hosts_timeout }} -t ed25519 {{ controller_known_hosts_targets | join(' ') }}
+  register: controller_known_hosts_keyscan_all
+  changed_when: false
+  failed_when: false
+
+- name: Add keys to known_hosts
+  ansible.builtin.known_hosts:
+    path: "{{ controller_known_hosts_path }}"
+    name: "{{ (item.split(' ') | first) | default('') }}"
+    key: "{{ item }}"
+    state: present
+    hash_host: true
+  loop: "{{ (controller_known_hosts_keyscan_all.stdout | default('')) | splitlines() }}"
+  when: (controller_known_hosts_keyscan_all.stdout | default('')) | length > 0

@@ -1,0 +1,8 @@
+---
+# handlers for ntp role
+
+- name: Restart systemd-timesyncd
+  ansible.builtin.systemd:
+    name: systemd-timesyncd
+    state: restarted
+  become: true

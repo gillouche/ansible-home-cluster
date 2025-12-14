@@ -20,7 +20,17 @@
                 ];
 
                 shellHook = ''
-                    echo "Python version: $(python3 --version)"
+                    if [ ! -d .venv ]; then
+                            uv init
+                            uv venv
+                        fi
+                        source .venv/bin/activate
+
+                        echo "Python3 version: "
+                        python3 --version
+
+                        echo "uv version: "
+                        uv --version
                 '';
             };
     };

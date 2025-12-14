@@ -1,4 +1,5 @@
 ---
+
 - name: Setup all devices
   hosts: all
   gather_facts: true
@@ -6,17 +7,83 @@
 
   roles:
     - role: facts
-#    - role: os_setup
-#    - role: utils
-#    - role: aur_helper
-#    - role: docker
+      tags: ['facts']
+    - role: ntp
+      tags: ['ntp']
+    - role: os_setup
+      tags: ['os']
+    - role: utils
+      tags: ['utils']
+    - role: aur_helper
+      tags: ['aur']
+    - role: docker
+      tags: ['docker']
 
-# Pi-hole cluster setup runs only on the pihole_cluster group (no sudo by default)
+# Pi-hole cluster setup runs only on the pihole_cluster group
+# this creates the virtual IP for the DNS so it must be executed first
 - name: Setup Pi-hole cluster (primary + replicas)
   hosts: pihole_cluster
   gather_facts: true
   become: false
 
   roles:
-    - role: docker
     - role: pihole
+      tags: ['pihole']
+
+# HashiCorp Vault cluster (3-node Raft)
+- name: Setup HashiCorp Vault cluster
+  hosts: vault_cluster
+  gather_facts: true
+  become: false
+
+  roles:
+    - role: vault
+      tags: ['vault']
+
+# Reverse proxy cluster (Caddy + keepalived VIP), must be after vault setup
+- name: Setup reverse proxy cluster
+  hosts: reverse_proxy_cluster
+  gather_facts: true
+  become: false
+
+  roles:
+    - role: reverse_proxy
+      tags: ['proxy']
+
+# ----------------------------------------------------
+# Optional / never-run-by-default plays
+# ----------------------------------------------------
+
+- name: Ping all devices
+  hosts: all
+  gather_facts: false
+  become: false
+
+  tags: [never, ping]
+
+  tasks:
+    - name: Ping
+      ansible.builtin.ping:
+
+
+- name: Maintenance - Pacman refresh and upgrade
+  hosts: all
+  gather_facts: true
+  become: false
+
+  tags: [never, maintenance]
+
+  tasks:
+    - name: Refresh pacman database and upgrade all packages (Arch only)
+      community.general.pacman:
+        update_cache: true
+        upgrade: true
+      become: true
+      when:
+        - ansible_facts['distribution'] | lower == 'archlinux'
+
+    - name: Skip maintenance on non-Arch hosts
+      ansible.builtin.debug:
+        msg: "Skipping pacman maintenance on non-Arch host: {{ ansible_facts['distribution'] }}"
+      when:
+        - ansible_facts['distribution'] | lower != 'archlinux'

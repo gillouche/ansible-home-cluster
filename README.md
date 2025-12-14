@@ -1,27 +1,49 @@
-# ansible-cluster-playground
-Ansible Playbook to install an Raspberry Pi and jetson nano devices cluster used as a playground.
+# ansible-home-cluster
 
-Current setup:
-- 4 raspberry pi 4 model B 8g: k3s workers
-- 1 jetson nano 2g: pi-hole, nginx, docker registry
-- 1 raspberry pi 5 8g: k3s leader, prometheus, grafana
+## Testing Vault ACME with acme.sh (Docker)
 
-## IoT Devices
+This project configures Caddy to obtain certificates from Vault’s ACME endpoint. For manual testing with a real ACME client, you can use the helper script installed on Vault nodes:
 
-### Requirements
-- install raspberry pi devices using the script in setup directory
-- follow post install instructions
-
-The rest of the devices configuration is done using the playbook.
-
-## Install
-
-### Run
-Vault password: playbook
-
-```shell
-python3 -m venv venv
-source venv/bin/activate
-pip3 install -r requirements.txt
-./run.sh
 ```
+sudo /usr/local/bin/vault-acme-test.sh <domain> \
+  --server https://<vault-ip>:8200/v1/pki/acme/directory \
+  --email noreply@<your-domain> [--alpn | --http-01]
+```
+
+Defaults and behavior:
+- ACME client in Docker per acme.sh docs: https://github.com/acmesh-official/acme.sh/wiki/Run-acme.sh-in-docker
+- State is mounted at `/acme.sh` inside the container from `~/.acme-test` on host
+- Host CA bundle is mounted into the container and `SSL_CERT_FILE` is set so the client trusts Vault’s TLS
+- Challenge defaults to TLS-ALPN-01 (requires port 443 to be free). Use `--http-01` to force HTTP-01 (requires port 80 per ACME spec)
+
+Examples:
+
+1) TLS-ALPN-01 (recommended when 443 is free)
+```
+sudo /usr/local/bin/vault-acme-test.sh primary.pihole.gillouche.homelab \
+  --server https://192.168.0.13:8200/v1/pki/acme/directory \
+  --email noreply@gillouche.homelab --alpn
+```
+
+2) HTTP-01 (requires port 80; stop any service on :80 first)
+```
+sudo /usr/local/bin/vault-acme-test.sh primary.pihole.gillouche.homelab \
+  --server https://192.168.0.13:8200/v1/pki/acme/directory \
+  --email noreply@gillouche.homelab --http-01
+```
+
+3) Optional: deploy certs into another container using acme.sh’s docker deploy hook
+```
+sudo /usr/local/bin/vault-acme-test.sh primary.pihole.gillouche.homelab \
+  --server https://192.168.0.13:8200/v1/pki/acme/directory \
+  --email noreply@gillouche.homelab --alpn \
+  --deploy-to some-container-name
+```
+
+Advanced:
+- You can choose the client via `--client acme.sh|lego` (default `acme.sh`). `lego` uses `goacme/lego` and supports `--http` or `--tls` (`--alpn` in the script). See https://github.com/Neilpang/letsproxy for related proxy patterns and the acme.sh wiki for deploy options: https://github.com/acmesh-official/acme.sh/wiki/deploy-to-docker-containers
+
+Troubleshooting:
+- HTTP-01 must bind to port 80; TLS-ALPN-01 must bind to port 443. If those ports are in use (e.g., by Caddy), stop the service or choose the alternate challenge.
+- Ensure the test domain resolves to the host running the test.
+- Ensure the Vault ACME directory URL is reachable from the node.

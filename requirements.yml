@@ -1,0 +1,12 @@
+---
+# Collections required by this project. Pin versions for reproducibility.
+# Install with: ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: community.general
+    version: ">=9.5.0,<10.0.0"
+  - name: community.docker
+    version: ">=3.8.0,<4.0.0"
+  - name: ansible.posix
+    version: ">=1.5.4,<2.0.0"
+  - name: ansible.utils
+    version: ">=2.12.0,<3.0.0"
