@@ -28,7 +28,7 @@
   become: true
 
 # -------------------------
-# Cluster setup (primary + replicas) and VIP with keepalived
+# Cluster setup (primary + replicas) — keepalived handled by dedicated role
 # -------------------------
 
 - name: Determine Pi-hole cluster role for this host
@@ -51,11 +51,7 @@
   when: inventory_hostname in (groups['pihole_cluster'] | default([]))
   become: false
 
-- name: Ensure keepalived is installed (Arch)
-  community.general.pacman:
-    name: keepalived
-    state: present
-  become: true
+  # keepalived base setup is handled by the dedicated keepalived role
 
 ### Pi-hole 6: minimally update existing /etc/pihole/pihole.toml (do not overwrite)
 
@@ -147,64 +143,6 @@
         state: absent
       when: (pihole_custom_dns_records | default([])) | length == 0
 
-- name: Ensure keepalived conf.d directory exists
-  ansible.builtin.file:
-    path: /etc/keepalived/conf.d
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
-  become: true
-  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
-
-- name: Check if keepalived main config exists
-  ansible.builtin.stat:
-    path: /etc/keepalived/keepalived.conf
-  register: pihole_keepalived_main
-  become: true
-  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
-
-- name: Create minimal keepalived main config with include if missing
-  ansible.builtin.copy:
-    dest: /etc/keepalived/keepalived.conf
-    owner: root
-    group: root
-    mode: '0644'
-    content: |
-      global_defs {
-        enable_script_security
-      }
-      include /etc/keepalived/conf.d/*.conf
-  when:
-    - inventory_hostname in (groups['pihole_cluster'] | default([]))
-    - not pihole_keepalived_main.stat.exists
-  become: true
-
-- name: Ensure keepalived main config includes conf.d
-  ansible.builtin.lineinfile:
-    path: /etc/keepalived/keepalived.conf
-    regexp: '^\s*include\s+/etc/keepalived/conf\.d/\*\.conf\s*$'
-    line: 'include /etc/keepalived/conf.d/*.conf'
-    state: present
-    insertbefore: EOF
-  become: true
-  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
-
-- name: Normalize keepalived main configuration (purge legacy vrrp instances)
-  ansible.builtin.copy:
-    dest: /etc/keepalived/keepalived.conf
-    owner: root
-    group: root
-    mode: '0644'
-    content: |
-      global_defs {
-        enable_script_security
-      }
-      include /etc/keepalived/conf.d/*.conf
-  become: true
-  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
-
-
 - name: Render Pi-hole VRRP instance into conf.d
   ansible.builtin.template:
     src: keepalived.conf.j2
@@ -230,64 +168,7 @@
   become: true
   when: inventory_hostname in (groups['pihole_cluster'] | default([]))
 
-- name: Ensure non-local bind is enabled for services on VIP (recommended)
-  ansible.posix.sysctl:
-    name: net.ipv4.ip_nonlocal_bind
-    value: '1'
-    state: present
-    sysctl_set: true
-    reload: true
-  become: true
-  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
-
-- name: Validate keepalived configuration before (re)start
-  ansible.builtin.command: keepalived -t -f /etc/keepalived/keepalived.conf
-  changed_when: false
-  become: true
-  register: keepalived_validate
-  failed_when: false
-  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
-
-- name: Enable and start keepalived
-  ansible.builtin.systemd:
-    name: keepalived
-    state: started
-    enabled: true
-    daemon_reload: true
-  become: true
-  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
-  register: keepalived_systemd
-  failed_when: false
-
-- name: Show keepalived validation output (if validation failed)
-  ansible.builtin.debug:
-    var: keepalived_validate.stderr
-  when:
-    - inventory_hostname in (groups['pihole_cluster'] | default([]))
-    - keepalived_validate is defined
-    - keepalived_validate.rc | default(0) != 0
-
-- name: Show keepalived journal on failure
-  ansible.builtin.command: journalctl -u keepalived --no-pager -n 100
-  register: keepalived_journal
-  changed_when: false
-  become: true
-  when:
-    - inventory_hostname in (groups['pihole_cluster'] | default([]))
-    - keepalived_systemd is defined
-    - (keepalived_systemd is failed) or (keepalived_systemd.status is defined and keepalived_systemd.status != 0)
-
-- name: Fail with keepalived journal extract
-  ansible.builtin.fail:
-    msg: |
-      keepalived failed to start. Validation rc={{ keepalived_validate.rc | default('n/a') }}
-      Validation stderr: {{ keepalived_validate.stderr | default('') }}
-      Recent journal:
-      {{ keepalived_journal.stdout | default('no journal captured') }}
-  when:
-    - inventory_hostname in (groups['pihole_cluster'] | default([]))
-    - keepalived_systemd is defined
-    - (keepalived_systemd is failed) or (keepalived_validate is defined and keepalived_validate.rc | default(0) != 0)
+  # keepalived service management and validation handled by keepalived role
 
 # -------------------------
 # Replicas: keep configuration in sync with primary using Gravity Sync (Docker mode)

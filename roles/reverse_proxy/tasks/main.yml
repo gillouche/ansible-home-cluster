@@ -1,60 +1,10 @@
 ---
 # tasks for reverse_proxy (Caddy + keepalived VIP)
 
-# ----------------------------------------
-# Keepalived (VIP) for reverse proxy
-# ----------------------------------------
-
-- name: Ensure keepalived is installed (Arch)
-  community.general.pacman:
-    name: keepalived
-    state: present
-  become: true
-  when: (ansible_facts['distribution'] | lower) == 'archlinux'
-
 - name: Determine reverse proxy role for this host
   ansible.builtin.set_fact:
     reverse_proxy_is_primary: "{{ inventory_hostname in (groups['reverse_proxy_primary'] | default([])) }}"
   become: false
-
-- name: Ensure keepalived conf.d directory exists (reverse proxy)
-  ansible.builtin.file:
-    path: /etc/keepalived/conf.d
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
-  become: true
-
-- name: Check if keepalived main config exists (reverse proxy)
-  ansible.builtin.stat:
-    path: /etc/keepalived/keepalived.conf
-  register: reverse_proxy_keepalived_main
-  become: true
-
-- name: Create minimal keepalived main config with include if missing (reverse proxy)
-  ansible.builtin.copy:
-    dest: /etc/keepalived/keepalived.conf
-    owner: root
-    group: root
-    mode: '0644'
-    content: |
-      global_defs {
-        enable_script_security
-      }
-      include /etc/keepalived/conf.d/*.conf
-  when: not reverse_proxy_keepalived_main.stat.exists
-  become: true
-
-- name: Ensure keepalived main config includes conf.d (reverse proxy)
-  ansible.builtin.lineinfile:
-    path: /etc/keepalived/keepalived.conf
-    regexp: '^\s*include\s+/etc/keepalived/conf\.d/\*\.conf\s*$'
-    line: 'include /etc/keepalived/conf.d/*.conf'
-    state: present
-    insertbefore: EOF
-  become: true
-
 - name: Warn if VRRP auth password is not set (keepalived will be skipped)
   ansible.builtin.debug:
     msg: >-
@@ -77,15 +27,6 @@
     vrrp_priority: "{{ 150 if reverse_proxy_is_primary | bool else 100 }}"
     vrrp_auth_pass: "{{ reverse_proxy_vrrp_auth_pass }}"
   notify: Restart keepalived
-  become: true
-  when: (reverse_proxy_vrrp_auth_pass is defined) and ((reverse_proxy_vrrp_auth_pass | length) >= 12)
-
-- name: Enable and start keepalived
-  ansible.builtin.systemd:
-    name: keepalived
-    state: started
-    enabled: true
-    daemon_reload: true
   become: true
   when: (reverse_proxy_vrrp_auth_pass is defined) and ((reverse_proxy_vrrp_auth_pass | length) >= 12)
 

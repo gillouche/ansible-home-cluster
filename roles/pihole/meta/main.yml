@@ -10,3 +10,4 @@ galaxy_info:
 dependencies:
   - role: utils
   - role: podman
+  - role: keepalived

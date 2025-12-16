@@ -1,13 +1,10 @@
 ---
 galaxy_info:
   author: ansible-home-cluster
-  description: Deploy and configure reverse proxy (Caddy) with Podman.
+  description: Base keepalived setup (package, main config include, sysctl, service) used by dependent roles
   license: MIT
   min_ansible_version: '2.13'
   platforms:
     - name: GenericLinux
       versions: ['all']
-dependencies:
-  - role: utils
-  - role: podman
-  - role: keepalived
+dependencies: []
