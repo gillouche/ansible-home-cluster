@@ -1,112 +1,128 @@
 ---
 # tasks file for aur-helper
 
-- name: Stop role on non-Arch Linux
-  ansible.builtin.meta: end_role
-  when:
-    - (ansible_facts['os_family'] | lower) != 'archlinux'
-    - (ansible_facts['distribution'] | lower) != 'archlinux'
-  become: false
-
 ## Removed role execution flag mechanism; rely on idempotent tasks
 
-- name: Set variables
+## variables come from role defaults; no need to set here
+
+# Allow running only with --tags aur_rebuild_yay by setting the force flag early
+- name: Force build when tag aur_rebuild_yay is provided
   ansible.builtin.set_fact:
-    aur_helper_work_dir_path: "/tmp/aur/yay-bin"
-  become: false
+    aur_helper_force_build: true
+  tags:
+    - never
+    - aur_rebuild_yay
+  when: "'aur_rebuild_yay' in (ansible_run_tags | default([]))"
 
-- name: Ensure legacy yay package is removed
-  community.general.pacman:
-    name: yay
-    state: absent
-  become: true
-
-- name: Collect package facts (pacman)
-  ansible.builtin.package_facts:
-    manager: pacman
-  become: true
-
-- name: Determine if yay-bin is installed
+# Detect Arch Linux safely using gathered facts
+- name: Detect Arch Linux hosts for AUR flow
   ansible.builtin.set_fact:
-    aur_helper_bin_installed: "{{ 'yay-bin' in (ansible_facts.packages | default({})) }}"
-  become: false
+    aur_is_arch: "{{ (ansible_facts.get('distribution','') | lower) == 'archlinux' }}"
+  tags: [aur, aur_rebuild_yay]
 
-- name: Install build prerequisites for AUR (only if yay-bin missing)
-  community.general.pacman:
-    name:
-      - base-devel
-      - make
-      - git
-      - go
-      - gcc
-      - fakeroot
-    state: present
-  become: true
-  when: not aur_helper_bin_installed
+### Main AUR build flow (tagged to run with either --tags aur or --tags aur_rebuild_yay)
+- name: Ensure yay-bin present (build from AUR when required)
+  tags: [aur, aur_rebuild_yay]
+  block:
+    - name: Ensure yay package is not installed (pacman)
+      community.general.pacman:
+        name: yay
+        state: absent
+      become: true
 
-- name: Remove work dir if existing (fresh build)
-  ansible.builtin.file:
-    path: "{{ aur_helper_work_dir_path }}"
-    state: absent
-  when: not aur_helper_bin_installed
-  become: true
+    - name: Collect package facts (pacman)
+      ansible.builtin.package_facts:
+        manager: pacman
+      become: true
 
-- name: Create working directory
-  ansible.builtin.file:
-    path: "{{ aur_helper_work_dir_path }}"
-    state: directory
-    owner: "{{ target_user }}"
-    group: "{{ target_user }}"
-    mode: "0755"
-    recurse: yes
-  when: not aur_helper_bin_installed
-  become: false
+    - name: Probe yay-bin presence via pacman -Q (fallback check)
+      ansible.builtin.command: pacman -Q yay-bin
+      register: aur_helper_yay_q
+      changed_when: false
+      failed_when: false
+      become: true
 
-- name: Clone yay-bin AUR repository
-  ansible.builtin.git:
-    repo: https://aur.archlinux.org/yay-bin.git
-    dest: "{{ aur_helper_work_dir_path }}"
-    version: "{{ aur_helper_yay_ref | default('HEAD') }}"
-    update: false
-  become: false
-  when: not aur_helper_bin_installed
+    - name: Debug AUR decision booleans (verbosity 1)
+      ansible.builtin.debug:
+        msg: "ansible_pkg_mgr={{ ansible_pkg_mgr | default('') }}, force={{ aur_helper_force_build | default(false) }}, packages_has_yay_bin={{ 'yay-bin' in (ansible_facts.packages | default({})) }}, pacman_Q_rc={{ aur_helper_yay_q.rc | default('n/a') }}, should_build={{ aur_helper_should_build | default('unset') }}"
+        verbosity: 1
 
-- name: Build yay-bin
-  ansible.builtin.command: makepkg --noconfirm
-  args:
-    chdir: "{{ aur_helper_work_dir_path }}"
-    creates: "{{ aur_helper_work_dir_path }}/yay-bin-*.pkg.tar.*"
-  when: not aur_helper_bin_installed
-  become: false
+    - name: Determine if yay-bin is installed and if build is required
+      ansible.builtin.set_fact:
+        aur_helper_bin_installed: "{{ ('yay-bin' in (ansible_facts.packages | default({}))) or ((aur_helper_yay_q.rc | default(1)) == 0) }}"
+        aur_helper_should_build: "{{ (not(( 'yay-bin' in (ansible_facts.packages | default({})) ) or ((aur_helper_yay_q.rc | default(1)) == 0))) or (aur_helper_force_build | bool) }}"
+      become: false
 
-- name: Find built package file (yay-bin)
-  ansible.builtin.find:
-    paths: "{{ aur_helper_work_dir_path }}"
-    patterns: "yay-bin-*.pkg.tar.*"
-    file_type: file
-    recurse: false
-    age_stamp: mtime
-  register: aur_helper_yay_pkg_find
-  when: not aur_helper_bin_installed
-  become: false
+    - name: Install build prerequisites for AUR (when build is required)
+      community.general.pacman:
+        name:
+          - base-devel
+          - make
+          - git
+          - go
+          - gcc
+          - fakeroot
+        state: present
+      become: true
+      when: aur_helper_should_build | bool
 
-- name: Install yay-bin with pacman
-  community.general.pacman:
-    name: "{{ (aur_helper_yay_pkg_find.files | sort(attribute='mtime', reverse=true) | map(attribute='path') | list | first) }}"
-    state: present
-  become: true
-  when:
-    - not aur_helper_bin_installed
-    - (aur_helper_yay_pkg_find.files | default([])) | length > 0
+    - name: Remove work dir if existing (fresh build)
+      ansible.builtin.file:
+        path: "{{ aur_helper_work_dir_path }}"
+        state: absent
+      when: aur_helper_should_build | bool
+      become: true
 
-# ---------------------------------------------
-# Verification
-# ---------------------------------------------
-- name: Verify yay works (prints version)
-  ansible.builtin.command: yay -V
-  register: aur_helper_yay_version_cmd
-  changed_when: false
-  failed_when: false
-  become: false
+    - name: Create working directory
+      ansible.builtin.file:
+        path: "{{ aur_helper_work_dir_path }}"
+        state: directory
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: "0755"
+        recurse: yes
+      when: aur_helper_should_build | bool
+      become: false
 
-## Removed role execution flag mechanism; rely on idempotent tasks
+    - name: Clone yay-bin AUR repository
+      ansible.builtin.git:
+        repo: https://aur.archlinux.org/yay-bin.git
+        dest: "{{ aur_helper_work_dir_path }}"
+        version: "{{ aur_helper_yay_ref | default('HEAD') }}"
+        update: true
+      become: false
+      when: aur_helper_should_build | bool
+
+    - name: Build yay-bin
+      ansible.builtin.command: makepkg --noconfirm
+      args:
+        chdir: "{{ aur_helper_work_dir_path }}"
+      when: aur_helper_should_build | bool
+      become: false
+
+    - name: Find built package file (yay-bin)
+      ansible.builtin.find:
+        paths: "{{ aur_helper_work_dir_path }}"
+        patterns: "yay-bin-*.pkg.tar.*"
+        file_type: file
+        recurse: false
+        age_stamp: mtime
+      register: aur_helper_yay_pkg_find
+      when: aur_helper_should_build | bool
+      become: false
+
+    - name: Install yay-bin with pacman
+      community.general.pacman:
+        name: "{{ (aur_helper_yay_pkg_find.files | sort(attribute='mtime', reverse=true) | map(attribute='path') | list | first) }}"
+        state: present
+      become: true
+      when:
+        - aur_helper_should_build | bool
+        - (aur_helper_yay_pkg_find.files | default([])) | length > 0
+
+    - name: Verify yay works (prints version)
+      ansible.builtin.command: yay -V
+      register: aur_helper_yay_version_cmd
+      changed_when: false
+      failed_when: false
+      become: false

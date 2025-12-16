@@ -23,6 +23,7 @@
     - role: aur
       tags:
         - aur
+        - aur_rebuild_yay
     - role: podman
       tags:
         - podman

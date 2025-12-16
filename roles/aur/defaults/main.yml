@@ -1,2 +1,11 @@
 ---
 # defaults for aur role
+
+# Default working directory for building AUR packages (yay-bin)
+aur_helper_work_dir_path: "/tmp/aur/yay-bin"
+
+# Optional: AUR git ref for yay-bin (branch, tag, or commit). Default HEAD.
+aur_helper_yay_ref: "HEAD"
+
+# Force rebuilding yay-bin even if it's already installed
+aur_helper_force_build: false
