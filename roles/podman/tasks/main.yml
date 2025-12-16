@@ -1,0 +1,56 @@
+
+- name: Ensure target_user can run rootless containers (subuid/subgid)
+  ansible.builtin.lineinfile:
+    path: /etc/subuid
+    line: "{{ target_user }}:100000:65536"
+    create: true
+    state: present
+  become: true
+
+- name: Ensure target_user subgid range exists
+  ansible.builtin.lineinfile:
+    path: /etc/subgid
+    line: "{{ target_user }}:100000:65536"
+    create: true
+    state: present
+  become: true
+
+- name: Ensure newuidmap/newgidmap exist (rootless prerequisite)
+  ansible.builtin.stat:
+    path: "/usr/bin/{{ item }}"
+  register: _uidmap_bins
+  loop:
+    - newuidmap
+    - newgidmap
+
+- name: Ensure newuidmap/newgidmap are owned by root and setuid
+  ansible.builtin.file:
+    path: "/usr/bin/{{ item.item }}"
+    owner: root
+    group: root
+    mode: '04755'
+  loop: "{{ _uidmap_bins.results | default([]) }}"
+  when: item.stat.exists | default(false)
+  become: true
+
+# Configure Podman registries so short image names like "pihole/pihole:tag" resolve
+- name: Ensure /etc/containers exists
+  ansible.builtin.file:
+    path: /etc/containers
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Configure unqualified-search registries for Podman
+  ansible.builtin.copy:
+    dest: /etc/containers/registries.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      # Managed by ansible-home-cluster
+      # Allow short names like "pihole/pihole" by defining search registries
+      unqualified-search-registries = ["docker.io", "quay.io", "ghcr.io"]
+  become: true

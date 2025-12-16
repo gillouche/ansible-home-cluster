@@ -23,9 +23,9 @@
     - role: aur
       tags:
         - aur
-    - role: docker
+    - role: podman
       tags:
-        - docker
+        - podman
 
 # Pi-hole cluster setup runs only on the pihole_cluster group
 # this creates the virtual IP for the DNS so it must be executed first
@@ -88,12 +88,87 @@
 
 - name: Bootstrap devices (SSH + network)
   hosts: all
-  gather_facts: true
+  gather_facts: false
   become: false
   tags:
     - never
     - bootstrap_devices
 
+  vars:
+    devices_bootstrap_user: alarm
+    devices_bootstrap_pubkey: "{{ lookup('env','HOME') + '/.ssh/id_ed25519_local.pub' }}"
+    # Relax host-key checking only for this bootstrap run
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+    # Ensure the connection uses the bootstrap user
+    ansible_user: "{{ devices_bootstrap_user }}"
+
+  pre_tasks:
+    - name: Check if inventories/group_vars/all.vault.yml exists
+      ansible.builtin.stat:
+        path: inventories/group_vars/all.vault.yml
+      register: _all_vault_file
+      no_log: true
+
+    - name: Load vaulted credentials from group_vars/all.vault.yml (if present)
+      ansible.builtin.include_vars:
+        file: inventories/group_vars/all.vault.yml
+      when: _all_vault_file.stat.exists | default(false)
+      no_log: true
+
+    - name: Check if inventories/group_vars/bootstrap.vault.yml exists
+      ansible.builtin.stat:
+        path: inventories/group_vars/bootstrap.vault.yml
+      register: _bootstrap_vault_file
+      no_log: true
+
+    - name: Load vaulted credentials from group_vars/bootstrap.vault.yml (if present)
+      ansible.builtin.include_vars:
+        file: inventories/group_vars/bootstrap.vault.yml
+      when: _bootstrap_vault_file.stat.exists | default(false)
+      no_log: true
+
+    - name: Prompt for SSH password if not provided by vault
+      ansible.builtin.pause:
+        prompt: "SSH password for bootstrap user ({{ devices_bootstrap_user }})"
+        echo: no
+      register: bootstrap_pw
+      when: ansible_password is not defined
+      no_log: true
+
+    - name: Set ansible_password from prompt
+      ansible.builtin.set_fact:
+        ansible_password: "{{ bootstrap_pw.user_input }}"
+      when: ansible_password is not defined
+      no_log: true
+
   roles:
     - role: devices_ssh
     - role: devices_network
+
+## --- General purpose staggered reboot (sequential, waits for each host) ---
+
+- name: Reboot devices sequentially (staggered)
+  hosts: all
+  gather_facts: false
+  become: true
+  serial: 1
+  tags:
+    - never
+    - reboot
+
+  vars:
+    # Tune these if needed via -e on the CLI
+    reboot_timeout: 600
+    reboot_connect_timeout: 30
+    reboot_post_reboot_delay: 10
+    reboot_test_command: "true"
+
+  tasks:
+    - name: Reboot host and wait for it to become available
+      ansible.builtin.reboot:
+        msg: "Reboot triggered by ansible-home-cluster"
+        reboot_timeout: "{{ reboot_timeout }}"
+        connect_timeout: "{{ reboot_connect_timeout }}"
+        post_reboot_delay: "{{ reboot_post_reboot_delay }}"
+        test_command: "{{ reboot_test_command }}"

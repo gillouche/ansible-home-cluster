@@ -1,6 +1,8 @@
 ---
 # Virtual IP and primary node
 pihole_virtual_ip: 192.168.0.251
+pihole_vrrp_interface: end0
+vip_prefixlen: 24
 pihole_primary_host: rpi5b8g1
 
 # Enable wildcard DNS via dnsmasq to point domains to reverse proxy VIP

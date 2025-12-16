@@ -143,7 +143,7 @@
   become: true
 
 # ----------------------------------------
-# Caddy reverse proxy using Docker
+# Caddy reverse proxy using Podman
 # ----------------------------------------
 
 - name: Ensure reverse-proxy directories exist
@@ -208,8 +208,8 @@
         )
       }}
 
-- name: Run Caddy reverse proxy container
-  community.general.docker_container:
+- name: Run Caddy reverse proxy container (Podman)
+  containers.podman.podman_container:
     name: "{{ reverse_proxy_container_name }}"
     image: "{{ reverse_proxy_image }}"
     state: started
@@ -223,14 +223,4 @@
       - "80:80/tcp"
       - "443:443/tcp"
     volumes: "{{ reverse_proxy_caddy_volumes_list }}"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    log_driver: json-file
-    log_options:
-      max-size: "10m"
-      max-file: "5"
   become: false

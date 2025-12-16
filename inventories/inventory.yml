@@ -2,46 +2,47 @@
 all:
   hosts:
     rpi4b8g1:
+      # no critical workload, stateless worker
       ansible_host: 192.168.0.76
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi4b8g2:
+    rpi4b8g2: # no critical workload, stateless worker
       ansible_host: 192.168.0.77
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi4b8g3:
+    rpi4b8g3: # no critical workload, stateless worker
       ansible_host: 192.168.0.78
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi4b8g4:
+    rpi4b8g4: # no critical workload, stateless worker
       ansible_host: 192.168.0.79
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi5b8g1:
+    rpi5b8g1: # no critical workload, stateless worker
       ansible_host: 192.168.0.80
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi5b16g1ssd:
+    rpi5b16g1ssd: # storage, vault, anything with heavy writes + nexus
       ansible_host: 192.168.0.13
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi5b16g2ssd:
+    rpi5b16g2ssd: # storage, vault, anything with heavy writes
       ansible_host: 192.168.0.19
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi5b16g3ssd:
+    rpi5b16g3ssd: # storage, vault, anything with heavy writes
       ansible_host: 192.168.0.155
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi5b16g4:
+    rpi5b16g4: # k8s master + primary -> pihole, reverse proxy
       ansible_host: 192.168.0.201
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi5b16g5:
+    rpi5b16g5: # k8s master + replicas -> pihole, reverse proxy
       ansible_host: 192.168.0.217
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi5b16g6:
+    rpi5b16g6: # k8s master + replicas -> pihole, reverse proxy
       ansible_host: 192.168.0.227
       ansible_ssh_user: alarm
       target_user: alarm
@@ -49,30 +50,99 @@ all:
   children:
     pihole_primary:
       hosts:
-        rpi5b8g1:
+        rpi5b16g4:
     pihole_replicas:
       hosts:
-        rpi4b8g1:
-        rpi4b8g2:
+        rpi5b16g5:
+        rpi5b16g6:
     pihole_cluster:
       hosts:
-        rpi5b8g1:
-        rpi4b8g1:
-        rpi4b8g2:
+        rpi5b16g4:
+        rpi5b16g5:
+        rpi5b16g6:
     reverse_proxy_primary:
       hosts:
-        rpi5b8g1:
+        rpi5b16g4:
     reverse_proxy_replicas:
       hosts:
-        rpi4b8g1:
-        rpi4b8g2:
+        rpi5b16g5:
+        rpi5b16g6:
     reverse_proxy_cluster:
       hosts:
-        rpi5b8g1:
-        rpi4b8g1:
-        rpi4b8g2:
+        rpi5b16g4:
+        rpi5b16g5:
+        rpi5b16g6:
     vault_cluster:
       hosts:
         rpi5b16g1ssd:
         rpi5b16g2ssd:
         rpi5b16g3ssd:
+    nexus:
+      hosts:
+        rpi5b16g1ssd:
+    k3s_cluster:
+      children:
+        k3s_server:
+        k3s_agent:
+    k3s_server_init:
+      hosts:
+        rpi5b16g4:
+    k3s_server:
+      hosts:
+        rpi5b16g4:
+          k3s_node_labels:
+            - "node-class=rpi5"
+            - "reliability=stable"
+            - "storage=ephemeral"
+        rpi5b16g5:
+          k3s_node_labels:
+            - "node-class=rpi5"
+            - "reliability=stable"
+            - "storage=ephemeral"
+        rpi5b16g6:
+          k3s_node_labels:
+            - "node-class=rpi5"
+            - "reliability=stable"
+            - "storage=ephemeral"
+    k3s_agent:
+      hosts:
+        rpi4b8g1:
+          k3s_node_labels:
+            - "node-class=rpi4"
+            - "reliability=best-effort"
+            - "storage=ephemeral"
+        rpi4b8g2:
+          k3s_node_labels:
+            - "node-class=rpi4"
+            - "reliability=best-effort"
+            - "storage=ephemeral"
+        rpi4b8g3:
+          k3s_node_labels:
+            - "node-class=rpi4"
+            - "reliability=best-effort"
+            - "storage=ephemeral"
+        rpi4b8g4:
+          k3s_node_labels:
+            - "node-class=rpi4"
+            - "reliability=best-effort"
+            - "storage=ephemeral"
+        rpi5b8g1:
+          k3s_node_labels:
+            - "node-class=rpi5"
+            - "reliability=best-effort"
+            - "storage=ephemeral"
+        rpi5b16g1ssd:
+          k3s_node_labels:
+            - "storage=ssd"
+            - "node-class=rpi5"
+            - "reliability=preferred"
+        rpi5b16g2ssd:
+          k3s_node_labels:
+            - "storage=ssd"
+            - "node-class=rpi5"
+            - "reliability=preferred"
+        rpi5b16g3ssd:
+          k3s_node_labels:
+            - "storage=ssd"
+            - "node-class=rpi5"
+            - "reliability=preferred"

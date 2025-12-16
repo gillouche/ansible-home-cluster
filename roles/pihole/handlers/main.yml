@@ -8,7 +8,7 @@
   become: true
 
 - name: Restart pihole dns
-  ansible.builtin.command: docker exec {{ pihole_container_name }} pihole reloaddns
+  ansible.builtin.command: podman exec {{ pihole_container_name }} pihole reloaddns
   become: false
   changed_when: false
   check_mode: no

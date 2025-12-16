@@ -22,7 +22,7 @@
   tasks:
     - name: Set macOS DNS server to Pi-hole VIP (networksetup)
       ansible.builtin.command: >-
-        networksetup -setdnsservers {{ controller_dns_network_service | quote }} 1.1.1.1
+        networksetup -setdnsservers "Wi-Fi" 1.1.1.1
       changed_when: true
       when: (ansible_facts.get('os_family', '') | lower) == 'darwin'
 

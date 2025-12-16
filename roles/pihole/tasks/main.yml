@@ -14,6 +14,19 @@
     state: directory
     mode: "0755"
 
+# Ensure container-mapped config directories exist on host
+- name: Ensure Pi-hole host etc and dnsmasq.d directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ target_user }}"
+    group: "{{ target_user }}"
+    mode: "0755"
+  loop:
+    - "{{ pihole_host_etc_dir }}"
+    - "{{ pihole_host_dnsmasq_dir }}"
+  become: true
+
 # -------------------------
 # Cluster setup (primary + replicas) and VIP with keepalived
 # -------------------------
@@ -60,7 +73,7 @@
     group: root
     mode: '0644'
   when: not (pihole_toml_stat.stat.exists | default(false))
-  become: false
+  become: true
 
 - name: Ensure [misc] section exists in pihole.toml
   ansible.builtin.lineinfile:
@@ -177,6 +190,21 @@
   become: true
   when: inventory_hostname in (groups['pihole_cluster'] | default([]))
 
+- name: Normalize keepalived main configuration (purge legacy vrrp instances)
+  ansible.builtin.copy:
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      global_defs {
+        enable_script_security
+      }
+      include /etc/keepalived/conf.d/*.conf
+  become: true
+  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
+
+
 - name: Render Pi-hole VRRP instance into conf.d
   ansible.builtin.template:
     src: keepalived.conf.j2
@@ -186,12 +214,38 @@
     mode: '0644'
   vars:
     vip_address: "{{ pihole_virtual_ip }}"
-    vrrp_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
+    vrrp_interface: "{{
+      pihole_vrrp_interface | default(
+        ansible_facts['default_ipv4']['interface'] | default(
+          ansible_facts['default_ipv6']['interface'] | default(
+            (ansible_facts['interfaces'] | select('match','^(e|en|eth)') | list | first) | default('end0')
+          )
+        )
+      )
+    }}"
     vrrp_state: "{{ 'MASTER' if pihole_is_primary | bool else 'BACKUP' }}"
     vrrp_priority: "{{ 150 if pihole_is_primary | bool else 100 }}"
     vrrp_auth_pass: "{{ pihole_vrrp_auth_pass | default('p1h0l3') }}"
   notify: Restart keepalived
   become: true
+  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
+
+- name: Ensure non-local bind is enabled for services on VIP (recommended)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: '1'
+    state: present
+    sysctl_set: true
+    reload: true
+  become: true
+  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
+
+- name: Validate keepalived configuration before (re)start
+  ansible.builtin.command: keepalived -t -f /etc/keepalived/keepalived.conf
+  changed_when: false
+  become: true
+  register: keepalived_validate
+  failed_when: false
   when: inventory_hostname in (groups['pihole_cluster'] | default([]))
 
 - name: Enable and start keepalived
@@ -202,6 +256,38 @@
     daemon_reload: true
   become: true
   when: inventory_hostname in (groups['pihole_cluster'] | default([]))
+  register: keepalived_systemd
+  failed_when: false
+
+- name: Show keepalived validation output (if validation failed)
+  ansible.builtin.debug:
+    var: keepalived_validate.stderr
+  when:
+    - inventory_hostname in (groups['pihole_cluster'] | default([]))
+    - keepalived_validate is defined
+    - keepalived_validate.rc | default(0) != 0
+
+- name: Show keepalived journal on failure
+  ansible.builtin.command: journalctl -u keepalived --no-pager -n 100
+  register: keepalived_journal
+  changed_when: false
+  become: true
+  when:
+    - inventory_hostname in (groups['pihole_cluster'] | default([]))
+    - keepalived_systemd is defined
+    - (keepalived_systemd is failed) or (keepalived_systemd.status is defined and keepalived_systemd.status != 0)
+
+- name: Fail with keepalived journal extract
+  ansible.builtin.fail:
+    msg: |
+      keepalived failed to start. Validation rc={{ keepalived_validate.rc | default('n/a') }}
+      Validation stderr: {{ keepalived_validate.stderr | default('') }}
+      Recent journal:
+      {{ keepalived_journal.stdout | default('no journal captured') }}
+  when:
+    - inventory_hostname in (groups['pihole_cluster'] | default([]))
+    - keepalived_systemd is defined
+    - (keepalived_systemd is failed) or (keepalived_validate is defined and keepalived_validate.rc | default(0) != 0)
 
 # -------------------------
 # Replicas: keep configuration in sync with primary using Gravity Sync (Docker mode)
@@ -298,48 +384,30 @@
   notify: Restart pihole dns
   become: true
 
-- name: Create Pi-hole Docker network when missing
-  community.docker.docker_network:
-    name: pihole_net
-    state: present
-    driver: bridge
-  become: true
+# Note: On some RPi kernels, netfilter/bridge capabilities needed by Podman user networks
+# are unavailable. We run the Pi-hole container in host network (rootful) to bind low ports
+# without relying on port publishing or netavark bridges.
 
-- name: Start/Update pihole container
-  community.general.docker_container:
+- name: Start/Update pihole container (Podman)
+  containers.podman.podman_container:
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
+    state: started
     restart_policy: always
-    ports:
-      - "53:53/tcp"
-      - "53:53/udp"
-      - "8080:80/tcp"
-      - "8443:443/tcp"
+    network: host
     env:
       TZ: "{{ pihole_timezone }}"
       FTLCONF_webserver_api_password: "{{ pihole_web_password }}"
       FTLCONF_dns_listeningMode: "ALL"
       FTLCONF_dns_upstreams: "{{ pihole_dns }}"
-    healthcheck:
-      test: ["CMD-SHELL", "dig +time=2 +tries=1 @127.0.0.1 pi-hole.net >/dev/null 2>&1 || nc -z 127.0.0.1 53 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     volumes:
       - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
       - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
-    networks:
-      - name: pihole_net
-    log_driver: json-file
-    log_options:
-      max-size: "10m"
-      max-file: "5"
   become: true
 
 - name: Wait for pihole web UI to be up
   ansible.builtin.wait_for:
-    port: 8080
+    port: 80
     delay: 5
     timeout: 60
 
@@ -348,14 +416,12 @@
     name: "update pihole gravity"
     minute: 0
     hour: 0
-    job: "docker exec {{ pihole_container_name }} pihole updateGravity"
+    job: "podman exec {{ pihole_container_name }} pihole updateGravity"
   become: true
 
-- name: Remove old image versions
-  community.docker.docker_prune:
-    images: yes
-    images_filters:
-      dangling: false
+- name: Remove old image versions (Podman)
+  containers.podman.podman_prune:
+    image: true
 
 - name: Configure Gravity Sync for Docker on replicas
   ansible.builtin.template:
