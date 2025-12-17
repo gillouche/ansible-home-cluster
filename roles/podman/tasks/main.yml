@@ -1,4 +1,52 @@
 
+---
+# Ensure base packages for Podman with bridge networking (netavark + nftables NAT)
+
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
+- name: Force remove legacy iptables (ignore deps) with pacman module
+  community.general.pacman:
+    name: iptables
+    state: absent
+    force: true
+  become: true
+  when: (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
+
+- name: Install Podman and dependencies (Arch)
+  community.general.pacman:
+    name:
+      - podman
+      - conmon
+      - slirp4netns
+      - netavark
+      - aardvark-dns
+      - iptables-nft
+    state: present
+  become: true
+  when: (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
+
+- name: Ensure IPv4 forwarding enabled for container networking
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    state: present
+    sysctl_set: true
+    reload: true
+  become: true
+
+- name: Allow rootless publish of low ports (enable ports <1024 starting at 53)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_unprivileged_port_start
+    value: '53'
+    state: present
+    sysctl_set: true
+    reload: true
+  become: true
+
 - name: Ensure target_user can run rootless containers (subuid/subgid)
   ansible.builtin.lineinfile:
     path: /etc/subuid

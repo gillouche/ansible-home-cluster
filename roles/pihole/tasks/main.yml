@@ -55,6 +55,14 @@
 
 ### Pi-hole 6: minimally update existing /etc/pihole/pihole.toml (do not overwrite)
 
+- name: Stop running pihole container prior to config edits (best-effort)
+  containers.podman.podman_container:
+    name: "{{ pihole_container_name }}"
+    state: stopped
+  failed_when: false
+  changed_when: false
+  become: false
+
 - name: Stat pihole.toml
   ansible.builtin.stat:
     path: "{{ pihole_host_etc_dir }}/pihole.toml"
@@ -78,7 +86,7 @@
     line: '[misc]'
     insertafter: EOF
     state: present
-  become: false
+  become: true
 
 - name: Enable loading of /etc/dnsmasq.d in pihole.toml (etc_dnsmasq_d = true)
   block:
@@ -97,7 +105,7 @@
         replace: '\1 true'
       when: pihole_toml_dnsmasq_true.rc != 0
       notify: Restart pihole dns
-      become: false
+      become: true
 
     - name: Detect if etc_dnsmasq_d key exists
       ansible.builtin.command: >-
@@ -105,7 +113,7 @@
       register: pihole_toml_dnsmasq_key
       changed_when: false
       failed_when: false
-      become: false
+      become: true
 
     - name: Insert etc_dnsmasq_d = true under [misc] if key missing
       ansible.builtin.lineinfile:
@@ -116,7 +124,7 @@
         state: present
       when: pihole_toml_dnsmasq_true.rc != 0 and pihole_toml_dnsmasq_key.rc != 0
       notify: Restart pihole dns
-      become: false
+      become: true
 
 # -------------------------
 # Custom DNS A records via dnsmasq.d (preferred automation mode)
@@ -265,17 +273,66 @@
   notify: Restart pihole dns
   become: true
 
-# Note: On some RPi kernels, netfilter/bridge capabilities needed by Podman user networks
-# are unavailable. We run the Pi-hole container in host network (rootful) to bind low ports
-# without relying on port publishing or netavark bridges.
+- name: Get target user UID
+  ansible.builtin.command: id -u {{ target_user }}
+  register: pihole_target_user_uid
+  changed_when: false
+  become: false
 
-- name: Start/Update pihole container (Podman)
+- name: Get target user GID
+  ansible.builtin.command: id -g {{ target_user }}
+  register: pihole_target_user_gid
+  changed_when: false
+  become: false
+
+- name: Set UID/GID facts for container
+  ansible.builtin.set_fact:
+    pihole_target_uid: "{{ (pihole_target_user_uid.stdout | default('')) | trim }}"
+    pihole_target_gid: "{{ (pihole_target_user_gid.stdout | default('')) | trim }}"
+  become: false
+
+- name: Start/Update pihole container (Podman, rootless)
   containers.podman.podman_container:
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
     state: started
     restart_policy: always
-    network: host
+    userns: keep-id
+    user: "{{ pihole_target_uid }}:{{ pihole_target_gid }}"
+    published_ports:
+      - "{{ pihole_dns_tcp_port }}:53/tcp"
+      - "{{ pihole_dns_udp_port }}:53/udp"
+      - "{{ pihole_http_host_port }}:80/tcp"
+      - "{{ pihole_https_host_port }}:443/tcp"
+    env:
+      TZ: "{{ pihole_timezone }}"
+      FTLCONF_webserver_api_password: "{{ pihole_web_password }}"
+      FTLCONF_dns_listeningMode: "ALL"
+      FTLCONF_dns_upstreams: "{{ pihole_dns }}"
+      PIHOLE_UID: "{{ pihole_target_uid }}"
+      PIHOLE_GID: "{{ pihole_target_gid }}"
+    volumes:
+      - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
+      - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
+  become: false
+  when: pihole_rootless | bool
+
+- name: Start/Update pihole container (Podman, rootful)
+  containers.podman.podman_container:
+    name: "{{ pihole_container_name }}"
+    image: "{{ pihole_image }}"
+    state: started
+    restart_policy: always
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETFCAP
+    published_ports:
+      - "{{ pihole_dns_tcp_port }}:53/tcp"
+      - "{{ pihole_dns_udp_port }}:53/udp"
+      - "{{ pihole_http_host_port }}:80/tcp"
+      - "{{ pihole_https_host_port }}:443/tcp"
     env:
       TZ: "{{ pihole_timezone }}"
       FTLCONF_webserver_api_password: "{{ pihole_web_password }}"
@@ -285,10 +342,11 @@
       - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
       - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
   become: true
+  when: not (pihole_rootless | bool)
 
 - name: Wait for pihole web UI to be up
   ansible.builtin.wait_for:
-    port: 80
+    port: "{{ pihole_http_host_port | int }}"
     delay: 5
     timeout: 60
 

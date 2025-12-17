@@ -1,9 +1,22 @@
 ---
 # tasks file for aur-helper
-
-## Removed role execution flag mechanism; rely on idempotent tasks
-
 ## variables come from role defaults; no need to set here
+
+- name: Create the `aur_builder` user
+  become: yes
+  ansible.builtin.user:
+    name: aur_builder
+    create_home: yes
+    group: wheel
+
+- name: Allow the `aur_builder` user to run `sudo pacman` without a password
+  become: yes
+  ansible.builtin.lineinfile:
+    path: /etc/sudoers.d/11-install-aur_builder
+    line: 'aur_builder ALL=(ALL) NOPASSWD: /usr/bin/pacman'
+    create: yes
+    mode: 0644
+    validate: 'visudo -cf %s'
 
 # Allow running only with --tags aur_rebuild_yay by setting the force flag early
 - name: Force build when tag aur_rebuild_yay is provided
@@ -62,6 +75,7 @@
           - go
           - gcc
           - fakeroot
+          - python-setuptools
         state: present
       become: true
       when: aur_helper_should_build | bool

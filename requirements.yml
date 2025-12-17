@@ -9,4 +9,6 @@ collections:
   - name: ansible.utils
     version: "6.0.0"
   - name: containers.podman
-    version: "1.14.3"
+    version: "1.13.0"
+  - name: kewlfft.aur
+    version: "0.13.0"
