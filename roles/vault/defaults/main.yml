@@ -1,8 +1,13 @@
 ---
-vault_container_network_mode: "bridge"
+vault_image: "hashicorp/vault:1.21.1"
+vault_container_name: "vault"
+vault_api_port: 8200
 vault_published_ports:
   - "8200:8200/tcp"
   - "8201:8201/tcp"
+
+# Networking policy: all containers use bridge networking with published ports.
+# Host networking is not supported and should not be used.
 
 # Container-internal paths (for config/TLS/data mounts)
 vault_cfg_path_in_container: "/vault/config/vault.hcl"
@@ -10,11 +15,24 @@ vault_tls_dir_in_container: "/vault/tls"
 vault_data_dir_in_container: "/vault/data"
 vault_logs_dir_in_container: "/vault/logs"
 
-# Host logs directory (bind-mounted) to persist container app logs if Vault writes to /vault/logs
-vault_logs_dir: "/home/{{ vault_system_user }}/vault/logs"
+# Host logs directory (bind-mounted) to persist container app logs
+vault_logs_dir: "/home/vault/logs"
 
 # Host bin directory to store startup wrapper (bind-mounted)
-vault_bin_dir: "/home/{{ vault_system_user }}/vault/bin"
+vault_bin_dir: "/home/vault/bin"
+
+# Runtime user that will own Vault files on host and be used inside the container
+vault_runtime_user: "vault"
+vault_runtime_uid: 100
+vault_runtime_gid: 1000   # match 'alarm' group as requested
+vault_runtime_group_name: "alarm"  # primary group name that has gid 1000 on devices
+
+# Host paths for Vault configuration, TLS, and data (will be created)
+# Requested layout under /home/vault so these paths are bind-mounted into the container
+vault_host_root_dir_data: "/home/vault"
+vault_host_config_dir: "/home/vault/config"
+vault_host_tls_dir: "/home/vault/tls"
+vault_host_data_dir: "/home/vault/data"
 
 # Docker logging options (persist stdout/stderr via json-file)
 # For deep debugging, you can increase size and keep a single file
@@ -22,12 +40,16 @@ vault_docker_log_driver: "json-file"
 vault_docker_log_max_size: "1g"
 vault_docker_log_max_file: "1"
 
-# Container user (match image user/gid semantics)
-vault_container_user: "{{ vault_system_uid }}:{{ vault_system_gid }}"
+# Container user
+# Run Vault container as root (per request) for maximum access to mounted folders
+vault_container_user: "root"
 
 # Write full startup logs to files inside the container via a wrapper (tee)
 # Enabled by default to capture complete logs from process start.
 vault_enable_log_wrapper: true
+
+# Log level for Vault (when using wrapper)
+vault_log_level: "debug"
 
 # Optional admin token (otherwise the role will prefer the stored automation token,
 # or fall back to root token from vault-init.json when needed for initial setup)
@@ -106,7 +128,7 @@ vault_automation_token_renew_threshold_seconds: 604800
 #
 # Set this to a stable address (e.g., Vault VIP/LAN IP) to advertise an IP-based
 # cluster path for ACME, avoiding internal DNS dependency during ACME flows.
-# Example: "192.168.0.13"
+# Example: "192.168.0.81"
 vault_acme_advertise_addr: ""
 
 
@@ -144,3 +166,81 @@ vault_controller_ca_bundle_path: "~/.local/share/ansible-home-cluster/ca-bundle.
 # When true, Ansible will install a policies.json enabling ImportEnterpriseRoots
 vault_firefox_enable_enterprise_roots: false
 vault_firefox_policies_json_path: "~/Library/Application Support/Firefox/distribution/policies.json"
+# Defaults for Vault role (PKI + ACME via Vault CLI)
+
+# Vault public address (HTTPS only as requested)
+# Example: https://vault-1.gillouche.homelab:8200
+vault_addr: "https://127.0.0.1:8200"
+
+# Whether to configure PKI+ACME using a script executed inside the container.
+# When true, the role will write /home/vault/bin/pki_acme_setup.sh, mount it,
+# and run it via podman exec with the container's vault CLI.
+vault_use_setup_script: true
+
+# Root token (MUST be provided via vaulted vars; default empty to force user to set)
+vault_root_token: ""
+
+# PKI mount path per tutorial
+vault_pki_mount: "pki"
+
+# Max TTL for the PKI as per tutorial (10 years)
+vault_pki_max_ttl: "87600h"
+
+# Default base domain for issuance (can be a list). Example: ["gillouche.homelab", "*.gillouche.homelab"]
+# Pre-set to match your environment; override in inventory if needed.
+vault_pki_base_domains:
+  - "gillouche.homelab"
+  - "*.gillouche.homelab"
+
+# Name of the issuance role per tutorial
+vault_pki_role_name: "acme"
+
+# ACME directory (default from tutorial)
+vault_acme_directory_path: "/v1/pki/acme/directory"
+
+# Where to persist EAB credentials (controller-side file). Optional; alternatively store in vaulted group_vars.
+vault_eab_export_path: "{{ playbook_dir | default('.') }}/.vault/acme_eab.json"
+
+# Root CA subject defaults
+vault_root_ca_common_name: "{{ (vault_pki_base_domains[0] if (vault_pki_base_domains | length) > 0 else 'Homelab') ~ ' Root CA' }}"
+vault_root_ca_org: "Homelab"
+vault_root_ca_country: "FR"
+
+# Whether to export artifacts
+vault_export_root_ca: true
+vault_export_eab: true
+
+# Public Vault URL used in PKI URLs config. If empty, tasks compute from host IP.
+vault_public_url: ""
+
+# -------------------------------
+# Readiness/wait tuning
+# -------------------------------
+# How many retries and delay (seconds) when waiting for Vault readiness/unseal
+vault_wait_retries: 45
+vault_wait_delay: 2
+# If true, keep current behavior and do not fail the play when Vault remains
+# sealed after all retries. If false (default), fail fast to surface the issue.
+vault_allow_sealed_continue: false
+
+# How many retries and delay (seconds) when waiting for Vault node
+# to become HA active leader before performing PKI/ACME writes
+vault_wait_active_retries: 45
+vault_wait_active_delay: 2
+
+# Clustering control
+# Force-disable clustering (HA) — useful for single-device deployments or initial bring-up
+vault_disable_clustering: false
+
+# Vault cluster (raft) TCP port used for cluster_addr
+vault_cluster_port: 8201
+
+# TLS paths inside container (used by listener)
+vault_tls_cert_path: "{{ vault_tls_dir_in_container }}/api.crt"
+vault_tls_key_path: "{{ vault_tls_dir_in_container }}/api.key"
+
+# Fresh bootstrap controls (DANGEROUS: wipes local Raft data when true)
+# Use this only when you intentionally want to recreate the cluster from scratch
+# or when no data must be preserved. When true, each host will remove its
+# local Vault data directory before (re)starting the container.
+vault_force_fresh_bootstrap: false

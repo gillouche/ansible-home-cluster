@@ -9,5 +9,5 @@ galaxy_info:
       versions: ['all']
 dependencies:
   - role: utils
-  - role: podman
+  - role: containers
   - role: keepalived

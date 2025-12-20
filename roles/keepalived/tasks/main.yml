@@ -1,6 +1,12 @@
 ---
 # Generic keepalived setup role (installed once, used by dependent roles)
 
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
 - name: Ensure keepalived is installed (Arch)
   community.general.pacman:
     name: keepalived

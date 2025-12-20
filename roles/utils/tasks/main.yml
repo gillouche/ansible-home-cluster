@@ -1,4 +1,11 @@
 ---
+
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
 - name: Install diagnostics and common tools (Arch)
   community.general.pacman:
     state: present
@@ -20,6 +27,7 @@
       - whois
       - gnu-netcat
       - httpie
+      - python-pip
       - iproute2        # provides ss, ip
       - iputils         # provides ping, arping
       - openssl         # tls debugging (s_client, x509)
@@ -33,4 +41,3 @@
   become: true
   when:
     - (ansible_facts['distribution'] | lower) == 'archlinux'
-    - utils_install_diagnostics | default(false) | bool

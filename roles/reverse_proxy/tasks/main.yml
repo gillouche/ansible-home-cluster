@@ -1,5 +1,10 @@
 ---
 # tasks for reverse_proxy (Caddy + keepalived VIP)
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
 
 - name: Determine reverse proxy role for this host
   ansible.builtin.set_fact:

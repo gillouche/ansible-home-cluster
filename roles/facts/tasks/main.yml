@@ -7,6 +7,12 @@
   when: target_user is not defined
   become: false
 
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
 - name: Print all available facts if debug verbosity 4 is enabled
   ansible.builtin.debug:
     msg:

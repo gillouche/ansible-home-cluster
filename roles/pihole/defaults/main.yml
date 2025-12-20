@@ -66,9 +66,7 @@ pihole_dns_wildcard_domains:
 # Reverse proxy VIP used for wildcard DNS (defaults to global reverse_proxy_virtual_ip)
 pihole_reverse_proxy_vip: "{{ reverse_proxy_virtual_ip | default('192.168.0.252') }}"
 
-# Networking/ports for Podman
-# Run rootless by default using slirp4netns and publish mapped ports
-pihole_rootless: false
+# Networking/ports for Podman (always bridge; ports are configurable)
 pihole_dns_tcp_port: 53
 pihole_dns_udp_port: 53
 pihole_http_host_port: 8080

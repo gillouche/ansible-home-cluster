@@ -1,0 +1,6 @@
+table inet filter {
+  chain input {
+    # Allow all traffic from your LAN subnet
+    ip saddr {{ firewall_lan_subnet }} accept comment "allow all from LAN"
+  }
+}

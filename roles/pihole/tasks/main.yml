@@ -6,6 +6,31 @@
   when: inventory_hostname not in (groups['pihole_cluster'] | default([]))
   become: false
 
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
+- name: Add NFT firewall rules for pihole
+  ansible.builtin.template:
+    src: 30-pihole.nft.j2
+    dest: /etc/nftables.d/30-pihole.nft
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart nftables
+  become: true
+
+- name: Allow rootless publish of low ports (enable ports <1024 starting at 53)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_unprivileged_port_start
+    value: '53'
+    state: present
+    sysctl_set: true
+    reload: true
+  become: true
+
 - name: Create pihole directory
   ansible.builtin.file:
     path: "/home/{{ target_user }}/pihole"
@@ -291,32 +316,6 @@
     pihole_target_gid: "{{ (pihole_target_user_gid.stdout | default('')) | trim }}"
   become: false
 
-- name: Start/Update pihole container (Podman, rootless)
-  containers.podman.podman_container:
-    name: "{{ pihole_container_name }}"
-    image: "{{ pihole_image }}"
-    state: started
-    restart_policy: always
-    userns: keep-id
-    user: "{{ pihole_target_uid }}:{{ pihole_target_gid }}"
-    published_ports:
-      - "{{ pihole_dns_tcp_port }}:53/tcp"
-      - "{{ pihole_dns_udp_port }}:53/udp"
-      - "{{ pihole_http_host_port }}:80/tcp"
-      - "{{ pihole_https_host_port }}:443/tcp"
-    env:
-      TZ: "{{ pihole_timezone }}"
-      FTLCONF_webserver_api_password: "{{ pihole_web_password }}"
-      FTLCONF_dns_listeningMode: "ALL"
-      FTLCONF_dns_upstreams: "{{ pihole_dns }}"
-      PIHOLE_UID: "{{ pihole_target_uid }}"
-      PIHOLE_GID: "{{ pihole_target_gid }}"
-    volumes:
-      - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
-      - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
-  become: false
-  when: pihole_rootless | bool
-
 - name: Start/Update pihole container (Podman, rootful)
   containers.podman.podman_container:
     name: "{{ pihole_container_name }}"
@@ -342,7 +341,6 @@
       - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
       - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
   become: true
-  when: not (pihole_rootless | bool)
 
 - name: Wait for pihole web UI to be up
   ansible.builtin.wait_for:

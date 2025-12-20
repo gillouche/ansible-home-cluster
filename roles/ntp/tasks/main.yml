@@ -1,5 +1,10 @@
 ---
 # tasks for ntp role (Arch Linux NTP daemon)
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
 
 - name: Ensure ntp package is installed (Arch)
   community.general.pacman:

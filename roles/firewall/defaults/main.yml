@@ -1,0 +1,18 @@
+---
+# Intentionally left empty.
+# Note: `lan_subnet` is now defined globally in
+# inventories/group_vars/all.yml so that all devices share the same value.
+firewall_lan_subnet: "192.168.0.0/24"
+
+# Templates managed by the firewall role. Override in group_vars/host_vars to extend.
+firewall_templates:
+  - src: 10-allow-homelab.nft.j2
+    dest: /etc/nftables.d/10-allow-homelab.nft
+    owner: root
+    group: root
+    mode: '0644'
+  - src: 99-output-accept.nft.j2
+    dest: /etc/nftables.d/99-output-accept.nft
+    owner: root
+    group: root
+    mode: '0644'

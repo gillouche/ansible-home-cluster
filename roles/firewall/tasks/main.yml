@@ -1,0 +1,92 @@
+
+---
+# Firewall role: ensure required firewall packages and set permissive LAN policy
+
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
+# Package management moved here from podman role
+- name: Remove legacy iptables package (Arch)
+  community.general.pacman:
+    name: iptables
+    state: absent
+    force: true
+  become: true
+  when: (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
+
+- name: Install nftables stack (Arch)
+  community.general.pacman:
+    name:
+      - iptables-nft
+      - nftables
+    state: present
+  become: true
+  when: (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
+
+- name: Installing NFTables python-module with pip (pacman packages doesn't exist)
+  ansible.builtin.pip:
+    name: 'oxl-libnftables'
+    break_system_packages: true
+    state: present
+  become: true
+
+- name: Ensure /etc/nftables.d exists
+  ansible.builtin.file:
+    path: /etc/nftables.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Deploy nftables templates to /etc/nftables.d
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop: "{{ firewall_templates }}"
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Restart nftables
+  become: true
+
+- name: Ensure /etc/nftables.conf includes /etc/nftables.d at end
+  ansible.builtin.lineinfile:
+    path: /etc/nftables.conf
+    regexp: '^include\s+"/etc/nftables\.d/\*\.nft"\s*$'
+    line: 'include "/etc/nftables.d/*.nft"'
+    insertafter: EOF
+    state: present
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart nftables
+  become: true
+
+- name: Ensure legacy rate-limit rule is absent from /etc/nftables.conf
+  ansible.builtin.lineinfile:
+    path: /etc/nftables.conf
+    regexp: '^\s*pkttype\s+host\s+limit\s+rate\s+5/second\s+counter\s+reject\s+with\s+icmpx\s+type\s+admin-prohibited\s*$'
+    state: absent
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart nftables
+  become: true
+
+- name: Enable nftables service
+  ansible.builtin.systemd:
+    name: nftables.service
+    enabled: true
+  become: true
+
+- name: Ensure nftables service is running
+  ansible.builtin.systemd:
+    name: nftables.service
+    state: started
+  become: true

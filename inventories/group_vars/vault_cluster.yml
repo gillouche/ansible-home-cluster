@@ -4,12 +4,8 @@ vault_cluster_port: 8201
 vault_image: hashicorp/vault:1.21.1
 vault_acme_require_eab: false
 
-# Optional “defense in depth”: restrict Vault to LAN (documented; enforcement in role)
-vault_firewall_enable: true
-vault_allowed_subnet: "192.168.0.0/24"
-
 # Controller vault password path (used by run.sh)
 controller_vault_password_file: "~/.local/share/ansible-home-cluster/.vault_pass"
 
 # Stable advertise addr for ACME (avoid redirects to leader hostname)
-vault_acme_advertise_addr: 192.168.0.13
+vault_acme_advertise_addr: 192.168.0.81

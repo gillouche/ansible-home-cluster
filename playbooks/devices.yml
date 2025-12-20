@@ -24,9 +24,12 @@
       tags:
         - aur
         - aur_rebuild_yay
-    - role: podman
+    - role: firewall
       tags:
-        - podman
+        - firewall
+    - role: containers
+      tags:
+        - containers
 
 # Pi-hole cluster setup runs only on the pihole_cluster group
 # this creates the virtual IP for the DNS so it must be executed first
@@ -146,6 +149,24 @@
   roles:
     - role: devices_ssh
     - role: devices_network
+
+## --- General purpose firewall rule reset ---
+
+- name: Flush firewall rules existing on devices
+  hosts: all
+  gather_facts: false
+  become: true
+  tags:
+    - never
+    - reset_firewall
+
+  tasks:
+    # need to restart all containers afterwards because the NFT rules from podman will be missing
+    - name: Flush firewall rules
+      ansible.builtin.command: >-
+        nft flush ruleset
+      changed_when: true
+
 
 ## --- General purpose staggered reboot (sequential, waits for each host) ---
 

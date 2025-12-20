@@ -1,6 +1,12 @@
 ---
 # tasks for maintenance (os package updates)
 
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
 - name: Refresh pacman database and upgrade all packages (Arch only)
   community.general.pacman:
     update_cache: true

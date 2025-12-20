@@ -23,27 +23,27 @@ all:
       ansible_ssh_user: alarm
       target_user: alarm
     rpi5b16g1ssd: # storage, vault, anything with heavy writes + nexus
-      ansible_host: 192.168.0.13
+      ansible_host: 192.168.0.81
       ansible_ssh_user: alarm
       target_user: alarm
     rpi5b16g2ssd: # storage, vault, anything with heavy writes
-      ansible_host: 192.168.0.19
+      ansible_host: 192.168.0.82
       ansible_ssh_user: alarm
       target_user: alarm
     rpi5b16g3ssd: # storage, vault, anything with heavy writes
-      ansible_host: 192.168.0.155
+      ansible_host: 192.168.0.83
       ansible_ssh_user: alarm
       target_user: alarm
     rpi5b16g4: # k8s master + primary -> pihole, reverse proxy
-      ansible_host: 192.168.0.201
+      ansible_host: 192.168.0.84
       ansible_ssh_user: alarm
       target_user: alarm
     rpi5b16g5: # k8s master + replicas -> pihole, reverse proxy
-      ansible_host: 192.168.0.217
+      ansible_host: 192.168.0.85
       ansible_ssh_user: alarm
       target_user: alarm
     rpi5b16g6: # k8s master + replicas -> pihole, reverse proxy
-      ansible_host: 192.168.0.227
+      ansible_host: 192.168.0.86
       ansible_ssh_user: alarm
       target_user: alarm
 

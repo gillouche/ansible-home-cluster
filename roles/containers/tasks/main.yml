@@ -8,13 +8,28 @@
       - min
   when: ansible_distribution is not defined
 
-- name: Force remove legacy iptables (ignore deps) with pacman module
-  community.general.pacman:
-    name: iptables
-    state: absent
-    force: true
+- name: Ensure container FORWARD table exists (allow destroy in file)
+  ansible.builtin.command: nft add table inet FORWARD_CONTAINERS
   become: true
-  when: (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
+  ignore_errors: yes
+
+- name: Ensure container NAT table exists (allow destroy in file)
+  ansible.builtin.command: nft add table ip NAT_CONTAINERS
+  become: true
+  ignore_errors: yes
+
+- name: Deploy containers nftables templates to /etc/nftables.d
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop: "{{ containers_templates }}"
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Restart nftables
+  become: true
 
 - name: Install Podman and dependencies (Arch)
   community.general.pacman:
@@ -24,7 +39,6 @@
       - slirp4netns
       - netavark
       - aardvark-dns
-      - iptables-nft
     state: present
   become: true
   when: (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
@@ -33,15 +47,6 @@
   ansible.posix.sysctl:
     name: net.ipv4.ip_forward
     value: '1'
-    state: present
-    sysctl_set: true
-    reload: true
-  become: true
-
-- name: Allow rootless publish of low ports (enable ports <1024 starting at 53)
-  ansible.posix.sysctl:
-    name: net.ipv4.ip_unprivileged_port_start
-    value: '53'
     state: present
     sysctl_set: true
     reload: true

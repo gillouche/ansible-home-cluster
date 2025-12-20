@@ -1,0 +1,50 @@
+# Flush only the chains we manage to avoid duplicates
+
+############################
+# Container networking rules
+############################
+
+# FORWARD chain for container bridges
+destroy table inet FORWARD_CONTAINERS
+table inet FORWARD_CONTAINERS {
+  chain forward {
+    type filter hook forward priority filter; policy accept;
+
+    # Allow established container traffic
+    ct state { established, related } accept comment "allow established container traffic"
+
+    # Docker bridge
+    iifname "docker0" accept comment "docker bridge ingress"
+    oifname "docker0" accept comment "docker bridge egress"
+
+    # Podman / Netavark bridges
+    iifname "podman*" accept comment "podman bridge ingress"
+    oifname "podman*" accept comment "podman bridge egress"
+
+    # Generic CNI bridges (k3s, flannel, calico, etc.)
+    iifname "cni*" accept comment "cni ingress"
+    oifname "cni*" accept comment "cni egress"
+
+    # Allow container ↔ host traffic
+    iifname { "docker0", "podman*", "cni*" } accept
+    oifname { "docker0", "podman*", "cni*" } accept
+  }
+}
+
+# NAT table for container masquerading
+destroy table ip NAT_CONTAINERS
+table ip NAT_CONTAINERS {
+  chain postrouting {
+    type nat hook postrouting priority srcnat; policy accept;
+
+    # Docker
+    oifname != "docker0" ip saddr 172.17.0.0/16 masquerade comment "docker nat"
+
+    # Podman
+    oifname != "podman*" ip saddr 10.88.0.0/16 masquerade comment "podman nat"
+
+    # CNI (k3s pods/services)
+    oifname != "cni*" ip saddr 10.42.0.0/16 masquerade comment "k3s pod cidr"
+    oifname != "cni*" ip saddr 10.43.0.0/16 masquerade comment "k3s service cidr"
+  }
+}

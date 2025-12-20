@@ -1,6 +1,11 @@
 ---
 # tasks file for aur-helper
 ## variables come from role defaults; no need to set here
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
 
 - name: Create the `aur_builder` user
   become: yes
