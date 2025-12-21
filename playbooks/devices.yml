@@ -44,14 +44,48 @@
       tags:
         - pihole
 
-# HashiCorp Vault cluster (3-node Raft)
-- name: Setup HashiCorp Vault cluster
+# HashiCorp Vault cluster (3-node Raft) — single play, staged execution
+- name: "Setup HashiCorp Vault cluster (staged: common → leader → followers)"
   hosts: vault_cluster
   gather_facts: true
   become: false
 
-  roles:
-    - role: vault
+  tasks:
+    # Stage 1 — common on all nodes
+    - name: Vault common prep on all nodes
+      import_role:
+        name: vault
+      vars:
+        vault_stage: common
+      tags:
+        - vault
+
+    # Stage 2 — leader only (first host)
+    - name: Vault leader bring-up (first host only)
+      import_role:
+        name: vault
+      vars:
+        vault_stage: leader
+      when: inventory_hostname == groups['vault_cluster'][0]
+      tags:
+        - vault
+
+    # Stage 3 — followers only (exclude leader)
+    - name: Vault followers bring-up (exclude leader)
+      import_role:
+        name: vault
+      vars:
+        vault_stage: followers
+      when: inventory_hostname != groups['vault_cluster'][0]
+      tags:
+        - vault
+
+    # Stage 4 — trust distribution on all hosts + controller bundle/keychain (optional)
+    - name: Vault trust distribution (Cluster CA + optional Root CA)
+      import_role:
+        name: vault
+      vars:
+        vault_stage: trust
       tags:
         - vault
 

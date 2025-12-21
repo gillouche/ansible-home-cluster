@@ -2,6 +2,7 @@
 # Caddy container configuration
 reverse_proxy_container_name: "caddy"
 reverse_proxy_image: "caddy:2.10.2"
+lan_subnet: "192.168.0.0/24"
 
 # TLS settings — Vault ACME by default (no file certs)
 # Modes:

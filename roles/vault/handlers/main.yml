@@ -1,0 +1,10 @@
+---
+# Handlers for Vault role
+
+- name: Restart Vault container to apply config changes (if needed)
+  containers.podman.podman_container:
+    name: "{{ vault_container_name }}"
+    image: "{{ vault_image }}"
+    state: started
+    restart: true
+  become: true

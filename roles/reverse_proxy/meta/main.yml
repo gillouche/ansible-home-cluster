@@ -8,6 +8,4 @@ galaxy_info:
     - name: GenericLinux
       versions: ['all']
 dependencies:
-  - role: utils
-  - role: containers
   - role: keepalived

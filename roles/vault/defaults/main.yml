@@ -2,9 +2,7 @@
 vault_image: "hashicorp/vault:1.21.1"
 vault_container_name: "vault"
 vault_api_port: 8200
-vault_published_ports:
-  - "8200:8200/tcp"
-  - "8201:8201/tcp"
+lan_subnet: "192.168.0.0/24"
 
 # Networking policy: all containers use bridge networking with published ports.
 # Host networking is not supported and should not be used.

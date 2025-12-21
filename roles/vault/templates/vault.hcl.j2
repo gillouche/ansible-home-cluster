@@ -26,18 +26,24 @@ path    = "{{ vault_data_dir_in_container }}"
     retry_join {
     # Target the bootstrap node's API address (use IP to avoid DNS dependency)
     leader_api_addr       = "https://{{ hostvars[first_node].ansible_facts.default_ipv4.address | default(first_node) }}:{{ vault_api_port }}"
-    # In initial bootstrap, skip TLS verification to avoid CA mismatch; tighten later
+    # Verify the leader's certificate against our cluster CA and set SNI to the leader IP
     leader_tls_servername = "{{ hostvars[first_node].ansible_facts.default_ipv4.address | default(first_node) }}"
-    leader_tls_skip_verify = true
+    leader_ca_cert_file   = "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
+    leader_client_cert_file = ""
+    leader_client_key_file  = ""
+    leader_tls_skip_verify = false
     }
 {% endif %}
 }
 
 listener "tcp" {
-address         = "{{ vault_listener_address | default(vault_bind_ip) }}:{{ vault_api_port }}"
-tls_disable     = 0
-tls_cert_file   = "{{ vault_tls_cert_path }}"
-tls_key_file    = "{{ vault_tls_key_path }}"
+  address         = "{{ vault_listener_address | default(vault_bind_ip) }}:{{ vault_api_port }}"
+  tls_disable     = 0
+  tls_cert_file   = "{{ vault_tls_cert_path }}"
+  tls_key_file    = "{{ vault_tls_key_path }}"
+  # Trust our cluster CA for inbound client verification when clients present certs
+  # (not enabling mTLS by default; this only supplies CA chain for verification where applicable)
+  tls_client_ca_file = "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
 }
 
 telemetry {
