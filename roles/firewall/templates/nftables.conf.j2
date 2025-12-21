@@ -1,0 +1,57 @@
+#!/usr/bin/nft -f
+# vim:set ts=2 sw=2 et:
+
+############################
+# Base firewall ruleset
+############################
+
+destroy table inet filter
+
+table inet filter {
+
+  ################
+  # INPUT (to host)
+  ################
+  chain input {
+    type filter hook input priority filter; policy drop;
+
+    # Drop broken traffic early
+    ct state invalid drop
+
+    # Allow established connections
+    ct state { established, related } accept
+
+    # Allow loopback
+    iif lo accept
+
+    # FULL TRUST: LAN
+    ip saddr {{ lan_subnet }} accept
+
+    # Diagnostics (optional but sane)
+    ip protocol icmp accept
+    meta l4proto ipv6-icmp accept
+  }
+
+  ###################
+  # FORWARD (routing)
+  ###################
+  chain forward {
+    type filter hook forward priority filter; policy drop;
+
+    # FULL TRUST: LAN
+    ip saddr {{ lan_subnet }} accept
+    ip daddr {{ lan_subnet }} accept
+  }
+
+  #################
+  # OUTPUT (host)
+  #################
+  chain output {
+    type filter hook output priority filter; policy accept;
+  }
+}
+
+############################
+# Additional rules
+############################
+# include "/etc/nftables.d/*.nft"

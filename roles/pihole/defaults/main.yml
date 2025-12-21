@@ -2,6 +2,7 @@
 # Docker image and container name (pinned by default; override in group_vars if needed)
 pihole_image: "pihole/pihole:2025.11.1"
 pihole_container_name: "pihole"
+lan_subnet: "192.168.0.0/24"
 
 # Environment defaults
 pihole_web_password: "changeme"

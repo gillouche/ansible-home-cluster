@@ -1,6 +1,0 @@
-# Allow all outbound traffic (explicit, future-proof)
-table inet filter {
-    chain output {
-        type filter hook output priority filter; policy accept;
-    }
-}

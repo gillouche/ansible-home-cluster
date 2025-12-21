@@ -7,6 +7,7 @@
   tags:
     - base
 
+  # roles executed on all hosts, they shouldn't be a dependency of another role
   roles:
     - role: facts
       tags:

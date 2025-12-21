@@ -1,8 +1,0 @@
----
-# Templates managed by the containers role. Override in group_vars/host_vars to extend.
-containers_templates:
-  - src: 20-containers.nft.j2
-    dest: /etc/nftables.d/20-containers.nft
-    owner: root
-    group: root
-    mode: '0644'

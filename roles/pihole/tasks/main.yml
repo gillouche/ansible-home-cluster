@@ -12,15 +12,6 @@
       - min
   when: ansible_distribution is not defined
 
-- name: Add NFT firewall rules for pihole
-  ansible.builtin.template:
-    src: 30-pihole.nft.j2
-    dest: /etc/nftables.d/30-pihole.nft
-    owner: root
-    group: root
-    mode: '0644'
-  notify: Restart nftables
-  become: true
 
 - name: Allow rootless publish of low ports (enable ports <1024 starting at 53)
   ansible.posix.sysctl:

@@ -42,40 +42,29 @@
     mode: '0755'
   become: true
 
-- name: Deploy nftables templates to /etc/nftables.d
+- name: Deploy consolidated nftables.conf
   ansible.builtin.template:
-    src: "{{ item.src }}"
-    dest: "{{ item.dest }}"
-    owner: "{{ item.owner | default('root') }}"
-    group: "{{ item.group | default('root') }}"
-    mode: "{{ item.mode | default('0644') }}"
-  loop: "{{ firewall_templates }}"
-  loop_control:
-    label: "{{ item.dest }}"
-  notify: Restart nftables
-  become: true
-
-- name: Ensure /etc/nftables.conf includes /etc/nftables.d at end
-  ansible.builtin.lineinfile:
-    path: /etc/nftables.conf
-    regexp: '^include\s+"/etc/nftables\.d/\*\.nft"\s*$'
-    line: 'include "/etc/nftables.d/*.nft"'
-    insertafter: EOF
-    state: present
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
     owner: root
     group: root
     mode: '0644'
   notify: Restart nftables
   become: true
 
-- name: Ensure legacy rate-limit rule is absent from /etc/nftables.conf
-  ansible.builtin.lineinfile:
-    path: /etc/nftables.conf
-    regexp: '^\s*pkttype\s+host\s+limit\s+rate\s+5/second\s+counter\s+reject\s+with\s+icmpx\s+type\s+admin-prohibited\s*$'
+- name: Find existing files under /etc/nftables.d
+  ansible.builtin.find:
+    paths: /etc/nftables.d
+    file_type: any
+  register: nftables_d_contents
+  become: true
+
+- name: Purge /etc/nftables.d contents (leave directory present)
+  ansible.builtin.file:
+    path: "{{ item.path }}"
     state: absent
-    owner: root
-    group: root
-    mode: '0644'
+  loop: "{{ nftables_d_contents.files | default([]) }}"
+  when: (nftables_d_contents.matched | default(0)) > 0
   notify: Restart nftables
   become: true
 
