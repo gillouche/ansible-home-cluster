@@ -1,6 +1,33 @@
 ---
 # Common preparation tasks for all Vault nodes (no container start here)
 
+- name: Ensure vault group exists
+  ansible.builtin.group:
+    name: "{{ vault_runtime_group_name | default('vault') }}"
+    state: present
+    system: true
+  become: true
+
+- name: Ensure vault user exists with home directory
+  ansible.builtin.user:
+    name: "{{ vault_runtime_user | default('vault') }}"
+    state: present
+    system: true
+    group: "{{ vault_runtime_group_name | default('vault') }}"
+    home: "/home/{{ vault_runtime_user | default('vault') }}"
+    create_home: true
+    shell: /usr/bin/nologin
+  become: true
+
+- name: Ensure /home/vault root directory exists
+  ansible.builtin.file:
+    path: "/home/{{ vault_runtime_user | default('vault') }}"
+    state: directory
+    owner: "{{ vault_runtime_user | default('vault') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
+    mode: '0750'
+  become: true
+
 - name: Ensure controller CA directory exists (run on controller)
   ansible.builtin.file:
     path: "{{ vault_cluster_ca_dir_controller | expanduser }}"
@@ -9,6 +36,7 @@
   delegate_to: localhost
   run_once: true
   become: false
+  when: vault_is_bootstrap | default(false)
 
 - name: Check if cluster CA exists (controller)
   ansible.builtin.stat:
@@ -17,11 +45,13 @@
   delegate_to: localhost
   run_once: true
   become: false
+  when: (vault_is_bootstrap | default(false)) or ((vault_stage | default('')) == 'bootstrap')
 
 - name: Generate Vault cluster CA when missing (controller)
   ansible.builtin.shell: |
     set -euo pipefail
     umask 077
+    mkdir -p {{ vault_cluster_ca_dir_controller | expanduser }}
     cd {{ vault_cluster_ca_dir_controller | expanduser }}
     if [ ! -f cluster-ca.key ]; then
       openssl genrsa -out cluster-ca.key 4096
@@ -50,17 +80,37 @@
     fi
   args:
     executable: /bin/sh
-  when: not _vault_ca_cert_stat_common.stat.exists
+  when:
+    - (vault_is_bootstrap | default(false)) or ((vault_stage | default('')) == 'bootstrap')
+    - not _vault_ca_cert_stat_common.stat.exists
   delegate_to: localhost
   run_once: true
   become: false
+
+- name: Ensure Vault host logs directory exists (bootstrap)
+  ansible.builtin.file:
+    path: "/home/vault/logs"
+    state: directory
+    owner: "{{ vault_runtime_user | default('vault') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
+    mode: '0775'
+  become: true
+
+- name: Ensure Vault host bin directory exists (bootstrap)
+  ansible.builtin.file:
+    path: "/home/vault/bin"
+    state: directory
+    owner: "{{ vault_runtime_user | default('vault') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
+    mode: '0755'
+  become: true
 
 - name: Ensure host TLS directory exists
   ansible.builtin.file:
     path: "{{ vault_host_tls_dir }}"
     state: directory
     owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: '0750'
   become: true
 
@@ -69,7 +119,7 @@
     src: "{{ vault_cluster_ca_cert_controller | expanduser }}"
     dest: "{{ vault_host_tls_dir }}/cluster-ca.pem"
     owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: '0644'
   become: true
 
@@ -91,7 +141,7 @@
   ansible.builtin.copy:
     dest: "{{ vault_host_tls_dir }}/openssl-api.cnf"
     owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: '0644'
     content: |
       [ req ]
@@ -122,10 +172,14 @@
 - name: Stat TLS assets
   ansible.builtin.stat:
     path: "{{ item }}"
+    get_attributes: false
+    get_checksum: false
   loop:
     - "{{ vault_host_tls_dir }}/api.key"
     - "{{ vault_host_tls_dir }}/api.crt"
   register: _tls_stats
+  become: true
+  become_user: root
 
 - name: Read current cert SANs (if present)
   ansible.builtin.command: >-
@@ -134,11 +188,12 @@
   changed_when: false
   failed_when: false
   when: (_tls_stats.results[1].stat.exists | default(false))
+  become: true
 
 - name: Decide if TLS regeneration is required
   ansible.builtin.set_fact:
     _tls_regen_required: >-
-      {{ (vault_tls_force_regen | default(false))
+      {{ (vault_tls_force_regen | default(false)) or (vault_force_tls_regen | default(false))
          or not (_tls_stats.results[0].stat.exists | default(false))
          or not (_tls_stats.results[1].stat.exists | default(false))
          or (
@@ -163,11 +218,19 @@
   changed_when: true
   become: true
 
+- name: Ensure CSRs directory exists on controller
+  ansible.builtin.file:
+    path: "{{ vault_cluster_ca_dir_controller | expanduser }}/csrs"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+
 - name: Fetch CSR to controller
   ansible.builtin.fetch:
     src: "{{ vault_host_tls_dir }}/api.csr"
     dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/csrs/{{ inventory_hostname }}.csr"
     flat: true
+  become: true
 
 - name: Ensure extfiles directory exists on controller
   ansible.builtin.file:
@@ -223,7 +286,7 @@
     src: "{{ vault_cluster_ca_dir_controller | expanduser }}/certs/{{ inventory_hostname }}.crt"
     dest: "{{ vault_host_tls_dir }}/api.crt"
     owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: '0644'
     force: false
   become: true
@@ -233,7 +296,7 @@
   ansible.builtin.file:
     path: "{{ item.path }}"
     owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: "{{ item.mode }}"
   loop:
     - { path: "{{ vault_host_tls_dir }}/api.key", mode: '0600' }
@@ -246,7 +309,7 @@
     path: "{{ item.path }}"
     state: directory
     owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: "{{ item.mode }}"
   loop:
     - { path: "{{ vault_host_config_dir }}", mode: '0750' }
@@ -254,15 +317,36 @@
     - { path: "{{ vault_host_data_dir }}",   mode: '0770' }
   become: true
 
+- name: Ensure Vault host logs directory exists (leader)
+  ansible.builtin.file:
+    path: "/home/vault/logs"
+    state: directory
+    owner: "{{ vault_runtime_user | default('vault') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
+    mode: '0775'
+  become: true
+
+- name: Ensure Vault host bin directory exists (leader)
+  ansible.builtin.file:
+    path: "/home/vault/bin"
+    state: directory
+    owner: "{{ vault_runtime_user | default('vault') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
+    mode: '0755'
+  become: true
+
 - name: Render Vault configuration from template (no container start here)
   ansible.builtin.template:
-    src: "vault.hcl.j2"
+    src: "{{ (_vault_cfg_template | string) }}"
     dest: "{{ vault_host_config_dir }}/vault.hcl"
     owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: '0644'
   become: true
   vars:
+    _vault_cfg_template: >-
+      {{ ((vault_is_bootstrap | default(false)) or ((vault_stage | default('')) == 'bootstrap'))
+          | ternary('vault.bootstrap.hcl.j2', 'vault.hcl.j2') }}
     # Compute effective Vault public URL used by the template
     vault_public_url_effective: >-
       {{

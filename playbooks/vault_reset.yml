@@ -1,0 +1,70 @@
+---
+# One-shot nuclear reset for Vault cluster
+# This playbook purges all controller artifacts under ~/.local/share/ansible-home-cluster
+# and wipes /home/vault on all hosts in the vault_cluster group. It does NOT start or configure Vault.
+
+- name: Nuclear reset for Vault (controller + all vault nodes)
+  hosts: vault_cluster
+  gather_facts: true
+  become: false
+
+  vars:
+    vault_container_name: "vault"
+    vault_runtime_user: "vault"
+    vault_runtime_group_name: "vault"
+
+  tasks:
+    # Controller cleanup (localhost)
+    - name: Nuclear reset on controller — remove ~/.local/share/ansible-home-cluster (DANGEROUS)
+      ansible.builtin.file:
+        path: "~/.local/share/ansible-home-cluster"
+        state: absent
+      delegate_to: localhost
+      run_once: true
+
+    - name: Recreate controller base directory after nuclear reset
+      ansible.builtin.file:
+        path: "~/.local/share/ansible-home-cluster"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      run_once: true
+
+    # Host-side cleanup
+    - name: Stop and remove Vault container if present (host)
+      containers.podman.podman_container:
+        name: "{{ vault_container_name }}"
+        state: absent
+      become: true
+      failed_when: false
+
+    - name: Wipe Vault home directory on host (DANGEROUS)
+      ansible.builtin.file:
+        path: "/home/vault"
+        state: absent
+      become: true
+
+    - name: Recreate Vault base directory structure on host
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ vault_runtime_user }}"
+        group: "{{ vault_runtime_group_name }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "/home/vault",        mode: '0750' }
+        - { path: "/home/vault/config", mode: '0750' }
+        - { path: "/home/vault/tls",    mode: '0750' }
+        - { path: "/home/vault/data",   mode: '0770' }
+        - { path: "/home/vault/logs",   mode: '0775' }
+        - { path: "/home/vault/bin",    mode: '0755' }
+      become: true
+
+    - name: Ensure TLS directory is empty after nuclear reset
+      ansible.builtin.file:
+        path: "/home/vault/tls"
+        state: directory
+        owner: "{{ vault_runtime_user }}"
+        group: "{{ vault_runtime_group_name }}"
+        mode: '0750'
+      become: true

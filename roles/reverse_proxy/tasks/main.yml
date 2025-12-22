@@ -1,4 +1,36 @@
 ---
+
+- name: Ensure reverse_proxy system user exists with home
+  block:
+    - name: Detect nologin path
+      ansible.builtin.set_fact:
+        _nologin_path: >-
+          {{ '/usr/sbin/nologin' if (ansible_facts['path'] is defined and '/usr/sbin' in ansible_facts['path']) else '/sbin/nologin' }}
+      when: false  # placeholder; below we probe files directly
+
+    - name: Probe available nologin paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /usr/sbin/nologin
+        - /sbin/nologin
+        - /usr/bin/nologin
+      register: _nologin_stats
+
+    - name: Pick first available nologin
+      ansible.builtin.set_fact:
+        reverse_proxy_nologin: "{{ (_nologin_stats.results | selectattr('stat.exists','defined') | selectattr('stat.exists') | map(attribute='invocation.module_args.path') | list | first) | default('/usr/sbin/nologin') }}"
+
+    - name: Create reverse_proxy system user with home
+      ansible.builtin.user:
+        name: reverse_proxy
+        comment: "Reverse Proxy Service User"
+        home: "/home/reverse_proxy"
+        create_home: true
+        shell: "{{ reverse_proxy_nologin }}"
+        system: true
+  become: true
+
 # tasks for reverse_proxy (Caddy + keepalived VIP)
 - name: Gather minimal facts (role safeguard when running with tags)
   ansible.builtin.setup:
@@ -92,81 +124,69 @@
 # Caddy reverse proxy using Podman
 # ----------------------------------------
 
-- name: Ensure reverse-proxy directories exist
+- name: Ensure reverse proxy host directories exist
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ item.path }}"
     state: directory
-    owner: "{{ target_user }}"
-    group: "{{ target_user }}"
-    mode: '0755'
+    owner: "reverse_proxy"
+    group: "reverse_proxy"
+    mode: "{{ item.mode }}"
   loop:
-    - "/home/{{ target_user }}/reverse-proxy"
-    - "/home/{{ target_user }}/reverse-proxy/data"
+    - { path: "{{ reverse_proxy_root_dir }}",   mode: '0755' }
+    - { path: "{{ reverse_proxy_config_dir }}", mode: '0755' }
+    - { path: "{{ reverse_proxy_data_dir }}",   mode: '0755' }
+    - { path: "{{ reverse_proxy_certs_dir }}",  mode: '0755' }
   become: true
 
-- name: Build Caddyfile from reverse_proxy_sites
-  ansible.builtin.copy:
-    dest: "/home/{{ target_user }}/reverse-proxy/Caddyfile"
-    owner: "{{ target_user }}"
-    group: "{{ target_user }}"
+- name: Build Caddyfile from reverse_proxy_domains (use Vault ACME)
+  ansible.builtin.template:
+    src: "Caddyfile.j2"
+    dest: "{{ reverse_proxy_config_dir }}/Caddyfile"
+    owner: reverse_proxy
+    group: reverse_proxy
     mode: '0644'
-    content: |
-      {% if reverse_proxy_tls_mode | default('vault_acme') == 'vault_acme' %}
-      {
-        email {{ reverse_proxy_acme_email | default('noreply@local') }}
-        acme_ca {{ reverse_proxy_acme_ca_url }}
-        {% if reverse_proxy_mount_host_ca_bundle | default(true) %}
-        env SSL_CERT_FILE={{ reverse_proxy_ca_container_file | default('/etc/ssl/certs/host-ca-bundle.pem') }}
-        {% endif %}
-      }
-      {% endif %}
-
-      {% for site in reverse_proxy_sites | default([]) %}
-      {{ site.host }} {
-        reverse_proxy {{ site.upstream }}
-      }
-      {% endfor %}
+  notify: Restart reverse proxy
   become: true
 
-- name: Ensure host CA bundle exists if it will be mounted
-  ansible.builtin.stat:
-    path: "{{ reverse_proxy_ca_host_file | default('/etc/ssl/cert.pem') }}"
-  register: reverse_proxy_host_ca_stat
+
+- name: Copy Vault Cluster CA to reverse proxy trust path (for ACME)
+  ansible.builtin.copy:
+    src: "{{ vault_cluster_ca_cert_controller | default('~/.local/share/ansible-home-cluster/vault-ca/cluster-ca.pem') | expanduser }}"
+    dest: "{{ reverse_proxy_certs_dir }}/vault-cluster-ca.pem"
+    owner: "reverse_proxy"
+    group: "reverse_proxy"
+    mode: '0644'
   become: true
-  when: reverse_proxy_mount_host_ca_bundle | default(true)
 
-- name: Build Caddy container volumes list
-  ansible.builtin.set_fact:
-    reverse_proxy_caddy_volumes_list: >-
-      {{
-        [
-          "/home/" ~ target_user ~ "/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro",
-          "/home/" ~ target_user ~ "/reverse-proxy/data:/data"
-        ]
-        +
-        (
-          [ (reverse_proxy_ca_host_file |
-            default('/etc/ssl/cert.pem')) ~ ":" ~ (reverse_proxy_ca_container_file |
-            default('/etc/ssl/certs/host-ca-bundle.pem')) ~ ":ro" ]
-          if (reverse_proxy_mount_host_ca_bundle | default(true)) and (reverse_proxy_host_ca_stat.stat.exists |
-            default(false))
-          else []
-        )
-      }}
+- name: Render Caddyfile with Vault ACME configured
+  ansible.builtin.template:
+    src: "Caddyfile.j2"
+    dest: "{{ reverse_proxy_config_dir }}/Caddyfile"
+    owner: "reverse_proxy"
+    group: "reverse_proxy"
+    mode: '0644'
+  notify: Restart reverse proxy
+  become: true
 
-- name: Run Caddy reverse proxy container (Podman)
+- name: Ensure reverse proxy container is running (rootful Podman)
   containers.podman.podman_container:
     name: "{{ reverse_proxy_container_name }}"
     image: "{{ reverse_proxy_image }}"
     state: started
     restart_policy: unless-stopped
-    read_only: true
-    cap_drop: ["ALL"]
-    capabilities:
-      - NET_BIND_SERVICE
-    user: "caddy"
-    published_ports:
-      - "80:80/tcp"
-      - "443:443/tcp"
-    volumes: "{{ reverse_proxy_caddy_volumes_list }}"
-  become: false
+    user: 0
+    publish:
+      - "{{ reverse_proxy_http_port }}:80/tcp"
+      - "{{ reverse_proxy_https_port }}:443/tcp"
+    volumes:
+      - "{{ reverse_proxy_config_dir }}:/etc/caddy"
+      - "{{ reverse_proxy_data_dir }}:/data"
+      - "{{ reverse_proxy_certs_dir }}:/etc/ssl/certs"
+  become: true
+
+- name: Remove old reverse proxy container (safety, ensure clean create)
+  containers.podman.podman_container:
+    name: "{{ reverse_proxy_container_name }}"
+    state: absent
+  become: true
+  when: false  # placeholder disabled; set to true if you need explicit removal before create

@@ -1,0 +1,5 @@
+---
+# Bootstrap Transit Vault host — must NOT use transit seal for its own startup
+# It will start with Shamir, initialize, then create the transit key/token
+# for the main cluster. Leader/followers keep transit seal enabled (defaults).
+vault_enable_transit_seal: false

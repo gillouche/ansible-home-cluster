@@ -74,7 +74,18 @@ all:
         rpi5b16g6:
     vault_cluster:
       hosts:
+        rpi5b8g1:
         rpi5b16g1ssd:
+        rpi5b16g2ssd:
+        rpi5b16g3ssd:
+    vault_bootstrap:
+      hosts:
+        rpi5b8g1:
+    vault_leader:
+      hosts:
+        rpi5b16g1ssd:
+    vault_followers:
+      hosts:
         rpi5b16g2ssd:
         rpi5b16g3ssd:
     nexus:

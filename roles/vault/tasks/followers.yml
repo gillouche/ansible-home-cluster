@@ -3,81 +3,18 @@
 
 - name: Set leader host fact (followers)
   ansible.builtin.set_fact:
-    vault_leader_host: "{{ (groups['vault_cluster'] | default([inventory_hostname]))[0] }}"
+    vault_leader_host: "{{ (groups['vault_leader'] | default([]))[0] }}"
 
 - name: Determine leader API endpoint
   ansible.builtin.set_fact:
     _leader_api: >-
-      https://{{
-        hostvars[
-          (vault_leader_host | default((groups['vault_cluster'] | default([inventory_hostname]))[0]))
-        ].ansible_facts.default_ipv4.address
-        | default(
-            hostvars[
-              (vault_leader_host | default((groups['vault_cluster'] | default([inventory_hostname]))[0]))
-            ].inventory_hostname
-          )
-      }}:{{ vault_api_port }}
-
-- name: Load unseal keys from init JSON on controller for followers
-  ansible.builtin.slurp:
-    src: "{{ vault_init_export_path | expanduser }}"
-  register: _init_json_followers
-  delegate_to: localhost
-  run_once: true
-
-- name: Persist unseal keys on followers from init JSON (cacheable)
-  ansible.builtin.set_fact:
-    cacheable: true
-    vault_unseal_keys_b64: "{{ (_init_json_followers.content | default('') | length | int) | ternary((_init_json_followers.content | b64decode | from_json).unseal_keys_b64 | default([]), []) }}"
-
-- name: Assert unseal keys are present (from controller init JSON)
-  ansible.builtin.assert:
-    that:
-      - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
-    fail_msg: >-
-      No unseal keys found or fewer than threshold in {{ vault_init_export_path | expanduser }}.
-      Ensure this file exists on the controller and contains 'unseal_keys_b64'.
-
-- name: Wait for leader readiness (controller-side)
-  ansible.builtin.command: >-
-    curl -sS --max-time 5 --retry 0 --cacert {{ vault_cluster_ca_cert_controller | expanduser }} \
-      -o /dev/null -w "%{http_code}" {{ _leader_api }}/v1/sys/health
-  register: follower_wait_leader
-  changed_when: false
-  failed_when: false
-  retries: 90
-  delay: 2
-  until: >-
-    (
-      (follower_wait_leader.rc | default(1)) == 0 and
-      ((follower_wait_leader.stdout | default('000')) in ['200','429'])
-    )
-  delegate_to: localhost
-
-- name: Ensure Vault host logs directory exists (followers)
-  ansible.builtin.file:
-    path: "{{ vault_logs_dir }}"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
-    mode: '0775'
-  become: true
-
-- name: Ensure Vault host bin directory exists (followers)
-  ansible.builtin.file:
-    path: "/home/vault/bin"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
-    mode: '0755'
-  become: true
+      https://{{ hostvars[vault_leader_host].ansible_host | default(hostvars[vault_leader_host].ansible_facts.default_ipv4.address) }}:{{ vault_api_port }}
 
 - name: Install startup wrapper on followers to capture early logs
   ansible.builtin.copy:
     dest: "/home/vault/bin/start-vault.sh"
     owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: '0755'
     content: |
       #!/bin/sh
@@ -110,12 +47,7 @@
       - DAC_OVERRIDE
       - CHOWN
     user: "{{ vault_container_user | default(omit) }}"
-    env:
-      SKIP_CHOWN: "true"
-      SKIP_SETCAP: "true"
-      VAULT_LOG_LEVEL: "{{ vault_log_level | default('debug') }}"
-      VAULT_CACERT: "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
-      VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    env: "{{ vault_container_env }}"
     command: >-
       {{ (vault_enable_log_wrapper | default(true))
           | ternary('/bin/sh -lc /vault/bin/start-vault.sh', 'server -config=' ~ vault_cfg_path_in_container) }}
@@ -127,40 +59,36 @@
       - "/home/vault/bin:/vault/bin"
   become: true
 
-- name: Unseal follower with available keys (apply threshold)
+- name: Pause 5s before follower auto-initialize (transit)
+  ansible.builtin.pause:
+    seconds: 5
+  when:
+    - vault_enable_transit_seal | default(false)
+    - inventory_hostname in (groups['vault_followers'] | default([]))
+
+- name: Initialize Raft follower with recovery keys (Transit seal)
   ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc \
-    "vault operator unseal {{ item }}"
-  loop: "{{ (vault_unseal_keys_b64 | default([]))[: (vault_unseal_threshold | int)] }}"
-  register: follower_unseal_results
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault operator init"
+  register: _follower_init
   changed_when: true
   failed_when: false
+  become: true
   when:
-    - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
-  become: true
+    - vault_enable_transit_seal | default(false)
+    - inventory_hostname in (groups['vault_follower'] | default([]))
 
-- name: Wait for follower to be unsealed
+- name: Wait for follower to be unsealed (post-init, transit)
   ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc \
-    "vault status -format=json"
-  register: follower_unsealed
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
+  register: _follower_status_after_init
   changed_when: false
   failed_when: false
-  retries: 45
-  delay: 2
+  retries: "{{ vault_wait_retries | default(150) }}"
+  delay: "{{ vault_wait_delay | default(2) }}"
   until: >-
-    (follower_unsealed.rc | default(1)) == 0 and
-    ((follower_unsealed.stdout | from_json).sealed | default(true)) == false
+    (_follower_status_after_init.rc | default(1)) == 0 and
+    ((_follower_status_after_init.stdout | from_json).sealed | default(true)) == false
   become: true
-
-- name: Wait for follower Vault status (reachable)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc
-    "vault status -format=json"
-  register: follower_status
-  changed_when: false
-  failed_when: false
-  retries: 60
-  delay: 2
-  until: (follower_status.rc | default(1)) == 0
-  become: true
+  when:
+    - vault_enable_transit_seal | default(false)
+    - inventory_hostname in (groups['vault_follower'] | default([]))

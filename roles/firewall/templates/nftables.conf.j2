@@ -41,6 +41,13 @@ table inet filter {
     # FULL TRUST: LAN
     ip saddr {{ lan_subnet }} accept
     ip daddr {{ lan_subnet }} accept
+
+    # Allow established/related forwarded traffic (for container egress return paths)
+    ct state { established, related } accept
+
+    # Allow DNS egress for Podman containers to the internet (UDP/TCP 53)
+    ip saddr 10.88.0.0/16 udp dport 53 accept
+    ip saddr 10.88.0.0/16 tcp dport 53 accept
   }
 
   #################
@@ -48,8 +55,16 @@ table inet filter {
   #################
   chain output {
     type filter hook output priority filter; policy accept;
+
+    # Allow DNS egress for Podman containers (default cni-podman0 subnet 10.88.0.0/16)
+    # Adjust the subnet if your Podman network differs.
+    ip saddr 10.88.0.0/16 udp dport 53 accept
+    ip saddr 10.88.0.0/16 tcp dport 53 accept
   }
 }
+
+# Note: NAT (SNAT/MASQUERADE) for Podman is managed by Netavark/iptables-nft.
+# Do not duplicate NAT rules here to avoid conflicts.
 
 ############################
 # Additional rules

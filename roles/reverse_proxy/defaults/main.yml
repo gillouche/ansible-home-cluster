@@ -1,6 +1,6 @@
 ---
 # Caddy container configuration
-reverse_proxy_container_name: "caddy"
+reverse_proxy_container_name: "reverse-proxy"
 reverse_proxy_image: "caddy:2.10.2"
 lan_subnet: "192.168.0.0/24"
 
@@ -13,6 +13,7 @@ reverse_proxy_tls_mode: "vault_acme"
 # Vault ACME settings
 # Email used for ACME account registration in Caddy
 reverse_proxy_acme_email: ""
+# EAB is not used by default in this homelab setup; keep configuration minimal
 # ACME directory URL served by Vault. By default, use the first host in vault_cluster.
 # You can override this in inventory if you prefer a specific node.
 reverse_proxy_acme_ca_url: >-
@@ -24,7 +25,7 @@ reverse_proxy_acme_ca_url: >-
 
 # VIP and primary host sane defaults (override in group_vars as needed)
 reverse_proxy_virtual_ip: "192.168.0.252"
-reverse_proxy_primary_host: "rpi5b8g1"
+reverse_proxy_primary_host: "rpi5b16g4"
 
 # Simple default backend example (Pi-hole on same node)
 reverse_proxy_sites:
@@ -65,3 +66,52 @@ reverse_proxy_restart_now: false
 # Ensure host-side Caddy data tree is group-readable by this group and that new
 # files inherit the group via setgid + default ACLs. The project uses 'alarm'.
 reverse_proxy_data_group: "alarm"
+# Reverse proxy defaults (Vault ACME + rootful Podman)
+
+# Bind ports
+reverse_proxy_http_port: 80
+reverse_proxy_https_port: 443
+
+# Host paths
+reverse_proxy_root_dir: "/home/reverse_proxy"
+reverse_proxy_config_dir: "{{ reverse_proxy_root_dir }}/config"
+reverse_proxy_data_dir:   "{{ reverse_proxy_root_dir }}/data"
+reverse_proxy_certs_dir:  "{{ reverse_proxy_root_dir }}/certs"
+
+# Runtime user/group for file ownership on host (rootful container; keep root:root)
+reverse_proxy_owner: "root"
+reverse_proxy_group: "root"
+
+# Domains to serve (list of hostnames/FQDNs)
+reverse_proxy_domains: []
+
+# Vault ACME directory URL (provided by Vault role). Example:
+# https://192.168.0.81:8200/v1/pki/acme/directory
+# Derive from the first host in the vault_cluster inventory group by default,
+# but allow override via inventory/group_vars if needed.
+vault_acme_directory_url: >-
+  {{
+    "https://"
+    + (
+        hostvars[groups['vault_cluster'][0]].ansible_host
+        if (groups['vault_cluster'] | default([]))
+        else '127.0.0.1'
+      )
+    + ":"
+    + (
+        hostvars[groups['vault_cluster'][0]].vault_api_port | default(8200) | string
+        if (groups['vault_cluster'] | default([]))
+        else '8200'
+      )
+    + "/v1/pki/acme/directory"
+  }}
+
+# Optional: if your Vault PKI ACME endpoint requires a token/cookie header (most flows do not),
+# you can pass it here to Caddy via global headers (advanced use only)
+reverse_proxy_extra_global_headers: {}
+
+# Whether to force HTTPS on all hosts
+reverse_proxy_force_https: true
+
+# Extra site blocks (advanced): list of Caddyfile snippets to append
+reverse_proxy_extra_sites: []

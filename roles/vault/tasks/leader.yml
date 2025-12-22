@@ -1,38 +1,9 @@
 
----
-# Leader-only stage: ensure container is running, then proceed with join/health and keys
-
-- name: Stop any existing Vault container (best-effort)
-  containers.podman.podman_container:
-    name: "{{ vault_container_name }}"
-    state: stopped
-  failed_when: false
-  changed_when: false
-  become: true
-
-- name: Ensure Vault host logs directory exists (owned by vault:alarm)
-  ansible.builtin.file:
-    path: "{{ vault_logs_dir }}"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
-    mode: '0775'
-  become: true
-
-- name: Ensure Vault host bin directory exists (owned by vault:alarm)
-  ansible.builtin.file:
-    path: "/home/vault/bin"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
-    mode: '0755'
-  become: true
-
-- name: Install Vault startup wrapper to capture early logs
+- name: Install startup wrapper on leader to capture early logs
   ansible.builtin.copy:
     dest: "/home/vault/bin/start-vault.sh"
     owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('alarm') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: '0755'
     content: |
       #!/bin/sh
@@ -42,11 +13,8 @@
       log_ts="/vault/logs/startup-${ts}.log"
       log_cur="/vault/logs/current.log"
       : > "$log_cur"
-      # Default log level if not provided by env
       : "${VAULT_LOG_LEVEL:=info}"
       export VAULT_LOG_LEVEL
-      # Prune old startup logs, keep the most recent 50
-      # shellcheck disable=SC2010
       old_files=$(ls -1t /vault/logs/startup-*.log 2>/dev/null | sed -n '51,$p' || true)
       if [ -n "${old_files:-}" ]; then
         echo "$old_files" | xargs -r rm -f || true
@@ -68,14 +36,10 @@
       - DAC_OVERRIDE
       - CHOWN
     user: "{{ vault_container_user | default(omit) }}"
-    env:
-      SKIP_CHOWN: "true"
-      SKIP_SETCAP: "true"
-      VAULT_LOG_LEVEL: "{{ vault_log_level | default('debug') }}"
-      VAULT_CACERT: "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
-      VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    env: "{{ vault_container_env }}"
     command: >-
-      /bin/sh -lc /vault/bin/start-vault.sh
+      {{ (vault_enable_log_wrapper | default(true))
+          | ternary('/bin/sh -lc /vault/bin/start-vault.sh', 'server -config=' ~ vault_cfg_path_in_container) }}
     volumes:
       - "{{ vault_host_config_dir }}:/vault/config"
       - "{{ vault_host_tls_dir }}:/vault/tls"
@@ -84,273 +48,37 @@
       - "/home/vault/bin:/vault/bin"
   become: true
 
-# --- Fresh bootstrap on leader: init and unseal immediately ---
+# Auto-initialize the Raft leader when using Transit seal (Vault remains sealed until initialized)
+- name: Pause 5s before leader auto-initialize (transit)
+  ansible.builtin.pause:
+    seconds: 5
+  when:
+    - vault_enable_transit_seal | default(false)
+    - inventory_hostname in (groups['vault_leader'] | default([]))
 
-- name: Initialize Vault on leader (fresh bootstrap)
+- name: Initialize Raft leader with recovery keys (Transit seal)
   ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc
-    "vault operator init -format=json -key-shares={{ vault_unseal_shares }} -key-threshold={{ vault_unseal_threshold }}"
-  register: leader_init_json
-  changed_when: leader_init_json.rc == 0
-  failed_when: leader_init_json.rc != 0
-  when: (vault_force_fresh_bootstrap | default(false)) | bool
-  become: true
-
-# --- Post-start hardening: if leader sealed on regular runs, unseal with cached/init keys ---
-- name: Probe leader status (all runs)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc
-    "vault status -format=json"
-  register: leader_status_probe
-  changed_when: false
-  failed_when: false
-  become: true
-
-- name: Initialize Vault on leader when not initialized (non-bootstrap auto-init)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc
-    "vault operator init -format=json -key-shares={{ vault_unseal_shares }} -key-threshold={{ vault_unseal_threshold }}"
-  register: leader_auto_init
-  changed_when: leader_auto_init.rc == 0
-  failed_when: leader_auto_init.rc != 0
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - leader_status_probe is not defined or leader_status_probe.rc is not defined or leader_status_probe.rc != 0
-      or (
-        (leader_status_probe.stdout | default('')) | length > 0
-        and not ((leader_status_probe.stdout | from_json).initialized | default(true))
-      )
-  become: true
-
-- name: Persist init JSON on controller (non-bootstrap auto-init)
-  ansible.builtin.copy:
-    dest: "{{ vault_init_export_path | expanduser }}"
-    content: "{{ leader_auto_init.stdout | default('') }}"
-    mode: "0600"
-  delegate_to: localhost
-  run_once: true
-  when:
-    - leader_auto_init is defined
-    - (leader_auto_init.rc | default(1)) == 0
-
-- name: Load unseal keys from init JSON on controller (all non-bootstrap paths)
-  ansible.builtin.slurp:
-    src: "{{ vault_init_export_path | expanduser }}"
-  register: leader_keys_slurp
-  delegate_to: localhost
-  run_once: true
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-
-- name: Set unseal keys fact (non-bootstrap)
-  ansible.builtin.set_fact:
-    vault_unseal_keys_b64: "{{ (leader_keys_slurp.content | b64decode | from_json).unseal_keys_b64 | default([]) }}"
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-
-- name: Re-load unseal keys after auto-init (non-bootstrap)
-  ansible.builtin.slurp:
-    src: "{{ vault_init_export_path | expanduser }}"
-  register: leader_keys_slurp_after_init
-  delegate_to: localhost
-  run_once: true
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - leader_auto_init is defined
-    - (leader_auto_init.rc | default(1)) == 0
-
-- name: Set unseal keys fact from fresh init (non-bootstrap)
-  ansible.builtin.set_fact:
-    vault_unseal_keys_b64: "{{ (leader_keys_slurp_after_init.content | b64decode | from_json).unseal_keys_b64 | default(vault_unseal_keys_b64 | default([])) }}"
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - leader_keys_slurp_after_init is defined
-
-- name: Unseal leader with cached keys (non-bootstrap)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc
-    "vault operator unseal {{ item }}"
-  loop: "{{ (vault_unseal_keys_b64 | default([]))[: (vault_unseal_threshold | int)] }}"
-  register: leader_unseal_cached
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault operator init"
+  register: _leader_init
   changed_when: true
   failed_when: false
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
   become: true
-
-- name: Small wait between unseal shares (non-bootstrap)
-  ansible.builtin.wait_for:
-    timeout: 2
   when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - leader_unseal_cached is defined
+    - vault_enable_transit_seal | default(false)
+    - inventory_hostname in (groups['vault_leader'] | default([]))
 
-- name: Debug leader unseal results (non-bootstrap)
-  ansible.builtin.debug:
-    var: leader_unseal_cached
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - leader_unseal_cached is defined
-
-## removed pre-unseal API readiness wait; we unseal immediately when keys are present
-
-- name: Apply first unseal key (non-bootstrap)
+- name: Wait for leader to be unsealed (post-init, transit)
   ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc \
-    "vault operator unseal {{ (vault_unseal_keys_b64 | default([]))[0] }}"
-  register: leader_unseal_first
-  changed_when: true
-  failed_when: false
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
-  become: true
-
-- name: Check sealed status after first key (non-bootstrap)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc \
-    "vault status -format=json"
-  register: leader_status_after_first
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
+  register: _leader_status_after_init
   changed_when: false
   failed_when: false
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
-  become: true
-
-- name: Apply second unseal key (non-bootstrap)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc \
-    "vault operator unseal {{ (vault_unseal_keys_b64 | default([]))[1] }}"
-  register: leader_unseal_second
-  changed_when: true
-  failed_when: false
-  when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
-  become: true
-
-- name: Wait for leader health ready (after possible unseal)
-  ansible.builtin.command: >-
-    curl -sS --max-time 5 --retry 0 --cacert {{ vault_cluster_ca_cert_controller | expanduser }} \
-      -o /dev/null -w "%{http_code}" https://{{ ansible_facts.default_ipv4.address }}:{{ vault_api_port }}/v1/sys/health
-  register: leader_health_final
-  changed_when: false
-  failed_when: false
-  retries: 60
-  delay: 2
-  until: (leader_health_final.rc | default(1)) == 0 and (leader_health_final.stdout | default('000')) in ['200','429']
-  delegate_to: localhost
-
-- name: Persist init JSON on controller (fresh bootstrap)
-  ansible.builtin.copy:
-    dest: "{{ vault_init_export_path | expanduser }}"
-    content: "{{ leader_init_json.stdout | default('') }}"
-    mode: "0600"
-  delegate_to: localhost
-  run_once: true
-  when:
-    - (vault_force_fresh_bootstrap | default(false)) | bool
-    - leader_init_json is defined
-    - (leader_init_json.rc | default(1)) == 0
-
-- name: Load unseal keys from init JSON (controller) for leader unseal
-  ansible.builtin.slurp:
-    src: "{{ vault_init_export_path | expanduser }}"
-  register: leader_init_slurp
-  delegate_to: localhost
-  run_once: true
-  when: (vault_force_fresh_bootstrap | default(false)) | bool
-
-- name: Set leader unseal keys from init JSON
-  ansible.builtin.set_fact:
-    vault_unseal_keys_b64: "{{ (leader_init_slurp.content | b64decode | from_json).unseal_keys_b64 | default([]) }}"
-  when: (vault_force_fresh_bootstrap | default(false)) | bool
-
-- name: Unseal leader with available keys (apply threshold)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc
-    "vault operator unseal {{ item }}"
-  loop: "{{ (vault_unseal_keys_b64 | default([]))[: (vault_unseal_threshold | int)] }}"
-  register: leader_unseal_results
-  changed_when: true
-  failed_when: false
-  when:
-    - (vault_force_fresh_bootstrap | default(false)) | bool
-    - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
-  become: true
-
-- name: Wait for leader to be unsealed (after init)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc
-    "vault status -format=json"
-  register: leader_unsealed_after_init
-  changed_when: false
-  failed_when: false
-  retries: 60
-  delay: 2
+  retries: "{{ vault_wait_retries | default(150) }}"
+  delay: "{{ vault_wait_delay | default(2) }}"
   until: >-
-    (leader_unsealed_after_init.rc | default(1)) == 0 and
-    ((leader_unsealed_after_init.stdout | from_json).sealed | default(true)) == false
-  when: (vault_force_fresh_bootstrap | default(false)) | bool
+    (_leader_status_after_init.rc | default(1)) == 0 and
+    ((_leader_status_after_init.stdout | from_json).sealed | default(true)) == false
   become: true
-
-- name: Wait for leader to be unsealed (non-bootstrap)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc
-    "vault status -format=json"
-  register: leader_unsealed_after_cached
-  changed_when: false
-  failed_when: false
-  retries: 60
-  delay: 2
-  until: >-
-    (leader_unsealed_after_cached.rc | default(1)) == 0 and
-    ((leader_unsealed_after_cached.stdout | from_json).sealed | default(true)) == false
   when:
-    - not (vault_force_fresh_bootstrap | default(false)) | bool
-    - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
-  become: true
-
-- name: Wait for leader health ready
-  ansible.builtin.command: >-
-    curl -sS --max-time 5 --retry 0 --cacert {{ vault_cluster_ca_cert_controller | expanduser }} \
-      -o /dev/null -w "%{http_code}" https://{{ ansible_facts.default_ipv4.address }}:{{ vault_api_port }}/v1/sys/health
-  register: leader_health
-  changed_when: false
-  failed_when: false
-  retries: 60
-  delay: 2
-  until: (leader_health.rc | default(1)) == 0 and (leader_health.stdout | default('000')) in ['200','429']
-  delegate_to: localhost
-
-- name: Load unseal keys from init JSON on controller when not available
-  ansible.builtin.slurp:
-    src: "{{ vault_init_export_path | expanduser }}"
-  register: _init_json_slurp
-  delegate_to: localhost
-  run_once: true
-  when:
-    - (vault_unseal_keys_b64 | default([])) | length == 0
-
-- name: Persist leader unseal keys and root token from init JSON (cacheable)
-  ansible.builtin.set_fact:
-    cacheable: true
-    vault_unseal_keys_b64: >-
-      {{
-        ((_init_json_slurp.content | default('')) | string | length | int) | ternary(
-          (_init_json_slurp.content | b64decode | from_json).unseal_keys_b64 | default([]),
-          []
-        )
-      }}
-    vault_root_token: >-
-      {{
-        ((_init_json_slurp.content | default('')) | string | length | int) | ternary(
-          (_init_json_slurp.content | b64decode | from_json).root_token | default(''),
-          ''
-        )
-      }}
-  when:
-    - (vault_unseal_keys_b64 | default([])) | length == 0
-    - _init_json_slurp is defined
+    - vault_enable_transit_seal | default(false)
+    - inventory_hostname in (groups['vault_leader'] | default([]))

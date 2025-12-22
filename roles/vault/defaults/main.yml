@@ -20,10 +20,11 @@ vault_logs_dir: "/home/vault/logs"
 vault_bin_dir: "/home/vault/bin"
 
 # Runtime user that will own Vault files on host and be used inside the container
+# Create/manage a dedicated vault:vault account on vault_cluster hosts
 vault_runtime_user: "vault"
 vault_runtime_uid: 100
-vault_runtime_gid: 1000   # match 'alarm' group as requested
-vault_runtime_group_name: "alarm"  # primary group name that has gid 1000 on devices
+vault_runtime_gid: 1000   # optional hint, not enforced; group name below is authoritative
+vault_runtime_group_name: "vault"
 
 # Host paths for Vault configuration, TLS, and data (will be created)
 # Requested layout under /home/vault so these paths are bind-mounted into the container
@@ -41,6 +42,19 @@ vault_docker_log_max_file: "1"
 # Container user
 # Run Vault container as root (per request) for maximum access to mounted folders
 vault_container_user: "root"
+
+# Common environment for all in-container Vault CLI calls via podman exec
+# so we don't need to export VAULT_* on every exec
+vault_container_env:
+  SKIP_CHOWN: "true"
+  SKIP_SETCAP: "true"
+  VAULT_LOG_LEVEL: "{{ vault_log_level | default('debug') }}"
+  VAULT_CACERT: "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
+  VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+  # Placeholder for dynamic token when needed by exec commands; default empty.
+  # Tasks that need VAULT_TOKEN should set it temporarily via --env in podman exec,
+  # but per user requirement we will avoid env in exec: we'll store token file inside container.
+  VAULT_TOKEN: ""
 
 # Write full startup logs to files inside the container via a wrapper (tee)
 # Enabled by default to capture complete logs from process start.
@@ -138,8 +152,8 @@ vault_listener_address: "0.0.0.0"
 # Root CA trust distribution
 # -------------------------------------------------------------
 # Whether to install/update the Vault Root CA on all managed hosts (inventory 'all').
-# Defaults to false; enable in inventory to apply to your fleet.
-vault_install_root_ca_on_hosts: false
+# Default: true (install across the fleet)
+vault_install_root_ca_on_hosts: true
 
 # Whether to install the Vault Root CA on the controller (localhost). macOS is supported.
 # Defaults to false; enable in inventory to apply on your Mac.
@@ -197,7 +211,8 @@ vault_pki_role_name: "acme"
 vault_acme_directory_path: "/v1/pki/acme/directory"
 
 # Where to persist EAB credentials (controller-side file). Optional; alternatively store in vaulted group_vars.
-vault_eab_export_path: "{{ playbook_dir | default('.') }}/.vault/acme_eab.json"
+# Note: EAB export is disabled by default in this homelab; this path remains for optional future use.
+vault_eab_export_path: "~/.local/share/ansible-home-cluster/vault/acme_eab.json"
 
 # Root CA subject defaults
 vault_root_ca_common_name: "{{ (vault_pki_base_domains[0] if (vault_pki_base_domains | length) > 0 else 'Homelab') ~ ' Root CA' }}"
@@ -206,7 +221,8 @@ vault_root_ca_country: "FR"
 
 # Whether to export artifacts
 vault_export_root_ca: true
-vault_export_eab: true
+# Disable EAB export by default (no EAB in homelab)
+vault_export_eab: false
 
 # Public Vault URL used in PKI URLs config. If empty, tasks compute from host IP.
 vault_public_url: ""
@@ -242,3 +258,40 @@ vault_tls_key_path: "{{ vault_tls_dir_in_container }}/api.key"
 # or when no data must be preserved. When true, each host will remove its
 # local Vault data directory before (re)starting the container.
 vault_force_fresh_bootstrap: false
+
+# ---------------------------------------------
+# Transit Seal (ENABLED by default)
+# ---------------------------------------------
+# When enabled, the template will render a seal "transit" block so Vault can
+# auto-unseal using a remote Transit engine (bootstrap Vault).
+vault_enable_transit_seal: true
+
+# Full address to the bootstrap (Transit) Vault. Prefer HTTPS with LAN IP.
+# Default to your bootstrap node at 192.168.0.80 per homelab layout; you can
+# override this in inventory/group_vars if needed.
+vault_transit_addr: "https://192.168.0.80:8200"
+
+# Transit token used by the main cluster to perform unseal operations against
+# the bootstrap Vault. Keep empty in defaults; provide via vaulted group_vars.
+vault_transit_token: ""
+
+# Name and mount path of the transit key used for unseal operations.
+vault_transit_key_name: "autounseal"
+vault_transit_mount_path: "transit/"
+
+# Allow skipping TLS verification when the bootstrap Vault runs HTTP or has
+# a self-signed cert not yet trusted. Prefer false in production.
+vault_transit_tls_skip_verify: false
+
+# Bootstrap transit policy and token management (for bootstrap Vault stage)
+vault_transit_policy_name: "autounseal-policy"
+vault_transit_token_period: "720h"   # 30 days periodic
+vault_transit_token_export_path: "~/.local/share/ansible-home-cluster/vault/transit_token.txt"
+
+# Nuclear reset flag: when true, purge ALL controller artifacts under
+# ~/.local/share/ansible-home-cluster and wipe /home/vault/* on target hosts
+# before running the role, so the play behaves like a first run.
+vault_nuclear_reset: false
+
+# Force TLS (server key/CSR/cert) regeneration for the node even if files exist
+vault_force_tls_regen: false

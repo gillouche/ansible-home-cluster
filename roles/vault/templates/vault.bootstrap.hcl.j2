@@ -1,0 +1,29 @@
+# Managed by Ansible - Vault server configuration (Bootstrap single-node)
+
+ui = true
+
+cluster_name = "homelab-vault-bootstrap"
+
+# Public/API and cluster addresses based on effective public URL
+api_addr = "{{ vault_public_url_effective }}"
+{% set _pub_host = (vault_public_url_effective | regex_replace('^https?://', '') | regex_replace(':\d+/?$', '') | trim('/') ) %}
+cluster_addr = "https://{{ _pub_host }}:{{ vault_cluster_port }}"
+
+storage "raft" {
+  path = "{{ vault_data_dir_in_container }}"
+  # No retry_join for bootstrap; this node stands alone
+}
+
+listener "tcp" {
+  address         = "{{ vault_listener_address | default(vault_bind_ip) }}:{{ vault_api_port }}"
+  tls_disable     = 0
+  tls_cert_file   = "{{ vault_tls_cert_path }}"
+  tls_key_file    = "{{ vault_tls_key_path }}"
+  tls_client_ca_file = "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
+}
+
+telemetry {
+  prometheus_retention_time = "12h"
+}
+
+disable_mlock = true

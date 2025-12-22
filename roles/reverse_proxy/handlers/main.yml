@@ -1,5 +1,12 @@
 ---
-# handlers for reverse_proxy
+# Handlers for reverse_proxy
+
+- name: Restart reverse proxy
+  containers.podman.podman_container:
+    name: "{{ reverse_proxy_container_name }}"
+    state: started
+    restart: true
+  become: true
 
 - name: Restart keepalived
   ansible.builtin.service:
@@ -8,9 +15,7 @@
   become: true
 
 - name: Restart systemd-resolved
-  ansible.builtin.systemd:
+  ansible.builtin.service:
     name: systemd-resolved
     state: restarted
-    enabled: true
-    daemon_reload: true
   become: true
