@@ -9,58 +9,58 @@ destroy table inet filter
 
 table inet filter {
 
-  ################
-  # INPUT (to host)
-  ################
-  chain input {
-    type filter hook input priority filter; policy drop;
+################
+# INPUT (to host)
+################
+chain input {
+type filter hook input priority filter; policy drop;
 
-    # Drop broken traffic early
-    ct state invalid drop
+# Drop broken traffic early
+ct state invalid drop
 
-    # Allow established connections
-    ct state { established, related } accept
+# Allow established connections
+ct state { established, related } accept
 
-    # Allow loopback
-    iif lo accept
+# Allow loopback
+iif lo accept
 
-    # FULL TRUST: LAN
-    ip saddr {{ lan_subnet }} accept
+# FULL TRUST: LAN
+ip saddr {{ lan_subnet }} accept
 
-    # Diagnostics (optional but sane)
-    ip protocol icmp accept
-    meta l4proto ipv6-icmp accept
-  }
+# Diagnostics (optional but sane)
+ip protocol icmp accept
+meta l4proto ipv6-icmp accept
+}
 
-  ###################
-  # FORWARD (routing)
-  ###################
-  chain forward {
-    type filter hook forward priority filter; policy drop;
+###################
+# FORWARD (routing)
+###################
+chain forward {
+type filter hook forward priority filter; policy drop;
 
-    # FULL TRUST: LAN
-    ip saddr {{ lan_subnet }} accept
-    ip daddr {{ lan_subnet }} accept
+# FULL TRUST: LAN
+ip saddr {{ lan_subnet }} accept
+ip daddr {{ lan_subnet }} accept
 
-    # Allow established/related forwarded traffic (for container egress return paths)
-    ct state { established, related } accept
+# Allow established/related forwarded traffic (for container egress return paths)
+ct state { established, related } accept
 
-    # Allow DNS egress for Podman containers to the internet (UDP/TCP 53)
-    ip saddr 10.88.0.0/16 udp dport 53 accept
-    ip saddr 10.88.0.0/16 tcp dport 53 accept
-  }
+# Allow DNS egress for Podman containers to the internet (UDP/TCP 53)
+ip saddr 10.88.0.0/16 udp dport 53 accept
+ip saddr 10.88.0.0/16 tcp dport 53 accept
+}
 
-  #################
-  # OUTPUT (host)
-  #################
-  chain output {
-    type filter hook output priority filter; policy accept;
+#################
+# OUTPUT (host)
+#################
+chain output {
+type filter hook output priority filter; policy accept;
 
-    # Allow DNS egress for Podman containers (default cni-podman0 subnet 10.88.0.0/16)
-    # Adjust the subnet if your Podman network differs.
-    ip saddr 10.88.0.0/16 udp dport 53 accept
-    ip saddr 10.88.0.0/16 tcp dport 53 accept
-  }
+# Allow DNS egress for Podman containers (default cni-podman0 subnet 10.88.0.0/16)
+# Adjust the subnet if your Podman network differs.
+ip saddr 10.88.0.0/16 udp dport 53 accept
+ip saddr 10.88.0.0/16 tcp dport 53 accept
+}
 }
 
 # Note: NAT (SNAT/MASQUERADE) for Podman is managed by Netavark/iptables-nft.

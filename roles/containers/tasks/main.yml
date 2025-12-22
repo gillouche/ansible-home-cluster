@@ -1,4 +1,3 @@
-
 ---
 # Ensure base packages for Podman with bridge networking (netavark + nftables NAT)
 

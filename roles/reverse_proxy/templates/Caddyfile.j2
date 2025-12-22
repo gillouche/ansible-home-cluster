@@ -1,61 +1,61 @@
 {
-  # Use Vault ACME endpoint for certificate management
-  acme_ca {{ vault_acme_directory_url }}
-  acme_ca_root /etc/ssl/certs/vault-cluster-ca.pem
-  {% if reverse_proxy_acme_email is defined and (reverse_proxy_acme_email | length) > 0 %}
-  email {{ reverse_proxy_acme_email }}
-  {% endif %}
-  {% if reverse_proxy_extra_global_headers is defined and reverse_proxy_extra_global_headers %}
-  header {
-  {% for k, v in reverse_proxy_extra_global_headers.items() %}
-    {{ k }} {{ v }}
-  {% endfor %}
-  }
-  {% endif %}
+# Use Vault ACME endpoint for certificate management
+acme_ca {{ vault_acme_directory_url }}
+acme_ca_root /etc/ssl/certs/vault-cluster-ca.pem
+{% if reverse_proxy_acme_email is defined and (reverse_proxy_acme_email | length) > 0 %}
+    email {{ reverse_proxy_acme_email }}
+{% endif %}
+{% if reverse_proxy_extra_global_headers is defined and reverse_proxy_extra_global_headers %}
+    header {
+    {% for k, v in reverse_proxy_extra_global_headers.items() %}
+        {{ k }} {{ v }}
+    {% endfor %}
+    }
+{% endif %}
 }
 
 # Primary configuration from reverse_proxy_sites: one block per site with redirect
 {% if reverse_proxy_sites is defined and reverse_proxy_sites %}
-{% for site in reverse_proxy_sites %}
-{% set _upstream = site.upstream if site.upstream is defined else '' %}
-{% set _endpoint = site.endpoint if site.endpoint is defined else '/' %}
-{% set _scheme_prefix = 'http://' if (_upstream and not _upstream.startswith('http')) else '' %}
-{{ site.host }} {
-  encode zstd gzip
+    {% for site in reverse_proxy_sites %}
+        {% set _upstream = site.upstream if site.upstream is defined else '' %}
+        {% set _endpoint = site.endpoint if site.endpoint is defined else '/' %}
+        {% set _scheme_prefix = 'http://' if (_upstream and not _upstream.startswith('http')) else '' %}
+        {{ site.host }} {
+        encode zstd gzip
 
-  {% if reverse_proxy_force_https %}
-  @http {
-    protocol http
-  }
-  redir @http https://{host}{uri}
-  {% endif %}
+        {% if reverse_proxy_force_https %}
+            @http {
+            protocol http
+            }
+            redir @http https://{host}{uri}
+        {% endif %}
 
-  # Health endpoint
-  respond /health 200
+        # Health endpoint
+        respond /health 200
 
-  # Redirect root to the specified upstream endpoint (post-TLS)
-  redir / {{ _scheme_prefix }}{{ _upstream }}{{ _endpoint }} 301
-}
-{% endfor %}
+        # Redirect root to the specified upstream endpoint (post-TLS)
+        redir / {{ _scheme_prefix }}{{ _upstream }}{{ _endpoint }} 301
+        }
+    {% endfor %}
 {% endif %}
 
 # Fallback: optionally render simple host blocks from reverse_proxy_domains if provided
 {% if (reverse_proxy_domains is defined and reverse_proxy_domains) and (not (reverse_proxy_sites is defined and reverse_proxy_sites)) %}
-{% for host in reverse_proxy_domains %}
-{{ host }} {
-  encode zstd gzip
-  {% if reverse_proxy_force_https %}
-  @http {
-    protocol http
-  }
-  redir @http https://{host}{uri}
-  {% endif %}
-  respond /health 200
-}
-{% endfor %}
+    {% for host in reverse_proxy_domains %}
+        {{ host }} {
+        encode zstd gzip
+        {% if reverse_proxy_force_https %}
+            @http {
+            protocol http
+            }
+            redir @http https://{host}{uri}
+        {% endif %}
+        respond /health 200
+        }
+    {% endfor %}
 {% endif %}
 
 # Extra site snippets if provided
 {% for snippet in reverse_proxy_extra_sites %}
-{{ snippet }}
+    {{ snippet }}
 {% endfor %}

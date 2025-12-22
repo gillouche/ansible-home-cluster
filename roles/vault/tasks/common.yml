@@ -19,13 +19,20 @@
     shell: /usr/bin/nologin
   become: true
 
-- name: Ensure /home/vault root directory exists
+- name: Ensure Vault host directories exist
   ansible.builtin.file:
-    path: "/home/{{ vault_runtime_user | default('vault') }}"
+    path: "{{ item.path }}"
     state: directory
     owner: "{{ vault_runtime_user | default('vault') }}"
     group: "{{ vault_runtime_group_name | default('vault') }}"
-    mode: '0750'
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ vault_host_root_dir_data }}", mode: '0750'}
+    - {path: "{{ vault_host_logs_dir }}", mode: '0775'}
+    - {path: "{{ vault_host_bin_dir }}", mode: '0755'}
+    - {path: "{{ vault_host_config_dir }}", mode: '0750'}
+    - {path: "{{ vault_host_tls_dir }}", mode: '0750'}
+    - {path: "{{ vault_host_data_dir }}", mode: '0770'}
   become: true
 
 - name: Ensure controller CA directory exists (run on controller)
@@ -76,7 +83,9 @@
     keyUsage = critical, digitalSignature, keyCertSign, cRLSign
     EOF
     if [ ! -f cluster-ca.pem ]; then
-      openssl req -x509 -new -key cluster-ca.key -days {{ vault_cluster_ca_days | default(3650) }} -out cluster-ca.pem -config ca.cnf -extensions v3_ca
+      openssl req -x509 -new -key cluster-ca.key
+      -days {{ vault_cluster_ca_days | default(3650) }}
+      -out cluster-ca.pem -config ca.cnf -extensions v3_ca
     fi
   args:
     executable: /bin/sh
@@ -86,33 +95,6 @@
   delegate_to: localhost
   run_once: true
   become: false
-
-- name: Ensure Vault host logs directory exists (bootstrap)
-  ansible.builtin.file:
-    path: "/home/vault/logs"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('vault') }}"
-    mode: '0775'
-  become: true
-
-- name: Ensure Vault host bin directory exists (bootstrap)
-  ansible.builtin.file:
-    path: "/home/vault/bin"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('vault') }}"
-    mode: '0755'
-  become: true
-
-- name: Ensure host TLS directory exists
-  ansible.builtin.file:
-    path: "{{ vault_host_tls_dir }}"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('vault') }}"
-    mode: '0750'
-  become: true
 
 - name: Copy cluster CA certificate to host
   ansible.builtin.copy:
@@ -213,7 +195,9 @@
 
 - name: Generate server CSR (only when required)
   ansible.builtin.command: >-
-    openssl req -new -key {{ vault_host_tls_dir }}/api.key -out {{ vault_host_tls_dir }}/api.csr -config {{ vault_host_tls_dir }}/openssl-api.cnf
+    openssl req -new -key {{ vault_host_tls_dir }}/api.key
+    -out {{ vault_host_tls_dir }}/api.csr
+    -config {{ vault_host_tls_dir }}/openssl-api.cnf
   when: _tls_regen_required
   changed_when: true
   become: true
@@ -257,7 +241,9 @@
       {% endif %}
       DNS.{{ dns_idx }}=localhost
       {% set ip_idx = 1 %}
-      {% if hostvars[inventory_hostname] is defined and hostvars[inventory_hostname].ansible_facts is defined and hostvars[inventory_hostname].ansible_facts.default_ipv4 is defined %}
+      {% if hostvars[inventory_hostname] is defined and
+        hostvars[inventory_hostname].ansible_facts is defined and
+        hostvars[inventory_hostname].ansible_facts.default_ipv4 is defined %}
       IP.{{ ip_idx }}={{ hostvars[inventory_hostname].ansible_facts.default_ipv4.address }}
       {% set ip_idx = ip_idx + 1 %}
       {% endif %}
@@ -275,7 +261,9 @@
       hexdump -vn8 -e '8/1 "%02X"' /dev/urandom > "$SERIAL_FILE"
     fi
     openssl x509 -req -in csrs/{{ inventory_hostname }}.csr -CA cluster-ca.pem -CAkey cluster-ca.key -CAserial "$SERIAL_FILE" \
-      -days {{ vault_server_cert_days | default(1825) }} -out certs/{{ inventory_hostname }}.crt -extfile exts/{{ inventory_hostname }}.ext -extensions v3_req
+      -days {{ vault_server_cert_days | default(1825) }}
+      -out certs/{{ inventory_hostname }}.crt
+      -extfile exts/{{ inventory_hostname }}.ext -extensions v3_req
   args:
     executable: /bin/sh
   when: _tls_regen_required
@@ -299,40 +287,9 @@
     group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: "{{ item.mode }}"
   loop:
-    - { path: "{{ vault_host_tls_dir }}/api.key", mode: '0600' }
-    - { path: "{{ vault_host_tls_dir }}/api.crt", mode: '0644' }
-    - { path: "{{ vault_host_tls_dir }}/cluster-ca.pem", mode: '0644' }
-  become: true
-
-- name: Ensure Vault host config/tls/data directories exist
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('vault') }}"
-    mode: "{{ item.mode }}"
-  loop:
-    - { path: "{{ vault_host_config_dir }}", mode: '0750' }
-    - { path: "{{ vault_host_tls_dir }}",    mode: '0750' }
-    - { path: "{{ vault_host_data_dir }}",   mode: '0770' }
-  become: true
-
-- name: Ensure Vault host logs directory exists (leader)
-  ansible.builtin.file:
-    path: "/home/vault/logs"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('vault') }}"
-    mode: '0775'
-  become: true
-
-- name: Ensure Vault host bin directory exists (leader)
-  ansible.builtin.file:
-    path: "/home/vault/bin"
-    state: directory
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('vault') }}"
-    mode: '0755'
+    - {path: "{{ vault_host_tls_dir }}/api.key", mode: '0600'}
+    - {path: "{{ vault_host_tls_dir }}/api.crt", mode: '0644'}
+    - {path: "{{ vault_host_tls_dir }}/cluster-ca.pem", mode: '0644'}
   become: true
 
 - name: Render Vault configuration from template (no container start here)

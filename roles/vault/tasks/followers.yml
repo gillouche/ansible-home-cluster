@@ -8,7 +8,8 @@
 - name: Determine leader API endpoint
   ansible.builtin.set_fact:
     _leader_api: >-
-      https://{{ hostvars[vault_leader_host].ansible_host | default(hostvars[vault_leader_host].ansible_facts.default_ipv4.address) }}:{{ vault_api_port }}
+      https://{{ hostvars[vault_leader_host].ansible_host |
+      default(hostvars[vault_leader_host].ansible_facts.default_ipv4.address) }}:{{ vault_api_port }}
 
 - name: Install startup wrapper on followers to capture early logs
   ansible.builtin.copy:

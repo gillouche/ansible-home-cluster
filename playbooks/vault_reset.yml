@@ -52,12 +52,12 @@
         group: "{{ vault_runtime_group_name }}"
         mode: "{{ item.mode }}"
       loop:
-        - { path: "/home/vault",        mode: '0750' }
+        - { path: "/home/vault", mode: '0750' }
         - { path: "/home/vault/config", mode: '0750' }
-        - { path: "/home/vault/tls",    mode: '0750' }
-        - { path: "/home/vault/data",   mode: '0770' }
-        - { path: "/home/vault/logs",   mode: '0775' }
-        - { path: "/home/vault/bin",    mode: '0755' }
+        - { path: "/home/vault/tls", mode: '0750' }
+        - { path: "/home/vault/data", mode: '0770' }
+        - { path: "/home/vault/logs", mode: '0775' }
+        - { path: "/home/vault/bin", mode: '0755' }
       become: true
 
     - name: Ensure TLS directory is empty after nuclear reset

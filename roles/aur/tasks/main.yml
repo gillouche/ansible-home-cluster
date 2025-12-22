@@ -20,7 +20,7 @@
     path: /etc/sudoers.d/11-install-aur_builder
     line: 'aur_builder ALL=(ALL) NOPASSWD: /usr/bin/pacman'
     create: yes
-    mode: 0644
+    mode: "0644"
     validate: 'visudo -cf %s'
 
 # Allow running only with --tags aur_rebuild_yay by setting the force flag early
@@ -62,13 +62,20 @@
 
     - name: Debug AUR decision booleans (verbosity 1)
       ansible.builtin.debug:
-        msg: "ansible_pkg_mgr={{ ansible_pkg_mgr | default('') }}, force={{ aur_helper_force_build | default(false) }}, packages_has_yay_bin={{ 'yay-bin' in (ansible_facts.packages | default({})) }}, pacman_Q_rc={{ aur_helper_yay_q.rc | default('n/a') }}, should_build={{ aur_helper_should_build | default('unset') }}"
+        msg: "ansible_pkg_mgr={{ ansible_pkg_mgr | default('') }},
+          force={{ aur_helper_force_build | default(false) }},
+          packages_has_yay_bin={{ 'yay-bin' in (ansible_facts.packages | default({})) }},
+          pacman_Q_rc={{ aur_helper_yay_q.rc | default('n/a') }},
+          should_build={{ aur_helper_should_build | default('unset') }}"
         verbosity: 1
 
     - name: Determine if yay-bin is installed and if build is required
       ansible.builtin.set_fact:
-        aur_helper_bin_installed: "{{ ('yay-bin' in (ansible_facts.packages | default({}))) or ((aur_helper_yay_q.rc | default(1)) == 0) }}"
-        aur_helper_should_build: "{{ (not(( 'yay-bin' in (ansible_facts.packages | default({})) ) or ((aur_helper_yay_q.rc | default(1)) == 0))) or (aur_helper_force_build | bool) }}"
+        aur_helper_bin_installed: "{{ ('yay-bin' in (ansible_facts.packages | default({}))) or
+         ((aur_helper_yay_q.rc | default(1)) == 0) }}"
+        aur_helper_should_build: "{{ (not(( 'yay-bin' in (ansible_facts.packages |
+         default({})) ) or ((aur_helper_yay_q.rc | default(1)) == 0))) or
+          (aur_helper_force_build | bool) }}"
       become: false
 
     - name: Install build prerequisites for AUR (when build is required)

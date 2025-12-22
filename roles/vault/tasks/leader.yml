@@ -1,4 +1,4 @@
-
+---
 - name: Install startup wrapper on leader to capture early logs
   ansible.builtin.copy:
     dest: "/home/vault/bin/start-vault.sh"

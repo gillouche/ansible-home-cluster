@@ -19,7 +19,11 @@
 
     - name: Pick first available nologin
       ansible.builtin.set_fact:
-        reverse_proxy_nologin: "{{ (_nologin_stats.results | selectattr('stat.exists','defined') | selectattr('stat.exists') | map(attribute='invocation.module_args.path') | list | first) | default('/usr/sbin/nologin') }}"
+        reverse_proxy_nologin: "{{ (_nologin_stats.results |
+         selectattr('stat.exists','defined') |
+          selectattr('stat.exists') |
+           map(attribute='invocation.module_args.path') |
+            list | first) | default('/usr/sbin/nologin') }}"
 
     - name: Create reverse_proxy system user with home
       ansible.builtin.user:
@@ -132,10 +136,10 @@
     group: "reverse_proxy"
     mode: "{{ item.mode }}"
   loop:
-    - { path: "{{ reverse_proxy_root_dir }}",   mode: '0755' }
-    - { path: "{{ reverse_proxy_config_dir }}", mode: '0755' }
-    - { path: "{{ reverse_proxy_data_dir }}",   mode: '0755' }
-    - { path: "{{ reverse_proxy_certs_dir }}",  mode: '0755' }
+    - {path: "{{ reverse_proxy_root_dir }}", mode: '0755'}
+    - {path: "{{ reverse_proxy_config_dir }}", mode: '0755'}
+    - {path: "{{ reverse_proxy_data_dir }}", mode: '0755'}
+    - {path: "{{ reverse_proxy_certs_dir }}", mode: '0755'}
   become: true
 
 - name: Build Caddyfile from reverse_proxy_domains (use Vault ACME)

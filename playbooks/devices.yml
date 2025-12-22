@@ -85,14 +85,19 @@
 
     - name: Compute bootstrap vault address from inventory (rpi5b8g1)
       ansible.builtin.set_fact:
-        _bootstrap_vault_addr_default: "https://{{ hostvars['rpi5b8g1'].ansible_host | default('192.168.0.80') }}:{{ vault_api_port | default(8200) }}"
+        _bootstrap_vault_addr_default:
+          "https://{{ hostvars['rpi5b8g1'].ansible_host |
+           default('192.168.0.80') }}:{{ vault_api_port | default(8200) }}"
       run_once: true
 
     - name: Set Transit seal defaults for main cluster when not provided
       ansible.builtin.set_fact:
         vault_enable_transit_seal: "{{ (vault_enable_transit_seal | default(false)) or true }}"
         vault_transit_addr: "{{ (vault_transit_addr | default('')) | length > 0 and vault_transit_addr or _bootstrap_vault_addr_default }}"
-        vault_transit_token: "{{ (vault_transit_token | default('')) | length > 0 and vault_transit_token or ((_bootstrap_transit_token.content | default('')) | ternary((_bootstrap_transit_token.content | b64decode | trim), '') ) }}"
+        vault_transit_token: "{{ (vault_transit_token | default('')) |
+         length > 0 and vault_transit_token or
+          ((_bootstrap_transit_token.content | default('')) |
+           ternary((_bootstrap_transit_token.content | b64decode | trim), '') ) }}"
       run_once: true
 
   tasks:
@@ -133,20 +138,6 @@
         vault_stage: followers
       tags:
         - vault
-
-#- name: "Vault trust distribution (Cluster CA + optional Root CA)"
-#  hosts: vault_cluster
-#  gather_facts: true
-#  become: false
-#
-#  tasks:
-#    - name: Vault trust distribution
-#      import_role:
-#        name: vault
-#      vars:
-#        vault_stage: trust
-#      tags:
-#        - vault
 
 # Reverse proxy cluster (Caddy + keepalived VIP), must be after vault setup
 - name: Setup reverse proxy cluster

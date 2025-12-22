@@ -105,7 +105,12 @@
 
 - name: Initialize bootstrap Vault (Shamir)
   ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc 'f=/tmp/vault-init.json; /bin/vault operator init -key-shares={{ vault_unseal_shares }} -key-threshold={{ vault_unseal_threshold }} -format=json > "$f"; cat "$f"'
+    podman exec {{ vault_container_name }}
+    sh -lc 'f=/tmp/vault-init.json;
+    /bin/vault operator init
+      -key-shares={{ vault_unseal_shares }}
+      -key-threshold={{ vault_unseal_threshold }}
+      -format=json > "$f"; cat "$f"'
   register: _bootstrap_init
   changed_when: true
   failed_when: >-
@@ -248,7 +253,9 @@
 # Ensure root token is available to the CLI inside container (no env in exec)
 - name: Write root token into container token file
   ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc 'printf "%s" "{{ vault_root_token }}" > /root/.vault-token && chmod 600 /root/.vault-token'
+    podman exec {{ vault_container_name }}
+    sh -lc 'printf "%s" "{{ vault_root_token }}" > /root/.vault-token &&
+    chmod 600 /root/.vault-token'
   changed_when: true
   failed_when: false
   become: true
@@ -290,12 +297,21 @@
     VAULT_ADDR="https://127.0.0.1:{{ vault_api_port }}"
     VAULT_CACERT="{{ vault_tls_dir_in_container }}/cluster-ca.pem"
     # Check if the mount exists without relying on jq
-    if podman exec {{ vault_container_name }} sh -lc "VAULT_ADDR=$VAULT_ADDR VAULT_CACERT=$VAULT_CACERT VAULT_TOKEN='{{ vault_root_token }}' vault secrets list -format=json | grep -q '^\s*\"{{ vault_transit_mount_path.rstrip('/') }}/\"'"; then
+    if podman exec {{ vault_container_name }}
+    sh -lc "VAULT_ADDR=$VAULT_ADDR VAULT_CACERT=$VAULT_CACERT
+    VAULT_TOKEN='{{ vault_root_token }}' vault secrets list -format=json |
+    grep -q '^\s*\"{{ vault_transit_mount_path.rstrip('/') }}/\"'"; then
       exit 0
     fi
     # Try to enable; if already exists, treat as success (idempotent)
-    if ! podman exec {{ vault_container_name }} sh -lc "VAULT_ADDR=$VAULT_ADDR VAULT_CACERT=$VAULT_CACERT VAULT_TOKEN='{{ vault_root_token }}' vault secrets enable -path='{{ vault_transit_mount_path.rstrip('/') }}' transit"; then
-      podman exec {{ vault_container_name }} sh -lc "VAULT_ADDR=$VAULT_ADDR VAULT_CACERT=$VAULT_CACERT VAULT_TOKEN='{{ vault_root_token }}' vault secrets list -format=json | grep -q '^\s*\"{{ vault_transit_mount_path.rstrip('/') }}/\"'"
+    if ! podman exec {{ vault_container_name }} sh -lc
+    "VAULT_ADDR=$VAULT_ADDR VAULT_CACERT=$VAULT_CACERT
+    VAULT_TOKEN='{{ vault_root_token }}' vault secrets enable
+    -path='{{ vault_transit_mount_path.rstrip('/') }}' transit"; then
+      podman exec {{ vault_container_name }} sh -lc
+    "VAULT_ADDR=$VAULT_ADDR VAULT_CACERT=$VAULT_CACERT
+    VAULT_TOKEN='{{ vault_root_token }}' vault secrets list -format=json |
+    grep -q '^\s*\"{{ vault_transit_mount_path.rstrip('/') }}/\"'"
     fi
   args:
     executable: /bin/sh

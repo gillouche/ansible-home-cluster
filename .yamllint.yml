@@ -27,22 +27,4 @@ ignore: |
   .github/
   roles/**/files/
   roles/**/templates/
-  inventories/group_vars/*.vault.yml
-overrides:
-  - files: "roles/vault/tasks/main.yml"
-    rules:
-      line-length:
-        max: 220
-        level: warning
-      braces: disable
-      brackets: disable
-      colons: disable
-      trailing-spaces: disable
-  - files: "roles/reverse_proxy/tasks/main.yml"
-    rules:
-      line-length:
-        max: 180
-        level: warning
-  - files: "inventories/inventory.yml"
-    rules:
-      braces: disable
+  inventories/group_vars/*/vault.yml

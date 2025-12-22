@@ -32,6 +32,8 @@ vault_host_root_dir_data: "/home/vault"
 vault_host_config_dir: "/home/vault/config"
 vault_host_tls_dir: "/home/vault/tls"
 vault_host_data_dir: "/home/vault/data"
+vault_host_logs_dir: "/home/vault/logs"
+vault_host_bin_dir: "/home/vault/bin"
 
 # Docker logging options (persist stdout/stderr via json-file)
 # For deep debugging, you can increase size and keep a single file

@@ -75,8 +75,8 @@ reverse_proxy_https_port: 443
 # Host paths
 reverse_proxy_root_dir: "/home/reverse_proxy"
 reverse_proxy_config_dir: "{{ reverse_proxy_root_dir }}/config"
-reverse_proxy_data_dir:   "{{ reverse_proxy_root_dir }}/data"
-reverse_proxy_certs_dir:  "{{ reverse_proxy_root_dir }}/certs"
+reverse_proxy_data_dir: "{{ reverse_proxy_root_dir }}/data"
+reverse_proxy_certs_dir: "{{ reverse_proxy_root_dir }}/certs"
 
 # Runtime user/group for file ownership on host (rootful container; keep root:root)
 reverse_proxy_owner: "root"
