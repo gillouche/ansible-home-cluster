@@ -54,24 +54,37 @@
       - "/home/vault/bin:/vault/bin"
   become: true
 
-# Auto-initialize the Raft leader when using Transit seal (Vault remains sealed until initialized)
+# Detect current leader status once
+- name: Read current leader Vault status (pre-init check)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
+  register: _leader_status_preinit
+  changed_when: false
+  failed_when: false
+  become: true
+
+# Auto-initialize the Raft leader when using Transit seal (only when not initialized)
 - name: Pause 5s before leader auto-initialize (transit)
   ansible.builtin.pause:
     seconds: 5
   when:
     - vault_enable_transit_seal | default(false)
     - inventory_hostname in (groups['vault_leader'] | default([]))
+    - (_leader_status_preinit.stdout | default('{}')) | length > 0
+    - (((_leader_status_preinit.stdout | from_json).initialized | default(false)) == false)
 
 - name: Initialize Raft leader with recovery keys (Transit seal)
   ansible.builtin.command: >-
     podman exec {{ vault_container_name }} sh -lc "/bin/vault operator init"
   register: _leader_init
-  changed_when: true
+  changed_when: (_leader_init.rc | default(1)) == 0
   failed_when: false
   become: true
   when:
     - vault_enable_transit_seal | default(false)
     - inventory_hostname in (groups['vault_leader'] | default([]))
+    - (_leader_status_preinit.stdout | default('{}')) | length > 0
+    - (((_leader_status_preinit.stdout | from_json).initialized | default(false)) == false)
 
 - name: Wait for leader to be unsealed (post-init, transit)
   ansible.builtin.command: >-
@@ -88,3 +101,5 @@
   when:
     - vault_enable_transit_seal | default(false)
     - inventory_hostname in (groups['vault_leader'] | default([]))
+    - (_leader_status_preinit.stdout | default('{}')) | length > 0
+    - (((_leader_status_preinit.stdout | from_json).initialized | default(false)) == false)
