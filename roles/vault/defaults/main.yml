@@ -290,10 +290,5 @@ vault_transit_policy_name: "autounseal-policy"
 vault_transit_token_period: "720h"   # 30 days periodic
 vault_transit_token_export_path: "~/.local/share/ansible-home-cluster/vault/transit_token.txt"
 
-# Nuclear reset flag: when true, purge ALL controller artifacts under
-# ~/.local/share/ansible-home-cluster and wipe /home/vault/* on target hosts
-# before running the role, so the play behaves like a first run.
-vault_nuclear_reset: false
-
 # Force TLS (server key/CSR/cert) regeneration for the node even if files exist
 vault_force_tls_regen: false

@@ -1,11 +1,6 @@
 ---
 # Minimal router for staged Vault role execution
 
-- name: Nuclear reset (purge controller artifacts and wipe /home/vault) — DANGEROUS
-  ansible.builtin.include_tasks: reset.yml
-  when:
-    - (vault_nuclear_reset | default(false) | bool)
-
 - name: Route to split-stage tasks when vault_stage is set (common|leader|followers)
   ansible.builtin.include_tasks: "{{ vault_stage }}.yml"
   when:

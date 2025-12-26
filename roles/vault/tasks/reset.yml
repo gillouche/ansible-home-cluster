@@ -1,7 +1,4 @@
 ---
-# Nuclear reset for Vault role — DANGEROUS
-# When vault_nuclear_reset: true, purge controller artifacts and wipe /home/vault on target host(s)
-
 - name: Stop and remove Vault container if present (host)
   containers.podman.podman_container:
     name: "{{ vault_container_name }}"

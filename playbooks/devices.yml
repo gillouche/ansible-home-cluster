@@ -46,16 +46,16 @@
 
 # Bootstrap Transit Vault (single node on rpi5b8g1) — run before main vault cluster
 - name: "Bootstrap Transit Vault on rpi5b8g1"
-  hosts: vault_bootstrap
+  hosts: vault_transit
   gather_facts: true
   become: false
 
   tasks:
-    - name: Bootstrap end-to-end (CA/TLS + Vault start + Transit)
+    - name: bootstrap end-to-end (CA/TLS + Vault start + Transit)
       import_role:
         name: vault
       vars:
-        vault_stage: bootstrap
+        vault_stage: transit
         # Bootstrap must NOT use transit seal (starts with Shamir, then creates transit)
         vault_enable_transit_seal: false
       tags:

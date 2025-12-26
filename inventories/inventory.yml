@@ -78,7 +78,7 @@ all:
         rpi5b16g1ssd:
         rpi5b16g2ssd:
         rpi5b16g3ssd:
-    vault_bootstrap:
+    vault_transit:
       hosts:
         rpi5b8g1:
     vault_leader:
