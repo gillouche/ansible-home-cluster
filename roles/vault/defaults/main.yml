@@ -45,19 +45,6 @@ vault_docker_log_max_file: "1"
 # Run Vault container as root (per request) for maximum access to mounted folders
 vault_container_user: "root"
 
-# Common environment for all in-container Vault CLI calls via podman exec
-# so we don't need to export VAULT_* on every exec
-vault_container_env:
-  SKIP_CHOWN: "true"
-  SKIP_SETCAP: "true"
-  VAULT_LOG_LEVEL: "{{ vault_log_level | default('debug') }}"
-  VAULT_CACERT: "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
-  VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
-  # Placeholder for dynamic token when needed by exec commands; default empty.
-  # Tasks that need VAULT_TOKEN should set it temporarily via --env in podman exec,
-  # but per user requirement we will avoid env in exec: we'll store token file inside container.
-  VAULT_TOKEN: ""
-
 # Write full startup logs to files inside the container via a wrapper (tee)
 # Enabled by default to capture complete logs from process start.
 vault_enable_log_wrapper: true
@@ -181,10 +168,6 @@ vault_controller_ca_bundle_path: "~/.local/share/ansible-home-cluster/ca-bundle.
 vault_firefox_enable_enterprise_roots: false
 vault_firefox_policies_json_path: "~/Library/Application Support/Firefox/distribution/policies.json"
 # Defaults for Vault role (PKI + ACME via Vault CLI)
-
-# Vault public address (HTTPS only as requested)
-# Example: https://vault-1.gillouche.homelab:8200
-vault_addr: "https://127.0.0.1:8200"
 
 # Whether to configure PKI+ACME using a script executed inside the container.
 # When true, the role will write /home/vault/bin/pki_acme_setup.sh, mount it,

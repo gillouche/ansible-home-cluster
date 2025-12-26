@@ -48,7 +48,13 @@
       - DAC_OVERRIDE
       - CHOWN
     user: "{{ vault_container_user | default(omit) }}"
-    env: "{{ vault_container_env }}"
+    env:
+      SKIP_CHOWN: "true"
+      SKIP_SETCAP: "true"
+      VAULT_LOG_LEVEL: "{{ vault_log_level | default('debug') }}"
+      VAULT_CACERT: "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
+      VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+      VAULT_TOKEN: ""
     command: >-
       {{ (vault_enable_log_wrapper | default(true))
           | ternary('/bin/sh -lc /vault/bin/start-vault.sh', 'server -config=' ~ vault_cfg_path_in_container) }}

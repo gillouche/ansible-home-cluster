@@ -15,7 +15,7 @@ target_user: alarm
 
 # Vault trust/CA distribution (controller + hosts)
 vault_install_root_ca_on_hosts: true
-vault_trust_ca_on_controller: true
+vault_trust_ca_on_controller: false
 vault_controller_install_keychain: login
 
 # Controller (macOS) browser trust switch
