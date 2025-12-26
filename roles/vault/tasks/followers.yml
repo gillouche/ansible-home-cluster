@@ -66,23 +66,37 @@
       - "/home/vault/bin:/vault/bin"
   become: true
 
+# Detect current follower status once
+- name: Read current follower Vault status (pre-init check)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
+  register: _follower_status_preinit
+  changed_when: false
+  failed_when: false
+  become: true
+
+# Auto-initialize the Raft follower when using Transit seal (only when not initialized)
 - name: Pause 5s before follower auto-initialize (transit)
   ansible.builtin.pause:
     seconds: 5
   when:
     - vault_enable_transit_seal | default(false)
     - inventory_hostname in (groups['vault_followers'] | default([]))
+    - (_follower_status_preinit.stdout | default('{}')) | length > 0
+    - (((_follower_status_preinit.stdout | from_json).initialized | default(false)) == false)
 
 - name: Initialize Raft follower with recovery keys (Transit seal)
   ansible.builtin.command: >-
     podman exec {{ vault_container_name }} sh -lc "/bin/vault operator init"
   register: _follower_init
-  changed_when: true
+  changed_when: (_follower_init.rc | default(1)) == 0
   failed_when: false
   become: true
   when:
     - vault_enable_transit_seal | default(false)
-    - inventory_hostname in (groups['vault_follower'] | default([]))
+    - inventory_hostname in (groups['vault_followers'] | default([]))
+    - (_follower_status_preinit.stdout | default('{}')) | length > 0
+    - (((_follower_status_preinit.stdout | from_json).initialized | default(false)) == false)
 
 - name: Wait for follower to be unsealed (post-init, transit)
   ansible.builtin.command: >-
@@ -98,4 +112,6 @@
   become: true
   when:
     - vault_enable_transit_seal | default(false)
-    - inventory_hostname in (groups['vault_follower'] | default([]))
+    - inventory_hostname in (groups['vault_followers'] | default([]))
+    - (_follower_status_preinit.stdout | default('{}')) | length > 0
+    - (((_follower_status_preinit.stdout | from_json).initialized | default(false)) == false)
