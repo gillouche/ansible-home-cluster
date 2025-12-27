@@ -30,7 +30,7 @@ vault_runtime_group_name: "vault"
 # Requested layout under /home/vault so these paths are bind-mounted into the container
 vault_host_root_dir_data: "/home/vault"
 vault_host_config_dir: "/home/vault/config"
-vault_host_tls_dir: "/home/vault/tls"
+vault_host_tls_dir: "/etc/tls"
 vault_host_data_dir: "/home/vault/data"
 vault_host_logs_dir: "/home/vault/logs"
 vault_host_bin_dir: "/home/vault/bin"
@@ -94,8 +94,11 @@ vault_acme_nonce_strict: false
 # Automatic Raft bootstrap values (always active via state detection)
 vault_unseal_shares: 3
 vault_unseal_threshold: 2
-# Where to store the init payload on the controller (owner-only perms are used)
-vault_init_export_path: "~/.local/share/ansible-home-cluster/vault-init.json"
+# Where to store the Raft cluster init payload on the controller (leader/followers)
+vault_init_export_path: "~/.local/share/ansible-home-cluster/cluster-init.json"
+
+# Where to store the Transit bootstrap init payload on the controller (transit-only)
+vault_transit_init_export_path: "~/.local/share/ansible-home-cluster/transit-init.json"
 
 # ---------------------------------------------
 # Cluster CA for secure inter-node TLS (Raft join)
@@ -108,6 +111,14 @@ vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/cluster-
 # Certificate validity (days)
 vault_cluster_ca_days: 3650
 vault_server_cert_days: 1825
+
+# ---------------------------------------------
+# TLS certificate SAN customization
+# ---------------------------------------------
+# Additional Subject Alternative Names to include when issuing Vault's server cert.
+# Use this to add VIPs (e.g., HAProxy VRRP address) or extra DNS names.
+vault_additional_san_ips: []        # e.g., ["192.168.0.253"]
+vault_additional_san_dns: []        # e.g., ["vault.gillouche.homelab"]
 
 # Automation token storage on controller (encrypted via Ansible Vault if configured)
 vault_automation_token_path: "~/.local/share/ansible-home-cluster/vault-ansible-token.json"
@@ -131,6 +142,14 @@ vault_automation_token_renew_threshold_seconds: 604800
 # cluster path for ACME, avoiding internal DNS dependency during ACME flows.
 # Example: "192.168.0.81"
 vault_acme_advertise_addr: ""
+
+# Validate ACME directory reachability (VIP:8200) after Vault is up on leader
+# and optionally self-heal by enabling PKI+ACME if missing.
+vault_acme_validate_enable: true
+
+# Whether followers are allowed to configure PKI/ACME (writes) themselves.
+# By default, only the leader should perform PKI/ACME configuration; followers validate only.
+vault_configure_pki_on_followers: false
 
 
 # Listener bind address inside the container. Default to 0.0.0.0 so peers can reach it.
@@ -179,6 +198,31 @@ vault_root_token: ""
 
 # PKI mount path per tutorial
 vault_pki_mount: "pki"
+
+# Intermediate PKI for issuance and ACME (best practice)
+vault_pki_int_mount: "pki_int"
+
+# Controller-side Root CA path (offline/protected root used to sign intermediate)
+vault_root_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-root"
+vault_root_ca_cert_controller: "{{ vault_root_ca_dir_controller }}/root-ca.pem"
+vault_root_ca_key_controller: "{{ vault_root_ca_dir_controller }}/root-ca.key"
+vault_root_ca_days: 3650
+
+# Intermediate certificate parameters
+vault_intermediate_common_name: "Homelab Intermediate CA"
+vault_intermediate_key_type: "rsa"
+vault_intermediate_key_bits: 4096
+vault_intermediate_days: 1825
+
+# Default role policy constraints for PKI issuance
+vault_pki_default_role_name: "default"
+vault_pki_allowed_domains:
+  - "gillouche.homelab"
+vault_pki_allow_subdomains: true
+
+# Issuer naming consistent with homelab
+vault_pki_root_issuer_name: "homelab-root"
+vault_pki_int_issuer_name: "homelab-intermediate"
 
 # Max TTL for the PKI as per tutorial (10 years)
 vault_pki_max_ttl: "87600h"

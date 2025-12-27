@@ -88,72 +88,84 @@ all:
       hosts:
         rpi5b16g2ssd:
         rpi5b16g3ssd:
-    nexus:
-      hosts:
-        rpi5b16g1ssd:
-    k3s_cluster:
-      children:
-        k3s_server:
-        k3s_agent:
-    k3s_server_init:
+    load_balancer_cluster:
       hosts:
         rpi5b16g4:
-    k3s_server:
-      hosts:
-        rpi5b16g4:
-          k3s_node_labels:
-            - "node-class=rpi5"
-            - "reliability=stable"
-            - "storage=ephemeral"
         rpi5b16g5:
-          k3s_node_labels:
-            - "node-class=rpi5"
-            - "reliability=stable"
-            - "storage=ephemeral"
         rpi5b16g6:
-          k3s_node_labels:
-            - "node-class=rpi5"
-            - "reliability=stable"
-            - "storage=ephemeral"
-    k3s_agent:
+    load_balancer_primary:
       hosts:
-        rpi4b8g1:
-          k3s_node_labels:
-            - "node-class=rpi4"
-            - "reliability=best-effort"
-            - "storage=ephemeral"
-        rpi4b8g2:
-          k3s_node_labels:
-            - "node-class=rpi4"
-            - "reliability=best-effort"
-            - "storage=ephemeral"
-        rpi4b8g3:
-          k3s_node_labels:
-            - "node-class=rpi4"
-            - "reliability=best-effort"
-            - "storage=ephemeral"
-        rpi4b8g4:
-          k3s_node_labels:
-            - "node-class=rpi4"
-            - "reliability=best-effort"
-            - "storage=ephemeral"
-        rpi5b8g1:
-          k3s_node_labels:
-            - "node-class=rpi5"
-            - "reliability=best-effort"
-            - "storage=ephemeral"
-        rpi5b16g1ssd:
-          k3s_node_labels:
-            - "storage=ssd"
-            - "node-class=rpi5"
-            - "reliability=preferred"
-        rpi5b16g2ssd:
-          k3s_node_labels:
-            - "storage=ssd"
-            - "node-class=rpi5"
-            - "reliability=preferred"
-        rpi5b16g3ssd:
-          k3s_node_labels:
-            - "storage=ssd"
-            - "node-class=rpi5"
-            - "reliability=preferred"
+        rpi5b16g4:
+    load_balancer_replicas:
+      hosts:
+        rpi5b16g5:
+        rpi5b16g6:
+#    nexus:
+#      hosts:
+#        rpi5b16g1ssd:
+#    k3s_cluster:
+#      children:
+#        k3s_server:
+#        k3s_agent:
+#    k3s_server_init:
+#      hosts:
+#        rpi5b16g4:
+#    k3s_server:
+#      hosts:
+#        rpi5b16g4:
+#          k3s_node_labels:
+#            - "node-class=rpi5"
+#            - "reliability=stable"
+#            - "storage=ephemeral"
+#        rpi5b16g5:
+#          k3s_node_labels:
+#            - "node-class=rpi5"
+#            - "reliability=stable"
+#            - "storage=ephemeral"
+#        rpi5b16g6:
+#          k3s_node_labels:
+#            - "node-class=rpi5"
+#            - "reliability=stable"
+#            - "storage=ephemeral"
+#    k3s_agent:
+#      hosts:
+#        rpi4b8g1:
+#          k3s_node_labels:
+#            - "node-class=rpi4"
+#            - "reliability=best-effort"
+#            - "storage=ephemeral"
+#        rpi4b8g2:
+#          k3s_node_labels:
+#            - "node-class=rpi4"
+#            - "reliability=best-effort"
+#            - "storage=ephemeral"
+#        rpi4b8g3:
+#          k3s_node_labels:
+#            - "node-class=rpi4"
+#            - "reliability=best-effort"
+#            - "storage=ephemeral"
+#        rpi4b8g4:
+#          k3s_node_labels:
+#            - "node-class=rpi4"
+#            - "reliability=best-effort"
+#            - "storage=ephemeral"
+#        rpi5b8g1:
+#          k3s_node_labels:
+#            - "node-class=rpi5"
+#            - "reliability=best-effort"
+#            - "storage=ephemeral"
+#        rpi5b16g1ssd:
+#          k3s_node_labels:
+#            - "storage=ssd"
+#            - "node-class=rpi5"
+#            - "reliability=preferred"
+#        rpi5b16g2ssd:
+#          k3s_node_labels:
+#            - "storage=ssd"
+#            - "node-class=rpi5"
+#            - "reliability=preferred"
+#        rpi5b16g3ssd:
+#          k3s_node_labels:
+#            - "storage=ssd"
+#            - "node-class=rpi5"
+#            - "reliability=preferred"

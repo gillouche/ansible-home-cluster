@@ -7,27 +7,27 @@
   when: target_user is not defined
   become: false
 
-- name: Gather minimal facts (role safeguard when running with tags)
+- name: Gather full facts for facts role
   ansible.builtin.setup:
     gather_subset:
-      - min
-  when: ansible_distribution is not defined
+      - all
+  when: ansible_facts is not defined or (ansible_facts | length) == 0 or true
 
 - name: Print all available facts if debug verbosity 4 is enabled
   ansible.builtin.debug:
     msg:
-      - "OS Family: {{ ansible_facts['os_family'] }}"
-      - "Distribution: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
-      - "Distribution Release: {{ ansible_facts['distribution_release'] }}"
-      - "Kernel: {{ ansible_facts['kernel'] }}"
-      - "Architecture: {{ ansible_facts['architecture'] }}"
-      - "Hostname: {{ ansible_facts['hostname'] }}"
-      - "FQDN: {{ ansible_facts['fqdn'] }}"
-      - "Python Version: {{ ansible_facts['python_version'] }}"
-      - "CPU Cores: {{ ansible_facts['processor_vcpus'] }}"
-      - "Memory (MB): {{ ansible_facts['memtotal_mb'] }}"
-      - "User: {{ ansible_facts['user_id'] }}"
-      - "Home Directory: {{ ansible_facts['user_dir'] }}"
+      - "OS Family: {{ ansible_facts.os_family | default('n/a') }}"
+      - "Distribution: {{ ansible_facts.distribution | default('n/a') }} {{ ansible_facts.distribution_version | default('') }}"
+      - "Distribution Release: {{ ansible_facts.distribution_release | default('n/a') }}"
+      - "Kernel: {{ ansible_facts.kernel | default('n/a') }}"
+      - "Architecture: {{ ansible_facts.architecture | default('n/a') }}"
+      - "Hostname: {{ ansible_facts.hostname | default('n/a') }}"
+      - "FQDN: {{ ansible_facts.fqdn | default('n/a') }}"
+      - "Python Version: {{ ansible_facts.python_version | default('n/a') }}"
+      - "CPU Cores: {{ ansible_facts.processor_vcpus | default(ansible_facts.processor_cores | default('n/a')) }}"
+      - "Memory (MB): {{ ansible_facts.memtotal_mb | default('n/a') }}"
+      - "User: {{ ansible_facts.user_id | default('n/a') }}"
+      - "Home Directory: {{ ansible_facts.user_dir | default('n/a') }}"
     verbosity: 4
   register: facts_debug_result
   become: false
@@ -35,9 +35,9 @@
 - name: Print network information
   ansible.builtin.debug:
     msg:
-      - "Default IPv4 Address: {{ ansible_facts['default_ipv4']['address'] | default('N/A') }}"
-      - "Default Network Interface: {{ ansible_facts['default_ipv4']['interface'] | default('N/A') }}"
-      - "All IPv4 Addresses: {{ ansible_facts['all_ipv4_addresses'] }}"
+      - "Default IPv4 Address: {{ (ansible_facts.default_ipv4.address | default('N/A')) if (ansible_facts.default_ipv4 is defined) else 'N/A' }}"
+      - "Default Network Interface: {{ (ansible_facts.default_ipv4.interface | default('N/A')) if (ansible_facts.default_ipv4 is defined) else 'N/A' }}"
+      - "All IPv4 Addresses: {{ ansible_facts.all_ipv4_addresses | default([]) }}"
     verbosity: 4
   become: false
 

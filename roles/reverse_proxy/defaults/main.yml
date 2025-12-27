@@ -14,13 +14,15 @@ reverse_proxy_tls_mode: "vault_acme"
 # Email used for ACME account registration in Caddy
 reverse_proxy_acme_email: ""
 # EAB is not used by default in this homelab setup; keep configuration minimal
-# ACME directory URL served by Vault. By default, use the first host in vault_cluster.
-# You can override this in inventory if you prefer a specific node.
+# ACME directory URL served by Vault. Use the HAProxy VIP on port 8200 so
+# ACME always targets the active Vault leader via the load balancer.
+# Falls back to reverse_proxy_virtual_ip, then localhost if VIP not defined.
 reverse_proxy_acme_ca_url: >-
   {{
-    "https://" + (hostvars[groups['vault_cluster'][0]].ansible_host if (groups['vault_cluster']|default([])) else '127.0.0.1')
-    + ":" + (hostvars[groups['vault_cluster'][0]].vault_api_port | default(8200) | string)
-    + "/v1/pki/acme/directory"
+    "https://"
+    ~ (load_balancer_virtual_ip | default(reverse_proxy_virtual_ip | default('127.0.0.1')))
+    ~ ":" ~ (vault_api_port | default(8200) | string)
+    ~ "/v1/pki/acme/directory"
   }}
 
 # VIP and primary host sane defaults (override in group_vars as needed)
@@ -85,25 +87,14 @@ reverse_proxy_group: "root"
 # Domains to serve (list of hostnames/FQDNs)
 reverse_proxy_domains: []
 
-# Vault ACME directory URL (provided by Vault role). Example:
-# https://192.168.0.81:8200/v1/pki/acme/directory
-# Derive from the first host in the vault_cluster inventory group by default,
-# but allow override via inventory/group_vars if needed.
+# Vault ACME directory URL consumed by Caddy. Point to HAProxy VIP:8200 so
+# ACME requests are directed to the current leader. Override if needed.
 vault_acme_directory_url: >-
   {{
     "https://"
-    + (
-        hostvars[groups['vault_cluster'][0]].ansible_host
-        if (groups['vault_cluster'] | default([]))
-        else '127.0.0.1'
-      )
-    + ":"
-    + (
-        hostvars[groups['vault_cluster'][0]].vault_api_port | default(8200) | string
-        if (groups['vault_cluster'] | default([]))
-        else '8200'
-      )
-    + "/v1/pki/acme/directory"
+    ~ (load_balancer_virtual_ip | default(reverse_proxy_virtual_ip | default('127.0.0.1')))
+    ~ ":" ~ (vault_api_port | default(8200) | string)
+    ~ "/v1/pki/acme/directory"
   }}
 
 # Optional: if your Vault PKI ACME endpoint requires a token/cookie header (most flows do not),

@@ -1,4 +1,41 @@
 ---
+
+# Ensure common prep (users/dirs/mount points) is executed before stage-specific steps
+- name: Include common preparation tasks
+  ansible.builtin.include_tasks: common.yml
+
+- name: Render Vault configuration (leader)
+  ansible.builtin.template:
+    src: "vault.hcl.j2"
+    dest: "{{ vault_host_config_dir }}/vault.hcl"
+    owner: "{{ vault_runtime_user | default('vault') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
+    mode: '0644'
+  become: true
+  notify: Restart Vault container to apply config changes (if needed)
+  vars:
+    # Compute effective Vault public URL used by the template
+    vault_public_url_effective: >-
+      {{
+        (vault_public_url | default(''))
+        if ((vault_public_url | default('') | length) > 0)
+        else (
+          'https://'
+          ~ (
+              (
+                hostvars is defined
+                and hostvars[inventory_hostname] is defined
+                and hostvars[inventory_hostname].ansible_facts is defined
+                and hostvars[inventory_hostname].ansible_facts.default_ipv4 is defined
+              )
+              | ternary(
+                  hostvars[inventory_hostname].ansible_facts.default_ipv4.address,
+                  ansible_facts.default_ipv4.address
+                )
+            )
+          ~ ':' ~ (vault_api_port | string)
+        )
+      }}
 - name: Install startup wrapper on leader to capture early logs
   ansible.builtin.copy:
     dest: "/home/vault/bin/start-vault.sh"
@@ -42,7 +79,6 @@
       VAULT_LOG_LEVEL: "{{ vault_log_level | default('debug') }}"
       VAULT_CACERT: "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
       VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
-      VAULT_TOKEN: ""
     command: >-
       {{ (vault_enable_log_wrapper | default(true))
           | ternary('/bin/sh -lc /vault/bin/start-vault.sh', 'server -config=' ~ vault_cfg_path_in_container) }}
@@ -54,7 +90,40 @@
       - "/home/vault/bin:/vault/bin"
   become: true
 
-# Detect current leader status once
+- name: Pause briefly after starting container
+  ansible.builtin.pause:
+    seconds: 5
+
+# -------------------------------------------------------------
+# Cluster init JSON (strict reuse with auto-init if missing)
+# -------------------------------------------------------------
+- name: Check for existing cluster init JSON on controller (leader)
+  ansible.builtin.stat:
+    path: "{{ vault_init_export_path | expanduser }}"
+  register: _cluster_init_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Load cluster init JSON (strict reuse)
+  ansible.builtin.slurp:
+    src: "{{ vault_init_export_path | expanduser }}"
+  register: _cluster_init_loaded
+  delegate_to: localhost
+  run_once: true
+  when: _cluster_init_stat.stat.exists | default(false)
+
+- name: Fail fast if cluster-init.json exists but is not valid JSON
+  ansible.builtin.fail:
+    msg: >-
+      Existing cluster-init.json ({{ vault_init_export_path | expanduser }}) is not valid JSON. Delete it or replace with
+      the JSON output from 'vault operator init -format=json'. The leader will not proceed with a non-JSON file.
+  when:
+    - _cluster_init_stat.stat.exists | default(false)
+    - ((_cluster_init_loaded.content | default('') | b64decode | regex_search('^\s*[\[{]') | default('')) == '')
+  delegate_to: localhost
+  run_once: true
+
+# Detect current leader status once (pre-init check)
 - name: Read current leader Vault status (pre-init check)
   ansible.builtin.command: >-
     podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
@@ -62,6 +131,88 @@
   changed_when: false
   failed_when: false
   become: true
+
+- name: Initialize Raft leader (one-time, create cluster-init.json when missing)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "VAULT_FORMAT=json /bin/vault operator init -format=json"
+  register: _leader_init
+  changed_when: (_leader_init.rc | default(1)) == 0
+  failed_when: false
+  become: true
+  when:
+    - (not (_cluster_init_stat.stat.exists | default(false)))
+    - (_leader_status_preinit.stdout | default('{}')) | length > 0
+    - (((_leader_status_preinit.stdout | from_json).initialized | default(false)) == false)
+
+- name: Assert leader init output is valid JSON
+  ansible.builtin.assert:
+    that:
+      - (_leader_init.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+    fail_msg: >-
+      Vault leader init output was not JSON. Ensure the CLI honors -format=json. The role sets VAULT_FORMAT=json.
+  when:
+    - _leader_init is defined
+    - (_leader_init.rc | default(1)) == 0
+
+- name: Persist cluster init JSON to controller (leader)
+  ansible.builtin.copy:
+    dest: "{{ vault_init_export_path | expanduser }}"
+    mode: '0600'
+    content: "{{ (_leader_init.stdout | from_json) | to_nice_json }}"
+  delegate_to: localhost
+  run_once: true
+  when:
+    - _leader_init is defined
+    - (_leader_init.rc | default(1)) == 0
+
+- name: Load root token from controller init JSON if not provided (leader)
+  ansible.builtin.slurp:
+    src: "{{ vault_init_export_path | expanduser }}"
+  register: _leader_init_json
+  delegate_to: localhost
+  run_once: true
+  when:
+    - (vault_root_token | default('') | length) == 0
+    - (_cluster_init_stat.stat.exists | default(false))
+
+- name: Set vault_root_token from controller file (leader)
+  ansible.builtin.set_fact:
+    vault_root_token: >-
+      {{ (
+            (_leader_init_json.content | default('') | b64decode | default('{}', true))
+          | from_json
+        ).root_token | default(vault_root_token | default('')) }}
+  when: (vault_root_token | default('') | length) == 0 and (_leader_init_json is defined)
+
+- name: Set vault_root_token from leader init output when file just created (leader)
+  ansible.builtin.set_fact:
+    vault_root_token: >-
+      {{ (
+            (_leader_init.stdout | default('') | string | length) > 0
+         ) | ternary(((_leader_init.stdout | from_json).root_token | default(vault_root_token | default(''))), (vault_root_token | default(''))) }}
+  when:
+    - (vault_root_token | default('') | length) == 0
+    - (_leader_init is defined)
+    - (_leader_init.rc | default(1)) == 0
+
+- name: Write /root/.vault-token inside container when vault_root_token is available (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "printf '%s' '{{ vault_root_token }}' > /root/.vault-token && chmod 0600 /root/.vault-token"
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (vault_root_token | default('') | length) > 0
+
+- name: Verify CLI token inside container (lookup, leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "vault token lookup -format=json"
+  register: _leader_token_lookup
+  changed_when: false
+  failed_when: false
+  become: true
+  when:
+    - (vault_root_token | default('') | length) > 0
 
 # Auto-initialize the Raft leader when using Transit seal (only when not initialized)
 - name: Pause 5s before leader auto-initialize (transit)
@@ -73,9 +224,866 @@
     - (_leader_status_preinit.stdout | default('{}')) | length > 0
     - (((_leader_status_preinit.stdout | from_json).initialized | default(false)) == false)
 
+## -------------------------------------------------------------
+## Ensure PKI is mounted and ACME is enabled (leader-only, idempotent)
+## -------------------------------------------------------------
+- name: Compute VIP address for PKI URLs (leader)
+  ansible.builtin.set_fact:
+    _lb_vip_addr: "{{ load_balancer_virtual_ip | default(ansible_facts.default_ipv4.address) }}"
+
+- name: List current secrets engines (leader, PKI check)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets list -format=json"
+  register: _leader_secrets_list_pki
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Parse secrets engines (leader, PKI check)
+  ansible.builtin.set_fact:
+    _leader_mounts_pki: >-
+      {{ (_leader_secrets_list_pki.stdout | default('{}') | length > 0) | ternary((_leader_secrets_list_pki.stdout | from_json), {}) }}
+
+- name: Enable PKI engine at mount if missing (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets enable -path='{{ vault_pki_mount | default('pki') }}' pki"
+  register: _leader_enable_pki
+  changed_when: true
+  failed_when: false
+  become: true
+  when: _leader_mounts_pki.get(((vault_pki_mount | default('pki')) ~ '/'), none) is none
+
+- name: Configure PKI URLs to use VIP (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/urls' \
+      issuing_certificates='https://{{ _lb_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/ca' \
+      crl_distribution_points='https://{{ _lb_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/crl'"
+  register: _leader_pki_urls
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Configure PKI cluster path (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/cluster' \
+      path='https://{{ _lb_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}'"
+  register: _leader_pki_cluster
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Enable ACME on PKI (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/acme' enabled=true"
+  register: _leader_pki_acme_enable
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Read back PKI ACME config (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_mount | default('pki') }}/config/acme'"
+  register: _leader_pki_acme_read
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Debug PKI ACME status (leader)
+  ansible.builtin.debug:
+    msg: >-
+      ACME status on mount '{{ vault_pki_mount | default('pki') }}':
+      enabled={{ (_leader_pki_acme_read.stdout | default('{}') | from_json).data.enabled | default(false) }}
+  when: _leader_pki_acme_read is defined
+
+## -------------------------------------------------------------
+## Best practice issuance: configure intermediate at {{ vault_pki_int_mount }} and enable ACME there
+## - Offline/Controller Root CA used to sign intermediate
+## -------------------------------------------------------------
+- name: Enable PKI (intermediate) engine at mount if missing (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets enable -path='{{ vault_pki_int_mount | default('pki_int') }}' pki"
+  register: _leader_enable_pki_int
+  changed_when: true
+  failed_when: false
+  become: true
+  when: _leader_mounts_pki.get(((vault_pki_int_mount | default('pki_int')) ~ '/'), none) is none
+
+# -----------------------------------------------------------------
+# Ensure Root PKI issuer and templated URL config (tutorial-aligned)
+# -----------------------------------------------------------------
+- name: Tune Root PKI max TTL (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets tune -max-lease-ttl=87600h '{{ vault_pki_mount | default('pki') }}'"
+  register: _leader_pki_tune
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Detect existing issuers at Root PKI (list)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault list -format=json '{{ vault_pki_mount | default('pki') }}/issuers'"
+  register: _leader_pki_root_issuers
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Detect default Root issuer (read)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_mount | default('pki') }}/issuers/default'"
+  register: _leader_pki_root_default
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Compute Root PKI issuer presence
+  ansible.builtin.set_fact:
+    _pki_root_has_issuer: >-
+      {{
+        (
+          (_leader_pki_root_default.rc | default(1)) == 0
+        )
+        or (
+          (_leader_pki_root_issuers.rc | default(1)) == 0
+          and (_leader_pki_root_issuers.stdout | default('') | trim | length) > 0
+          and ((_leader_pki_root_issuers.stdout | from_json) | length) > 0
+        )
+      }}
+
+- name: Generate Root issuer on PKI when missing (homelab-root)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -field=certificate '{{ vault_pki_mount | default('pki') }}/root/generate/internal' \
+      common_name='Homelab Root CA' issuer_name='{{ vault_pki_root_issuer_name | default('homelab-root') }}' ttl=87600h > {{ vault_tls_dir_in_container }}/homelab-root.crt"
+  register: _leader_pki_root_generate
+  changed_when: true
+  failed_when: false
+  become: true
+  when: not (_pki_root_has_issuer | default(false) | bool)
+
+- name: Configure Root PKI cluster path (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/cluster' \
+      path='https://{{ _lb_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}' \
+      aia_path='https://{{ _lb_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}'"
+  register: _leader_pki_root_cluster
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Configure Root PKI templated URLs (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/urls' \
+      issuing_certificates='{{'{{'}}cluster_aia_path{{'}}'}}/issuer/{{'{{'}}issuer_id{{'}}'}}/der' \
+      crl_distribution_points='{{'{{'}}cluster_aia_path{{'}}'}}/issuer/{{'{{'}}issuer_id{{'}}'}}/crl/der' \
+      ocsp_servers='{{'{{'}}cluster_path{{'}}'}}/ocsp' \
+      enable_templating=true"
+  register: _leader_pki_root_urls
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Detect existing issuers at PKI INT (list)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault list -format=json '{{ vault_pki_int_mount | default('pki_int') }}/issuers'"
+  register: _leader_pki_int_issuers
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Detect default issuer at PKI INT (read)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_int_mount | default('pki_int') }}/issuers/default'"
+  register: _leader_pki_int_issuer_default
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Compute PKI INT issuer presence
+  ansible.builtin.set_fact:
+    _pki_int_has_issuer: >-
+      {{
+        (
+          (_leader_pki_int_issuer_default.rc | default(1)) == 0
+        )
+        or (
+          (_leader_pki_int_issuers.rc | default(1)) == 0
+          and (_leader_pki_int_issuers.stdout | default('') | trim | length) > 0
+          and ((_leader_pki_int_issuers.stdout | from_json) | length) > 0
+        )
+      }}
+
+- name: Detect if any PKI INT issuer has a private key (key_id present)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "MOUNT='{{ vault_pki_int_mount | default('pki_int') }}'
+    ids=$(vault list -format=json \"$MOUNT/issuers\" 2>/dev/null || echo '[]')
+    found=''
+    for id in $(echo \"$ids\" | sed -e 's/[\[\],\"]//g'); do
+      [ -z \"$id\" ] && continue
+      k=$(vault read -field=key_id \"$MOUNT/issuer/$id\" 2>/dev/null || true)
+      if [ -n \"$k\" ] && [ \"$k\" != \"null\" ]; then
+        found=1
+        break
+      fi
+    done
+    test -n \"$found\" && echo yes || echo no"
+  register: _leader_pki_int_any_key
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Set fact whether PKI INT has any issuer with key
+  ansible.builtin.set_fact:
+    _pki_int_has_issuer_with_key: "{{ (_leader_pki_int_any_key.stdout | default('no') | trim) == 'yes' }}"
+
+- name: Debug PKI INT has any issuer with key (always on)
+  ansible.builtin.debug:
+    msg: >-
+      _pki_int_has_issuer={{ _pki_int_has_issuer | default(false) }},
+      _pki_int_has_issuer_with_key={{ _pki_int_has_issuer_with_key | default(false) }}
+
+# -----------------------------------------------------------------
+# Tutorial flow: generate CSR in-container, sign via pki/root, set-signed
+# -----------------------------------------------------------------
+- name: Generate Intermediate CSR to container file when missing (homelab-intermediate)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -field=csr '{{ vault_pki_int_mount | default('pki_int') }}/intermediate/generate/internal' \
+      common_name='Homelab Intermediate Authority' issuer_name='{{ vault_pki_int_issuer_name | default('homelab-intermediate') }}' \
+      ttl='{{ (vault_intermediate_days | int) * 24 }}h' > {{ vault_tls_dir_in_container }}/pki_int.csr"
+  register: _leader_pki_int_csr_file
+  changed_when: true
+  failed_when: false
+  become: true
+  when: not (_pki_int_has_issuer | default(false) | bool)
+
+- name: Generate Intermediate CSR to container file (recover when issuers exist but none has key)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -field=csr '{{ vault_pki_int_mount | default('pki_int') }}/intermediate/generate/internal' \
+      common_name='Homelab Intermediate Authority' issuer_name='{{ vault_pki_int_issuer_name | default('homelab-intermediate') }}' \
+      ttl='{{ (vault_intermediate_days | int) * 24 }}h' > {{ vault_tls_dir_in_container }}/pki_int.csr"
+  register: _leader_pki_int_csr_file_recover
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (_pki_int_has_issuer | default(false) | bool)
+    - not (_pki_int_has_issuer_with_key | default(false) | bool)
+
+- name: Sign Intermediate CSR with Root issuer (in Vault)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -field=certificate '{{ vault_pki_mount | default('pki') }}/root/sign-intermediate' \
+      issuer_ref='{{ vault_pki_root_issuer_name | default('homelab-root') }}' \
+      csr=@{{ vault_tls_dir_in_container }}/pki_int.csr format=pem_bundle ttl='{{ (vault_intermediate_days | int) * 24 }}h' > {{ vault_tls_dir_in_container }}/pki_int-signed.pem"
+  register: _leader_pki_int_signed_pem
+  changed_when: true
+  failed_when: false
+  become: true
+  when: not (_pki_int_has_issuer | default(false) | bool)
+
+- name: Sign Intermediate CSR with Root issuer (recover when issuers exist but none has key)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -field=certificate '{{ vault_pki_mount | default('pki') }}/root/sign-intermediate' \
+      issuer_ref='{{ vault_pki_root_issuer_name | default('homelab-root') }}' \
+      csr=@{{ vault_tls_dir_in_container }}/pki_int.csr format=pem_bundle ttl='{{ (vault_intermediate_days | int) * 24 }}h' > {{ vault_tls_dir_in_container }}/pki_int-signed.pem"
+  register: _leader_pki_int_signed_pem_recover
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (_pki_int_has_issuer | default(false) | bool)
+    - not (_pki_int_has_issuer_with_key | default(false) | bool)
+
+- name: Set signed intermediate (pki_int) from signed pem
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/intermediate/set-signed' certificate=@{{ vault_tls_dir_in_container }}/pki_int-signed.pem"
+  register: _leader_pki_int_set_signed_internal
+  changed_when: true
+  failed_when: false
+  become: true
+  when: not (_pki_int_has_issuer | default(false) | bool)
+
+- name: Capture issuer_id from set-signed (internal path)
+  ansible.builtin.set_fact:
+    _pki_int_new_issuer_id: "{{ (_leader_pki_int_set_signed_internal.stdout | default('{}') | from_json).data.issuer_id | default('') }}"
+  when:
+    - not (_pki_int_has_issuer | default(false) | bool)
+    - (_leader_pki_int_set_signed_internal.stdout | default('') | length) > 0
+
+- name: Set default issuer to newly created issuer (internal path)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/config/issuers' default='{{ _pki_int_new_issuer_id }}'"
+  register: _leader_pki_int_set_default_after_internal
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (_pki_int_new_issuer_id | default('') | length) > 0
+
+- name: Set default issuer by name as fallback (internal path)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/config/issuers' default='{{ vault_pki_int_issuer_name | default('homelab-intermediate') }}'"
+  register: _leader_pki_int_set_default_after_internal_by_name
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (_pki_int_new_issuer_id | default('') | length) == 0
+
+- name: Set signed intermediate (recover, pki_int) from signed pem
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/intermediate/set-signed' certificate=@{{ vault_tls_dir_in_container }}/pki_int-signed.pem"
+  register: _leader_pki_int_set_signed_internal_recover
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (_pki_int_has_issuer | default(false) | bool)
+    - not (_pki_int_has_issuer_with_key | default(false) | bool)
+
+- name: Capture issuer_id from set-signed (recovered path)
+  ansible.builtin.set_fact:
+    _pki_int_new_issuer_id: "{{ (_leader_pki_int_set_signed_internal_recover.stdout | default('{}') | from_json).data.issuer_id | default('') }}"
+  when:
+    - (_pki_int_has_issuer | default(false) | bool)
+    - not (_pki_int_has_issuer_with_key | default(false) | bool)
+    - (_leader_pki_int_set_signed_internal_recover.stdout | default('') | length) > 0
+
+- name: Set default issuer to newly created issuer (recovered path)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/config/issuers' default='{{ _pki_int_new_issuer_id }}'"
+  register: _leader_pki_int_set_default_after_recover
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (_pki_int_new_issuer_id | default('') | length) > 0
+
+- name: Set default issuer by name as fallback (recovered path)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/config/issuers' default='{{ vault_pki_int_issuer_name | default('homelab-intermediate') }}'"
+  register: _leader_pki_int_set_default_after_recover_by_name
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (_pki_int_new_issuer_id | default('') | length) == 0
+
+- name: Mark pki_int chain ready (recovered path)
+  ansible.builtin.set_fact:
+    _pki_int_chain_ready: true
+  when:
+    - (_pki_int_has_issuer | default(false) | bool)
+    - not (_pki_int_has_issuer_with_key | default(false) | bool)
+
+- name: Mark pki_int chain ready (internal path)
+  ansible.builtin.set_fact:
+    _pki_int_chain_ready: true
+  when: not (_pki_int_has_issuer | default(false) | bool)
+
+- name: Generate intermediate CSR (internal key) if not present
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/intermediate/generate/internal' \
+      common_name='{{ vault_intermediate_common_name }}' key_type='{{ vault_intermediate_key_type }}' key_bits={{ vault_intermediate_key_bits }} ttl='{{ (vault_intermediate_days | int) * 24 }}h'"
+  register: _leader_pki_int_csr
+  changed_when: true
+  failed_when: false
+  become: true
+  when: >-
+    _leader_mounts_pki.get(((vault_pki_int_mount | default('pki_int')) ~ '/'), none) is not none
+    and (not (_pki_int_has_issuer | default(false) | bool))
+
+- name: Extract CSR text (intermediate)
+  ansible.builtin.set_fact:
+    _pki_int_csr_pem: "{{ ((_leader_pki_int_csr.stdout | default('{}') | from_json).data.csr | default('')) }}"
+  when: _leader_pki_int_csr is defined and (_leader_pki_int_csr.stdout | default('') | length) > 0
+
+- name: Fail if CSR generation did not return data
+  ansible.builtin.fail:
+    msg: "Failed to generate intermediate CSR at {{ vault_pki_int_mount | default('pki_int') }}."
+  when: >-
+    (_leader_pki_int_csr is defined)
+    and (not (_pki_int_has_issuer | default(false) | bool))
+    and ((_pki_int_csr_pem | default('') | length) == 0)
+
+- name: Ensure Root CA directory exists on controller
+  ansible.builtin.file:
+    path: "{{ vault_root_ca_dir_controller | expanduser }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  run_once: true
+
+- name: Check Root CA files on controller
+  ansible.builtin.stat:
+    path: "{{ item | expanduser }}"
+  loop:
+    - "{{ vault_cluster_ca_cert_controller }}"
+    - "{{ vault_cluster_ca_key_controller }}"
+  register: _root_ca_stats
+  delegate_to: localhost
+  run_once: true
+
+- name: Fail if Cluster Root CA files are missing on controller
+  ansible.builtin.fail:
+    msg: >-
+      Cluster Root CA not found on controller. Expected at:
+      cert={{ vault_cluster_ca_cert_controller | expanduser }}, key={{ vault_cluster_ca_key_controller | expanduser }}.
+      Please ensure your existing Root CA is present; the role reuses it to sign the intermediate (pki_int).
+  when: >-
+    ( _root_ca_stats.results | selectattr('stat.exists','equalto',False) | list | length ) > 0
+
+- name: Ensure controller CA working dir exists
+  ansible.builtin.file:
+    path: "{{ vault_cluster_ca_dir_controller | expanduser }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  run_once: true
+
+- name: Write intermediate CSR to controller workspace
+  ansible.builtin.copy:
+    dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/pki_int.csr"
+    content: "{{ _pki_int_csr_pem }}\n"
+    mode: '0600'
+  delegate_to: localhost
+  run_once: true
+  when:
+    - (not (_pki_int_has_issuer | default(false) | bool))
+    - (_pki_int_csr_pem | default('') | length) > 0
+
+- name: Create OpenSSL v3 CA ext file for intermediate (controller)
+  ansible.builtin.copy:
+    dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/v3_ext_intermediate.cnf"
+    mode: '0600'
+    content: |
+      basicConstraints=critical,CA:true,pathlen:0
+      keyUsage=critical,keyCertSign,cRLSign
+      subjectKeyIdentifier=hash
+      authorityKeyIdentifier=keyid:always,issuer
+  delegate_to: localhost
+  run_once: true
+
+- name: Sign intermediate CSR with Root CA (controller)
+  ansible.builtin.command: >-
+    openssl x509 -req -in {{ vault_cluster_ca_dir_controller | expanduser }}/pki_int.csr \
+      -CA {{ vault_cluster_ca_cert_controller | expanduser }} -CAkey {{ vault_cluster_ca_key_controller | expanduser }} -CAcreateserial \
+      -out {{ vault_cluster_ca_dir_controller | expanduser }}/pki_int.pem -days {{ vault_intermediate_days }} -sha256 \
+      -extfile {{ vault_cluster_ca_dir_controller | expanduser }}/v3_ext_intermediate.cnf
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+  when:
+    - (not (_pki_int_has_issuer | default(false) | bool))
+
+- name: Build intermediate chain (intermediate + root)
+  ansible.builtin.shell: >-
+    cat {{ vault_cluster_ca_dir_controller | expanduser }}/pki_int.pem {{ vault_cluster_ca_cert_controller | expanduser }} \
+      > {{ vault_cluster_ca_dir_controller | expanduser }}/pki_int-chain.pem
+  args:
+    executable: /bin/sh
+  delegate_to: localhost
+  run_once: true
+  changed_when: true
+  when:
+    - (not (_pki_int_has_issuer | default(false) | bool))
+
+- name: Copy intermediate chain from controller into host TLS dir (bind-mounted)
+  ansible.builtin.copy:
+    src: "{{ vault_cluster_ca_dir_controller | expanduser }}/pki_int-chain.pem"
+    dest: "{{ vault_host_tls_dir }}/pki_int-chain.pem"
+    mode: '0644'
+  become: true
+  when:
+    - (not (_pki_int_has_issuer | default(false) | bool))
+
+- name: Set signed intermediate chain in Vault (pki_int)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/intermediate/set-signed' certificate=@{{ vault_tls_dir_in_container }}/pki_int-chain.pem"
+  register: _leader_pki_int_set_signed
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (not (_pki_int_has_issuer | default(false) | bool))
+
+- name: Fallback - Set signed intermediate via pem_bundle when certificate param fails (pki_int)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/intermediate/set-signed' pem_bundle=@{{ vault_tls_dir_in_container }}/pki_int-chain.pem"
+  register: _leader_pki_int_set_signed_bundle
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (not (_pki_int_has_issuer | default(false) | bool))
+    - (_leader_pki_int_set_signed.rc | default(0)) != 0
+
+- name: Set default issuer for PKI INT (leader)
+  block:
+    - name: List issuers at PKI INT (post set-signed)
+      ansible.builtin.command: >-
+        podman exec {{ vault_container_name }} sh -lc "/bin/vault list -format=json '{{ vault_pki_int_mount | default('pki_int') }}/issuers'"
+      register: _leader_pki_int_issuers_ids
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: Debug raw issuers list JSON (post set-signed)
+      ansible.builtin.debug:
+        msg: "issuers_list_stdout={{ _leader_pki_int_issuers_ids.stdout | default('') | trim }} rc={{ _leader_pki_int_issuers_ids.rc | default('') }}"
+
+    - name: Dump PKI INT issuers with key_id and usage (pre-select debug)
+      ansible.builtin.command: >-
+        podman exec {{ vault_container_name }} sh -lc "MOUNT='{{ vault_pki_int_mount | default('pki_int') }}'
+        ids=$(vault list -format=json \"$MOUNT/issuers\" 2>/dev/null || echo '[]')
+        for id in $(echo \"$ids\" | sed -e 's/[\[\]\\,\"]//g'); do
+          [ -z \"$id\" ] && continue
+          k=$(vault read -field=key_id \"$MOUNT/issuer/$id\" 2>/dev/null || true)
+          u=$(vault read -field=usage \"$MOUNT/issuer/$id\" 2>/dev/null || true)
+          echo issuer:$id key:${k:-} usage:${u:-}
+        done"
+      register: _leader_pki_int_issuers_dump
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: Debug PKI INT issuers dump (pre-select)
+      ansible.builtin.debug:
+        msg: "{{ _leader_pki_int_issuers_dump.stdout | default('') }}"
+
+    - name: Read default issuer id from PKI INT config (preferred)
+      ansible.builtin.command: >-
+        podman exec {{ vault_container_name }} sh -lc "/bin/vault read -field=default '{{ vault_pki_int_mount | default('pki_int') }}/config/issuers'"
+      register: _leader_pki_int_default_id_raw
+      changed_when: false
+      failed_when: false
+      become: true
+
+    - name: Set fact with default issuer id (if present)
+      ansible.builtin.set_fact:
+        _pki_int_default_issuer_id: "{{ (_leader_pki_int_default_id_raw.stdout | default('') | trim) }}"
+
+    - name: Set default issuer by ID (leader)
+      ansible.builtin.command: >-
+        podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/config/issuers' default='{{ _pki_int_default_issuer_id }}'"
+      register: _leader_pki_int_set_default_issuer
+      changed_when: true
+      failed_when: false
+      become: true
+      when: (_pki_int_default_issuer_id | default('') | length) > 0
+
+    - name: Ensure PKI INT default issuer has key and issuance usage (auto-select if needed)
+      ansible.builtin.command: >-
+        podman exec {{ vault_container_name }} sh -lc "set -euo pipefail
+        MOUNT='{{ vault_pki_int_mount | default('pki_int') }}'
+        has_key() {
+          id=\"$1\"
+          [ -z \"$id\" ] && return 1
+          key=$(vault read -field=key_id \"$MOUNT/issuer/$id\" 2>/dev/null || true)
+          [ -z \"$key\" ] && return 1
+          [ \"$key\" = \"null\" ] && return 1
+        }
+        cur=$(vault read -field=default \"$MOUNT/config/issuers\" 2>/dev/null || true)
+        if has_key \"$cur\"; then
+          echo default_ok:$cur
+          exit 0
+        fi
+        picked=''
+        for id in $(vault list -format=json \"$MOUNT/issuers\" 2>/dev/null | jq -r '.[]' || true); do
+          [ -z \"$id\" ] && continue
+          if has_key \"$id\"; then
+            picked=\"$id\"
+            break
+          fi
+        done
+        if [ -n \"$picked\" ]; then
+          vault write -format=json \"$MOUNT/config/issuers\" default=\"$picked\" > /dev/null
+          echo default_set:$picked
+          exit 0
+        fi
+        echo no_valid_issuer >&2
+        exit 1
+        "
+      register: _leader_pki_int_default_validate
+      changed_when: "_leader_pki_int_default_validate.stdout is search('default_set:')"
+      failed_when: false
+      become: true
+
+    - name: Debug PKI INT default selection stdout
+      ansible.builtin.debug:
+        msg: >-
+          select_rc={{ _leader_pki_int_default_validate.rc | default('') }},
+          select_stdout={{ _leader_pki_int_default_validate.stdout | default('') | trim }}
+
+    - name: Update _pki_int_default_issuer_id from validation result (if parsed)
+      ansible.builtin.set_fact:
+        _pki_int_default_issuer_id: >-
+          {{
+            (
+              _leader_pki_int_default_validate.stdout
+              | default('')
+              | regex_search('default_(?:ok|set):[A-Za-z0-9-]+')
+              | default('')
+              | regex_replace('^default_(?:ok|set):','')
+            )
+            | default(_pki_int_default_issuer_id | default(''))
+          }}
+
+    - name: Read validated default issuer key_id (leader)
+      ansible.builtin.command: >-
+        podman exec {{ vault_container_name }} sh -lc "/bin/vault read -field=key_id '{{ vault_pki_int_mount | default('pki_int') }}/issuer/{{ _pki_int_default_issuer_id | default('') }}'"
+      register: _leader_pki_int_default_keyid
+      changed_when: false
+      failed_when: false
+      become: true
+      when: (_pki_int_default_issuer_id | default('') | length) > 0
+
+    - name: Read validated default issuer usage (leader)
+      ansible.builtin.command: >-
+        podman exec {{ vault_container_name }} sh -lc "/bin/vault read -field=usage '{{ vault_pki_int_mount | default('pki_int') }}/issuer/{{ _pki_int_default_issuer_id | default('') }}'"
+      register: _leader_pki_int_default_usage
+      changed_when: false
+      failed_when: false
+      become: true
+      when: (_pki_int_default_issuer_id | default('') | length) > 0
+
+    - name: Compute validated default issuer flags
+      ansible.builtin.set_fact:
+        _pki_int_default_has_key: "{{ (_leader_pki_int_default_keyid.stdout | default('') | trim | length) > 0 }}"
+        _pki_int_default_has_issuing: "{{ (_leader_pki_int_default_usage.stdout | default('') | trim is search('issuing-certificates')) }}"
+
+    - name: Debug PKI INT validated default issuer flags (always on)
+      ansible.builtin.debug:
+        msg: >-
+          default_issuer_id={{ _pki_int_default_issuer_id | default('') }},
+          has_key={{ _pki_int_default_has_key | default(false) }},
+          has_issuing_usage={{ _pki_int_default_has_issuing | default(false) }}
+
+    - name: Abort if no valid PKI INT issuer with private key and issuing usage was found (ACME would fail)
+      ansible.builtin.fail:
+        msg: >-
+          No valid PKI INT issuer with a private key and 'issuing-certificates' usage is configured as default.
+          ACME cannot be enabled. Ensure the intermediate issuer was generated with an internal key
+          (vault write {{ vault_pki_int_mount | default('pki_int') }}/intermediate/generate/internal ...),
+          then signed by the root and set via {{ vault_pki_int_mount | default('pki_int') }}/intermediate/set-signed.
+          Alternatively, import an issuer key and select it as default.
+      when: not ((_pki_int_default_has_key | default(false)) and (_pki_int_default_has_issuing | default(false)))
+
+- name: Configure PKI INT URLs to use VIP (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/config/urls' \
+      issuing_certificates='{{'{{'}}cluster_aia_path{{'}}'}}/issuer/{{'{{'}}issuer_id{{'}}'}}/der' \
+      crl_distribution_points='{{'{{'}}cluster_aia_path{{'}}'}}/issuer/{{'{{'}}issuer_id{{'}}'}}/crl/der' \
+      ocsp_servers='{{'{{'}}cluster_path{{'}}'}}/ocsp' \
+      enable_templating=true"
+  register: _leader_pki_int_urls
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Configure PKI INT cluster path (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/config/cluster' \
+      path='https://{{ _lb_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_int_mount | default('pki_int') }}' \
+      aia_path='https://{{ _lb_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_int_mount | default('pki_int') }}'"
+  register: _leader_pki_int_cluster
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Enable ACME on PKI INT (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/config/acme' enabled=true"
+  register: _leader_pki_int_acme_enable
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (_pki_int_default_has_key | default(false)) | bool
+    - (_pki_int_default_has_issuing | default(false)) | bool
+
+- name: Read back PKI INT ACME config (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_int_mount | default('pki_int') }}/config/acme'"
+  register: _leader_pki_int_acme_read
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Read back PKI INT issuers (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault list -format=json '{{ vault_pki_int_mount | default('pki_int') }}/issuers'"
+  register: _leader_pki_int_issuers_after
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Read back PKI INT default issuer (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_int_mount | default('pki_int') }}/issuers/default'"
+  register: _leader_pki_int_default_issuer_after
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Read back PKI INT selected issuer details (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_int_mount | default('pki_int') }}/issuer/{{ _pki_int_default_issuer_id | default('') }}'"
+  register: _leader_pki_int_selected_issuer
+  changed_when: false
+  failed_when: false
+  become: true
+  when: (_pki_int_default_issuer_id | default('') | length) > 0
+
+- name: Debug PKI INT issuers/default + ACME status (leader)
+  ansible.builtin.debug:
+    msg: >-
+      pki_int issuers: {{ _leader_pki_int_issuers_after.stdout | default('[]') }}, default_issuer: {{ _leader_pki_int_default_issuer_after.stdout | default('{}') }};
+      ACME: enabled={{ (_leader_pki_int_acme_read.stdout | default('{}') | from_json).data.enabled | default(false) }}
+  when: _leader_pki_int_acme_read is defined
+
+- name: Debug PKI INT selected issuer usage (leader)
+  ansible.builtin.debug:
+    msg: >-
+      selected_issuer_id={{ _pki_int_default_issuer_id | default('') }}, details={{ _leader_pki_int_selected_issuer.stdout | default('{}') }}
+  when: _leader_pki_int_selected_issuer is defined
+
+# -------------------------------------------------------------
+# Define PKI role constraints for issuance (policy layer)
+# -------------------------------------------------------------
+- name: Create/Update PKI INT role with allowed domains and subdomains (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_int_mount | default('pki_int') }}/roles/{{ vault_pki_default_role_name | default('default') }}' \
+      issuer_ref=$(vault read -field=default {{ vault_pki_int_mount | default('pki_int') }}/config/issuers) \
+      allowed_domains='{{ (vault_pki_allowed_domains | default(['gillouche.homelab'])) | join(',') }}' \
+      allow_subdomains={{ (vault_pki_allow_subdomains | default(true)) | ternary('true','false') }} \
+      allow_bare_domains=true \
+      allow_any_name=false \
+      no_store=false"
+  register: _leader_pki_int_role_write
+  changed_when: true
+  failed_when: false
+  become: true
+
+- name: Read back PKI INT default role (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_int_mount | default('pki_int') }}/roles/{{ vault_pki_default_role_name | default('default') }}'"
+  register: _leader_pki_int_role_read
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Debug PKI INT role constraints (leader)
+  ansible.builtin.debug:
+    msg: >-
+      pki_int role '{{ vault_pki_default_role_name | default('default') }}': {{ _leader_pki_int_role_read.stdout | default('{}') }}
+  when: _leader_pki_int_role_read is defined
+
+# Dump stdout/stderr for troubleshooting when issuer not present or ACME flag not set
+- name: Troubleshoot PKI INT issuer/ACME if missing
+  ansible.builtin.debug:
+    msg: >-
+      set-signed rc={{ _leader_pki_int_set_signed.rc | default('') }}, stdout={{ _leader_pki_int_set_signed.stdout | default('') }}, stderr={{ _leader_pki_int_set_signed.stderr | default('') }}
+      ; list-ids rc={{ _leader_pki_int_issuers_ids.rc | default('') }}, stdout={{ _leader_pki_int_issuers_ids.stdout | default('') }}, stderr={{ _leader_pki_int_issuers_ids.stderr | default('') }}
+      ; set-default-issuer rc={{ _leader_pki_int_set_default_issuer.rc | default('') }}, stdout={{ _leader_pki_int_set_default_issuer.stdout | default('') }}, stderr={{ _leader_pki_int_set_default_issuer.stderr | default('') }}
+      ; acme-enable rc={{ _leader_pki_int_acme_enable.rc | default('') }}, stdout={{ _leader_pki_int_acme_enable.stdout | default('') }}, stderr={{ _leader_pki_int_acme_enable.stderr | default('') }}
+      ; issuers-list rc={{ _leader_pki_int_issuers_after.rc | default('') }}, stdout={{ _leader_pki_int_issuers_after.stdout | default('') }}, stderr={{ _leader_pki_int_issuers_after.stderr | default('') }}
+      ; issuer-default rc={{ _leader_pki_int_default_issuer_after.rc | default('') }}, stdout={{ _leader_pki_int_default_issuer_after.stdout | default('') }}, stderr={{ _leader_pki_int_default_issuer_after.stderr | default('') }}
+  when: >-
+    (
+      (
+        (_leader_pki_int_issuers_after.stdout | default('') | trim | length) == 0
+      ) or (
+        (_leader_pki_int_issuers_after.rc | default(1)) != 0
+      )
+    )
+
+- name: Debug PKI INT ACME status (leader)
+  ansible.builtin.debug:
+    msg: >-
+      ACME status on mount '{{ vault_pki_int_mount | default('pki_int') }}':
+      enabled={{ (_leader_pki_int_acme_read.stdout | default('{}') | from_json).data.enabled | default(false) }}
+  when: _leader_pki_int_acme_read is defined
+
+## -------------------------------------------------------------
+## Validate ACME directory (VIP) and optionally enable PKI+ACME
+## -------------------------------------------------------------
+- name: Compute ACME directory URL (VIP)
+  ansible.builtin.set_fact:
+    _acme_vip_addr: "{{ load_balancer_virtual_ip | default(ansible_facts.default_ipv4.address) }}"
+    _acme_dir_url: >-
+      https://{{ load_balancer_virtual_ip | default(ansible_facts.default_ipv4.address) }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/acme/directory
+  when: vault_acme_validate_enable | default(true) | bool
+
+- name: Read ACME configuration (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_mount | default('pki') }}/config/acme'"
+  register: _acme_cfg_read
+  changed_when: false
+  failed_when: false
+  become: true
+  when: vault_acme_validate_enable | default(true) | bool
+
+- name: List current secrets engines (JSON) for PKI check (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets list -format=json"
+  register: _leader_secrets_list
+  changed_when: false
+  failed_when: false
+  become: true
+  when: (vault_acme_validate_enable | default(true) | bool)
+
+- name: Parse secrets engines (leader)
+  ansible.builtin.set_fact:
+    _leader_mounts: >-
+      {{ (_leader_secrets_list.stdout | default('{}') | length > 0) | ternary((_leader_secrets_list.stdout | from_json), {}) }}
+  when: (vault_acme_validate_enable | default(true) | bool)
+
+- name: Enable PKI engine at mount if missing (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets enable -path='{{ vault_pki_mount | default('pki') }}' pki"
+  register: _enable_pki
+  changed_when: true
+  failed_when: false
+  become: true
+  when: (vault_acme_validate_enable | default(true) | bool) and (_leader_mounts.get(((vault_pki_mount | default('pki')) ~ '/'), none) is none)
+
+- name: Configure PKI URLs to use VIP (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/urls' \
+      issuing_certificates='https://{{ _acme_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/ca' \
+      crl_distribution_points='https://{{ _acme_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/crl'"
+  register: _pki_urls
+  changed_when: true
+  failed_when: false
+  become: true
+  when: (vault_acme_validate_enable | default(true) | bool)
+
+- name: Enable ACME on PKI (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/acme' enabled=true"
+  register: _pki_acme_enable
+  changed_when: true
+  failed_when: false
+  become: true
+  when: (vault_acme_validate_enable | default(true) | bool) and (
+          (_acme_cfg_read.rc | default(1)) != 0 or
+          (
+            (_acme_cfg_read.stdout | default('') | trim | length) == 0 or
+            (((_acme_cfg_read.stdout | default('{}')) | from_json).data.enabled | default(false)) == false          )
+        )
+
+- name: Re-read ACME configuration (leader)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_mount | default('pki') }}/config/acme'"
+  register: _acme_cfg_read_after
+  changed_when: false
+  failed_when: false
+  become: true
+  when: vault_acme_validate_enable | default(true) | bool
+
+## Controller-side HTTP check omitted due to environment variability; rely on CLI reads above.
+
 - name: Initialize Raft leader with recovery keys (Transit seal)
   ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault operator init"
+    podman exec {{ vault_container_name }} sh -lc "VAULT_FORMAT=json /bin/vault operator init -format=json"
   register: _leader_init
   changed_when: (_leader_init.rc | default(1)) == 0
   failed_when: false

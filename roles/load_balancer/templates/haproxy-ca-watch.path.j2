@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch Vault CA file and restart HAProxy
+
+[Path]
+PathChanged=/etc/ca-certificates/trust-source/anchors/vault-cluster-ca.pem
+
+[Install]
+WantedBy=multi-user.target

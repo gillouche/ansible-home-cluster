@@ -4,7 +4,7 @@
 # and wipes /home/vault on all hosts in the vault_cluster group. It does NOT start or configure Vault.
 
 - name: Nuclear reset for Vault (controller + all vault nodes)
-  hosts: vault_cluster
+  hosts: all
   gather_facts: true
   become: false
 
@@ -44,27 +44,8 @@
         state: absent
       become: true
 
-    - name: Recreate Vault base directory structure on host
+    - name: Delete existing ca-certificates
       ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: directory
-        owner: "{{ vault_runtime_user }}"
-        group: "{{ vault_runtime_group_name }}"
-        mode: "{{ item.mode }}"
-      loop:
-        - { path: "/home/vault", mode: '0750' }
-        - { path: "/home/vault/config", mode: '0750' }
-        - { path: "/home/vault/tls", mode: '0750' }
-        - { path: "/home/vault/data", mode: '0770' }
-        - { path: "/home/vault/logs", mode: '0775' }
-        - { path: "/home/vault/bin", mode: '0755' }
-      become: true
-
-    - name: Ensure TLS directory is empty after nuclear reset
-      ansible.builtin.file:
-        path: "/home/vault/tls"
-        state: directory
-        owner: "{{ vault_runtime_user }}"
-        group: "{{ vault_runtime_group_name }}"
-        mode: '0750'
+        path: "/etc/tls"
+        state: absent
       become: true

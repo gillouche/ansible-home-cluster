@@ -9,6 +9,6 @@
 
 - name: Restart pihole dns
   ansible.builtin.command: podman exec {{ pihole_container_name }} pihole reloaddns
-  become: false
+  become: true
   changed_when: false
   check_mode: no

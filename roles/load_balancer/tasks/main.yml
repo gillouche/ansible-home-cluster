@@ -1,0 +1,118 @@
+---
+
+# Ensure HAProxy is installed and configured; keepalived is assumed present and managed by its own role
+
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
+- name: Determine load balancer role for this host
+  ansible.builtin.set_fact:
+    load_balancer_is_primary: "{{ inventory_hostname in (groups['load_balancer_primary'] | default([])) }}"
+  become: false
+
+- name: Install HAProxy package
+  ansible.builtin.package:
+    name: "{{ load_balancer_haproxy_package }}"
+    state: present
+  become: true
+
+- name: Ensure keepalived config directory exists
+  ansible.builtin.file:
+    path: /etc/keepalived/conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Warn if VRRP auth password is not set (keepalived will be skipped)
+  ansible.builtin.debug:
+    msg: >-
+      load_balancer_vrrp_auth_pass is undefined or too short (<12). Skipping keepalived VRRP configuration on this host.
+      Define it in group_vars/load_balancer_cluster.vault.yml and encrypt with ansible-vault for HA VIP.
+  when: (load_balancer_vrrp_auth_pass is not defined) or ((load_balancer_vrrp_auth_pass | length) < 12)
+  become: false
+
+- name: Render Load Balancer VRRP instance into conf.d
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/conf.d/load-balancer.conf
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    vip_address: "{{ load_balancer_virtual_ip }}"
+    vip_prefixlen: "{{ load_balancer_vip_prefixlen }}"
+    vrrp_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
+    vrrp_state: "{{ 'MASTER' if load_balancer_is_primary | bool else 'BACKUP' }}"
+    vrrp_priority: "{{ 150 if load_balancer_is_primary | bool else 100 }}"
+    vrrp_auth_pass: "{{ load_balancer_vrrp_auth_pass }}"
+    virtual_router_id: "{{ load_balancer_virtual_router_id }}"
+  notify: Restart keepalived
+  become: true
+  when: (load_balancer_vrrp_auth_pass is defined) and ((load_balancer_vrrp_auth_pass | length) >= 12)
+
+- name: Enable non-local bind if requested (allows HAProxy to start without VIP)
+  when: load_balancer_enable_nonlocal_bind | default(true) | bool
+  ansible.builtin.sysctl:
+    name: net.ipv4.ip_nonlocal_bind
+    value: '1'
+    state: present
+    reload: true
+  become: true
+
+- name: Ensure HAProxy config directory exists
+  ansible.builtin.file:
+    path: /etc/haproxy
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Render HAProxy configuration
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart haproxy
+  become: true
+
+- name: Enable and start HAProxy service
+  ansible.builtin.service:
+    name: "{{ load_balancer_haproxy_service }}"
+    state: started
+    enabled: true
+  become: true
+
+- name: Install HAProxy CA watch service
+  ansible.builtin.template:
+    src: haproxy-ca-watch.service.j2
+    dest: /etc/systemd/system/haproxy-ca-watch.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd
+
+- name: Install HAProxy CA watch path
+  ansible.builtin.template:
+    src: haproxy-ca-watch.path.j2
+    dest: /etc/systemd/system/haproxy-ca-watch.path
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd
+
+- name: Enable and start HAProxy CA watch path
+  ansible.builtin.service:
+    name: haproxy-ca-watch.path
+    state: started
+    enabled: true
+  become: true

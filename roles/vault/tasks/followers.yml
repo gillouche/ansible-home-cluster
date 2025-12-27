@@ -1,6 +1,43 @@
 ---
 # Followers-only stage: wait for leader, then start container (retry_join via config)
 
+# Ensure common prep (users/dirs/mount points) is executed before stage-specific steps
+- name: Include common preparation tasks
+  ansible.builtin.include_tasks: common.yml
+
+- name: Render Vault configuration (followers)
+  ansible.builtin.template:
+    src: "vault.hcl.j2"
+    dest: "{{ vault_host_config_dir }}/vault.hcl"
+    owner: "{{ vault_runtime_user | default('vault') }}"
+    group: "{{ vault_runtime_group_name | default('vault') }}"
+    mode: '0644'
+  become: true
+  notify: Restart Vault container to apply config changes (if needed)
+  vars:
+    # Compute effective Vault public URL used by the template
+    vault_public_url_effective: >-
+      {{
+        (vault_public_url | default(''))
+        if ((vault_public_url | default('') | length) > 0)
+        else (
+          'https://'
+          ~ (
+              (
+                hostvars is defined
+                and hostvars[inventory_hostname] is defined
+                and hostvars[inventory_hostname].ansible_facts is defined
+                and hostvars[inventory_hostname].ansible_facts.default_ipv4 is defined
+              )
+              | ternary(
+                  hostvars[inventory_hostname].ansible_facts.default_ipv4.address,
+                  ansible_facts.default_ipv4.address
+                )
+            )
+          ~ ':' ~ (vault_api_port | string)
+        )
+      }}
+
 - name: Set leader host fact (followers)
   ansible.builtin.set_fact:
     vault_leader_host: "{{ (groups['vault_leader'] | default([]))[0] }}"
@@ -54,7 +91,6 @@
       VAULT_LOG_LEVEL: "{{ vault_log_level | default('debug') }}"
       VAULT_CACERT: "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
       VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
-      VAULT_TOKEN: ""
     command: >-
       {{ (vault_enable_log_wrapper | default(true))
           | ternary('/bin/sh -lc /vault/bin/start-vault.sh', 'server -config=' ~ vault_cfg_path_in_container) }}
@@ -65,6 +101,30 @@
       - "{{ vault_logs_dir }}:{{ vault_logs_dir_in_container | default('/vault/logs') }}"
       - "/home/vault/bin:/vault/bin"
   become: true
+
+- name: Pause briefly after starting container
+  ansible.builtin.pause:
+    seconds: 5
+
+# Persist root token for CLI usage inside the container (after container is up)
+- name: Write /root/.vault-token inside container when vault_root_token is available (follower)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "printf '%s' '{{ vault_root_token }}' > /root/.vault-token && chmod 0600 /root/.vault-token"
+  changed_when: true
+  failed_when: false
+  become: true
+  when:
+    - (vault_root_token | default('') | length) > 0
+
+- name: Verify CLI token inside container (lookup, follower)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "vault token lookup -format=json"
+  register: _follower_token_lookup
+  changed_when: false
+  failed_when: false
+  become: true
+  when:
+    - (vault_root_token | default('') | length) > 0
 
 # Detect current follower status once
 - name: Read current follower Vault status (pre-init check)
@@ -85,9 +145,99 @@
     - (_follower_status_preinit.stdout | default('{}')) | length > 0
     - (((_follower_status_preinit.stdout | from_json).initialized | default(false)) == false)
 
+## -------------------------------------------------------------
+## Validate ACME directory (VIP) and optionally enable PKI+ACME
+## (followers participate in the same cluster; perform the same check)
+## -------------------------------------------------------------
+- name: Compute ACME directory URL (VIP) on follower
+  ansible.builtin.set_fact:
+    _acme_vip_addr: "{{ load_balancer_virtual_ip | default(ansible_facts.default_ipv4.address) }}"
+    _acme_dir_url: >-
+      https://{{ load_balancer_virtual_ip | default(ansible_facts.default_ipv4.address) }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/acme/directory
+  when: vault_acme_validate_enable | default(true) | bool
+
+- name: Read ACME configuration (follower)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_mount | default('pki') }}/config/acme'"
+  register: _acme_cfg_read
+  changed_when: false
+  failed_when: false
+  become: true
+  when: vault_acme_validate_enable | default(true) | bool
+
+- name: List current secrets engines (JSON) for PKI check (follower)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets list -format=json"
+  register: _follower_secrets_list
+  changed_when: false
+  failed_when: false
+  become: true
+  when: (vault_acme_validate_enable | default(true) | bool)
+
+- name: Parse secrets engines (follower)
+  ansible.builtin.set_fact:
+    _follower_mounts: >-
+      {{ (_follower_secrets_list.stdout | default('{}') | length > 0) | ternary((_follower_secrets_list.stdout | from_json), {}) }}
+  when: (vault_acme_validate_enable | default(true) | bool)
+
+- name: Enable PKI engine at mount if missing (follower)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets enable -path='{{ vault_pki_mount | default('pki') }}' pki"
+  register: _enable_pki
+  changed_when: true
+  failed_when: false
+  become: true
+  when: (vault_acme_validate_enable | default(true) | bool) and (vault_configure_pki_on_followers | default(false) | bool) and (_follower_mounts.get(((vault_pki_mount | default('pki')) ~ '/'), none) is none)
+
+- name: Configure PKI URLs to use VIP (follower)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/urls' \
+      issuing_certificates='https://{{ _acme_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/ca' \
+      crl_distribution_points='https://{{ _acme_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/crl'"
+  register: _pki_urls
+  changed_when: true
+  failed_when: false
+  become: true
+  when: (vault_acme_validate_enable | default(true) | bool) and (vault_configure_pki_on_followers | default(false) | bool)
+
+- name: Enable ACME on PKI (follower)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/acme' enabled=true"
+  register: _pki_acme_enable
+  changed_when: true
+  failed_when: false
+  become: true
+  when: (vault_acme_validate_enable | default(true) | bool) and (vault_configure_pki_on_followers | default(false) | bool) and (
+          (_acme_cfg_read.rc | default(1)) != 0 or
+          (
+            (_acme_cfg_read.stdout | default('') | trim | length) == 0 or
+            (((_acme_cfg_read.stdout | default('{}')) | from_json).data.enabled | default(false)) == false          )
+        )
+
+- name: Re-read ACME configuration (follower)
+  ansible.builtin.command: >-
+    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_mount | default('pki') }}/config/acme'"
+  register: _acme_cfg_read_after
+  changed_when: false
+  failed_when: false
+  become: true
+  when: vault_acme_validate_enable | default(true) | bool
+
+- name: Warn if ACME directory on VIP is still not accessible (follower)
+  ansible.builtin.debug:
+    msg: >-
+      ACME directory {{ _acme_dir_url }} not accessible according to configuration readback.
+      Ensure PKI is configured and ACME is enabled, or set vault_acme_validate_enable: false to skip this check.
+  when: (vault_acme_validate_enable | default(true) | bool) and (
+          (_acme_cfg_read_after.rc | default(1)) != 0 or
+          (
+            (_acme_cfg_read_after.stdout | default('') | trim | length) == 0 or
+            (((_acme_cfg_read_after.stdout | default('{}')) | from_json).data.enabled | default(false)) == false          )
+        )
+
 - name: Initialize Raft follower with recovery keys (Transit seal)
   ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault operator init"
+    podman exec {{ vault_container_name }} sh -lc "VAULT_FORMAT=json /bin/vault operator init -format=json"
   register: _follower_init
   changed_when: (_follower_init.rc | default(1)) == 0
   failed_when: false

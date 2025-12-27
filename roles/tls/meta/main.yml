@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: ansible-home-cluster
+  description: Base TLS role – generate per-host key/CSR, sign with controller CA, deploy certs to /etc/tls, sync trust anchors.
+  license: MIT
+  min_ansible_version: '2.13'
+  platforms:
+    - name: GenericLinux
+      versions: ['all']
+dependencies: []

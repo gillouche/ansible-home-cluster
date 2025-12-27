@@ -1,0 +1,460 @@
+---
+
+- name: Ensure controller CA directory exists (controller)
+  ansible.builtin.file:
+    path: "{{ tls_cluster_ca_dir_controller | expanduser }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  run_once: true
+
+- name: Bootstrap Cluster CA on controller when missing
+  block:
+    - name: Check if Cluster CA cert exists on controller
+      ansible.builtin.stat:
+        path: "{{ tls_cluster_ca_dir_controller | expanduser }}/cluster-ca.pem"
+      register: _tls_ca_cert_stat
+
+    - name: Generate Cluster CA key if missing (controller)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        umask 077
+        mkdir -p {{ tls_cluster_ca_dir_controller | expanduser }}
+        cd {{ tls_cluster_ca_dir_controller | expanduser }}
+        if [ ! -f cluster-ca.key ]; then
+          openssl genrsa -out cluster-ca.key 4096
+        fi
+      args:
+        executable: /bin/sh
+      when: not _tls_ca_cert_stat.stat.exists | default(false)
+
+    - name: Write CA openssl config on controller (when creating CA)
+      ansible.builtin.copy:
+        dest: "{{ tls_cluster_ca_dir_controller | expanduser }}/ca.cnf"
+        mode: '0600'
+        content: |
+          [ req ]
+          prompt             = no
+          default_bits       = 4096
+          default_md         = sha256
+          distinguished_name = dn
+          x509_extensions    = v3_ca
+
+          [ dn ]
+          CN = Vault Cluster CA
+          O  = Homelab
+          C  = FR
+
+          [ v3_ca ]
+          subjectKeyIdentifier=hash
+          authorityKeyIdentifier=keyid:always,issuer
+          basicConstraints = critical,CA:true
+          keyUsage = critical, digitalSignature, keyCertSign, cRLSign
+      when: not _tls_ca_cert_stat.stat.exists | default(false)
+
+    - name: Create Cluster CA certificate (controller)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        umask 077
+        cd {{ tls_cluster_ca_dir_controller | expanduser }}
+        openssl req -x509 -new -key cluster-ca.key \
+          -days 3650 \
+          -out cluster-ca.pem -config ca.cnf -extensions v3_ca
+      args:
+        executable: /bin/sh
+      when: not _tls_ca_cert_stat.stat.exists | default(false)
+  delegate_to: localhost
+  run_once: true
+
+- name: Ensure tls group exists (optional)
+  ansible.builtin.group:
+    name: "{{ tls_group_name }}"
+    state: present
+    system: true
+  become: true
+
+- name: Ensure vault user is member of tls group when present
+  ansible.builtin.user:
+    name: "{{ vault_runtime_user | default('vault') }}"
+    groups: "{{ tls_group_name }}"
+    append: true
+  become: true
+  when: vault_runtime_user is defined or (getent_passwd is defined and 'vault' in getent_passwd)
+
+- name: Ensure TLS directory exists with correct perms
+  ansible.builtin.file:
+    path: "{{ tls_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Compute controller Cluster CA fingerprint (sha256)
+  ansible.builtin.command: >-
+    /bin/sh -lc "openssl x509 -in '{{ tls_cluster_ca_cert_controller | expanduser }}' -noout -fingerprint -sha256 | sed 's/^.*=//' | tr -d ':' | tr 'A-Z' 'a-z'"
+  register: _tls_controller_ca_fpr
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Copy controller Cluster CA to /etc/tls
+  ansible.builtin.copy:
+    src: "{{ tls_cluster_ca_cert_controller | expanduser }}"
+    dest: "{{ tls_dir }}/cluster-ca.pem"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Install Cluster CA into system anchors
+  ansible.builtin.copy:
+    src: "{{ tls_cluster_ca_cert_controller | expanduser }}"
+    dest: "{{ tls_system_anchor_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Refresh system trust store
+
+- name: Compute host TLS CA fingerprint (sha256)
+  ansible.builtin.command: >-
+    /bin/sh -lc "openssl x509 -in '{{ tls_dir }}/cluster-ca.pem' -noout -fingerprint -sha256 | sed 's/^.*=//' | tr -d ':' | tr 'A-Z' 'a-z'"
+  register: _tls_host_ca_fpr
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Decide if CA drift exists on host
+  ansible.builtin.set_fact:
+    _tls_ca_drift: >-
+      {{ (_tls_host_ca_fpr.stdout | default('') | trim) != (_tls_controller_ca_fpr.stdout | default('') | trim) }}
+
+- name: Gather SAN helper lists (VIP, extras, all IPv4)
+  ansible.builtin.set_fact:
+    _tls_extra_ips: >-
+      {{ (
+            (load_balancer_virtual_ip is defined)
+            and ((load_balancer_virtual_ip | string) | length > 0)
+          ) | ternary([load_balancer_virtual_ip], [])
+          + (tls_additional_san_ips | default([]))
+        }}
+    _tls_extra_dns: >-
+      {{ tls_additional_san_dns | default([]) }}
+    _tls_all_ipv4: >-
+      {{ ansible_all_ipv4_addresses | default([]) }}
+
+- name: Gather SANs for this host (stable ordering)
+  ansible.builtin.set_fact:
+    _tls_candidate_dns: >-
+      {{ ([ inventory_hostname,
+             (ansible_facts.fqdn if (ansible_facts is defined and ansible_facts.fqdn is defined and (ansible_facts.fqdn | length) > 0) else omit),
+             (inventory_hostname ~ '.' ~ base_domain) if (base_domain is defined and (base_domain | length) > 0) else omit,
+             'localhost']
+           | reject('equalto', omit) | list)
+           + (_tls_extra_dns | default([]) | list)
+           | unique | sort }}
+    _tls_candidate_ips: >-
+      {{ ([ (
+               ansible_facts.default_ipv4.address
+               if (
+                 ansible_facts is defined
+                 and ansible_facts.default_ipv4 is defined
+                 and ansible_facts.default_ipv4.address is defined
+                 and (ansible_facts.default_ipv4.address | string | length) > 0
+               )
+               else omit
+             ),
+             (
+               ansible_default_ipv4.address
+               if (
+                 (ansible_default_ipv4 is defined)
+                 and (ansible_default_ipv4.address is defined)
+                 and ((ansible_default_ipv4.address | string | length) > 0)
+               )
+               else omit
+             ),
+             (
+               hostvars[inventory_hostname].ansible_host
+               if (
+                 hostvars is defined
+                 and (hostvars[inventory_hostname] is defined)
+                 and (hostvars[inventory_hostname].ansible_host is defined)
+                 and ((hostvars[inventory_hostname].ansible_host | string | length) > 0)
+               )
+               else omit
+             ) ]
+            | reject('equalto', omit) | list)
+           + ((_tls_all_ipv4 | default([])) | list)
+           + ['127.0.0.1']
+           + ((_tls_extra_ips | default([])) | list)
+           | unique | sort }}
+
+- name: Finalize SANs for this host
+  ansible.builtin.set_fact:
+    _tls_san_dns: >-
+      {{ _tls_candidate_dns | default([]) }}
+    _tls_san_ips: >-
+      {{ _tls_candidate_ips | default([]) }}
+
+- name: Render OpenSSL CSR config
+  ansible.builtin.copy:
+    dest: "{{ tls_dir }}/openssl-api.cnf"
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [ req ]
+      default_bits       = 2048
+      prompt             = no
+      default_md         = sha256
+      req_extensions     = v3_req
+      distinguished_name = dn
+
+      [ dn ]
+      CN = {{ inventory_hostname }}
+
+      [ v3_req ]
+      subjectAltName = @alt_names
+
+      [ alt_names ]
+      {% set dnsns = namespace(i=1) %}
+      {% for dns in _tls_san_dns %}
+      DNS.{{ dnsns.i }} = {{ dns }}
+      {% set dnsns.i = dnsns.i + 1 %}
+      {% endfor %}
+      {% set ipns = namespace(i=1) %}
+      {% for ip in _tls_san_ips %}
+      IP.{{ ipns.i }} = {{ ip }}
+      {% set ipns.i = ipns.i + 1 %}
+      {% endfor %}
+  become: true
+  register: _tls_csr_cfg
+
+- name: Stat key and cert
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ tls_dir }}/api.key"
+    - "{{ tls_dir }}/api.crt"
+  register: _tls_host_stats
+  become: true
+
+- name: Read key modulus (if present)
+  ansible.builtin.shell: >-
+    openssl rsa -noout -modulus -in {{ tls_dir }}/api.key | openssl md5 | awk '{print $2}'
+  register: _tls_key_mod
+  changed_when: false
+  failed_when: false
+  when: (_tls_host_stats.results[0].stat.exists | default(false))
+  become: true
+
+- name: Read cert modulus (if present)
+  ansible.builtin.shell: >-
+    openssl x509 -noout -modulus -in {{ tls_dir }}/api.crt | openssl md5 | awk '{print $2}'
+  register: _tls_crt_mod
+  changed_when: false
+  failed_when: false
+  when: (_tls_host_stats.results[1].stat.exists | default(false))
+  become: true
+
+- name: Determine key/cert mismatch
+  ansible.builtin.set_fact:
+    _tls_key_cert_mismatch: >-
+      {{ (_tls_key_mod.stdout | default('')) | trim != (_tls_crt_mod.stdout | default('')) | trim }}
+  when: (_tls_host_stats.results[0].stat.exists | default(false)) and (_tls_host_stats.results[1].stat.exists | default(false))
+
+- name: Decide if key (api.key) is required
+  ansible.builtin.set_fact:
+    _tls_need_key: >-
+      {{ not (_tls_host_stats.results[0].stat.exists | default(false)) }}
+
+- name: Decide if CSR/signing is required
+  ansible.builtin.set_fact:
+    _tls_need_csr_sign: >-
+      {{ (_tls_need_key | default(false))
+         or not (_tls_host_stats.results[1].stat.exists | default(false))
+         or (_tls_key_cert_mismatch | default(false))
+         or (_tls_ca_drift | default(false))
+         or (_tls_csr_cfg.changed | default(false))
+      }}
+
+- name: Generate server key (only when required)
+  ansible.builtin.command: >-
+    openssl genrsa -out {{ tls_dir }}/api.key 2048
+  when: _tls_need_key | bool
+  changed_when: true
+  become: true
+
+- name: Generate server CSR (only when required)
+  ansible.builtin.command: >-
+    openssl req -new -key {{ tls_dir }}/api.key \
+    -out {{ tls_dir }}/api.csr \
+    -config {{ tls_dir }}/openssl-api.cnf
+  when: _tls_need_csr_sign | bool
+  changed_when: true
+  become: true
+
+- name: Ensure CSRs directory exists on controller
+  ansible.builtin.file:
+    path: "{{ tls_cluster_ca_dir_controller | expanduser }}/csrs"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  run_once: true
+
+- name: Fetch CSR to controller
+  ansible.builtin.fetch:
+    src: "{{ tls_dir }}/api.csr"
+    dest: "{{ tls_cluster_ca_dir_controller | expanduser }}/csrs/{{ inventory_hostname }}.csr"
+    flat: true
+  become: true
+  when: _tls_need_csr_sign | bool
+
+- name: Ensure extfiles directory exists on controller
+  ansible.builtin.file:
+    path: "{{ tls_cluster_ca_dir_controller | expanduser }}/exts"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  run_once: true
+
+- name: Render SAN extfile for CSR (controller)
+  ansible.builtin.copy:
+    dest: "{{ tls_cluster_ca_dir_controller | expanduser }}/exts/{{ inventory_hostname }}.ext"
+    mode: '0600'
+    content: |
+      [ v3_req ]
+      subjectAltName=@alt_names
+
+      [ alt_names ]
+      {% set dnsns = namespace(i=1) %}
+      {% for dns in _tls_san_dns %}
+      DNS.{{ dnsns.i }}={{ dns }}
+      {% set dnsns.i = dnsns.i + 1 %}
+      {% endfor %}
+      {% set ipns = namespace(i=1) %}
+      {% for ip in _tls_san_ips %}
+      IP.{{ ipns.i }}={{ ip }}
+      {% set ipns.i = ipns.i + 1 %}
+      {% endfor %}
+  delegate_to: localhost
+
+- name: Sign server CSR with Cluster CA (controller)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    cd {{ tls_cluster_ca_dir_controller | expanduser }}
+    mkdir -p certs exts
+    SERIAL_FILE="cluster-ca.srl"
+    if [ ! -s "$SERIAL_FILE" ] || ! grep -Eq '^[0-9A-Fa-f]+$' "$SERIAL_FILE"; then
+      hexdump -vn8 -e '8/1 "%02X"' /dev/urandom > "$SERIAL_FILE"
+    fi
+    openssl x509 -req -in csrs/{{ inventory_hostname }}.csr -CA cluster-ca.pem -CAkey cluster-ca.key -CAserial "$SERIAL_FILE" \
+      -days {{ tls_server_cert_days | default(1825) }} \
+      -out certs/{{ inventory_hostname }}.crt \
+      -extfile exts/{{ inventory_hostname }}.ext \
+      -extensions v3_req
+  args:
+    executable: /bin/sh
+  when: _tls_need_csr_sign | bool
+  delegate_to: localhost
+
+- name: Copy signed server certificate back to host
+  ansible.builtin.copy:
+    src: "{{ tls_cluster_ca_dir_controller | expanduser }}/certs/{{ inventory_hostname }}.crt"
+    dest: "{{ tls_dir }}/api.crt"
+    owner: root
+    group: root
+    mode: '0644'
+    force: true
+  become: true
+  when: _tls_need_csr_sign | bool
+
+- name: Delete CSR on controller after signing (no retention)
+  ansible.builtin.file:
+    path: "{{ tls_cluster_ca_dir_controller | expanduser }}/csrs/{{ inventory_hostname }}.csr"
+    state: absent
+  delegate_to: localhost
+  when: _tls_need_csr_sign | bool and (tls_keep_csrs_days | string) | length == 0
+
+- name: Prune old CSRs on controller when retention set
+  ansible.builtin.find:
+    paths: "{{ tls_cluster_ca_dir_controller | expanduser }}/csrs"
+    age: "{{ tls_keep_csrs_days }}d"
+    age_stamp: mtime
+    patterns: "*.csr"
+  register: _old_csrs
+  delegate_to: localhost
+  when: (tls_keep_csrs_days | string) | length > 0
+
+- name: Remove old CSRs on controller (retention window)
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ _old_csrs.files | default([]) }}"
+  delegate_to: localhost
+  when: (tls_keep_csrs_days | string) | length > 0
+
+- name: Ensure permissions on TLS assets
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ tls_dir }}/api.key", group: "{{ tls_group_name }}", mode: '0640'}
+    - {path: "{{ tls_dir }}/api.crt", group: 'root', mode: '0644'}
+    - {path: "{{ tls_dir }}/cluster-ca.pem", group: 'root', mode: '0644'}
+  become: true
+
+- name: TLS regen reasons (debug)
+  ansible.builtin.debug:
+    msg: >-
+      tls: host={{ inventory_hostname }} need_key={{ _tls_need_key | default(false) }}
+      need_csr_sign={{ _tls_need_csr_sign | default(false) }} ca_drift={{ _tls_ca_drift | default(false) }}
+      key_cert_mismatch={{ _tls_key_cert_mismatch | default(false) }} csr_cfg_changed={{ _tls_csr_cfg.changed | default(false) }}
+  when: tls_debug | default(false)
+
+# -------------------------------------------------------
+# Optional: Import Cluster CA into macOS keychain (local)
+# -------------------------------------------------------
+
+- name: Compute SHA1 fingerprint of desired Cluster CA (controller)
+  ansible.builtin.command: >-
+    /bin/sh -lc "openssl x509 -in '{{ tls_cluster_ca_cert_controller | expanduser }}' -noout -fingerprint -sha1 | sed 's/^.*=//' | tr -d ':' | tr 'A-Z' 'a-z'"
+  register: _tls_desired_ca_fp
+  changed_when: false
+  failed_when: (_tls_desired_ca_fp.rc | default(1)) != 0
+  delegate_to: localhost
+  run_once: true
+  when: tls_trust_ca_on_controller | default(false)
+
+- name: List SHA1 fingerprints in target macOS keychain
+  ansible.builtin.command: >-
+    /bin/sh -lc "security find-certificate -a -Z -k {{ (tls_controller_install_keychain == 'system') | ternary('/Library/Keychains/System.keychain', '~/Library/Keychains/login.keychain-db') }} | awk '/SHA-1 hash:/{print tolower($3)}'"
+  register: _tls_keychain_fps
+  changed_when: false
+  failed_when: false
+  delegate_to: localhost
+  run_once: true
+  when: tls_trust_ca_on_controller | default(false)
+
+- name: Decide if CA import is needed (macOS keychain)
+  ansible.builtin.set_fact:
+    _tls_ca_import_needed: >-
+      {{ (_tls_keychain_fps.stdout_lines | default([])) | select('equalto', (_tls_desired_ca_fp.stdout | trim)) | list | length == 0 }}
+  delegate_to: localhost
+  run_once: true
+  when: tls_trust_ca_on_controller | default(false)
+
+- name: Import/Update Cluster CA in macOS keychain when needed
+  ansible.builtin.command: >-
+    security add-trusted-cert -d -r trustRoot -k {{ (tls_controller_install_keychain == 'system')
+      | ternary('/Library/Keychains/System.keychain', '~/Library/Keychains/login.keychain-db') }}
+      {{ tls_cluster_ca_cert_controller | expanduser }}
+  delegate_to: localhost
+  run_once: true
+  when: (tls_trust_ca_on_controller | default(false)) and (_tls_ca_import_needed | default(false))
+  changed_when: true
+  failed_when: false

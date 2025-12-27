@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart HAProxy when CA changes
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart haproxy.service

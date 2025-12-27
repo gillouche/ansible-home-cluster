@@ -1,0 +1,76 @@
+global
+  log /dev/log local0
+  log /dev/log local1 notice
+  daemon
+
+defaults
+  log     global
+  mode    tcp
+  option  tcplog
+  timeout connect 5s
+  timeout client  1m
+  timeout server  1m
+
+{% if load_balancer_haproxy_peers_enabled | default(false) %}
+peers {{ load_balancer_haproxy_peers_name | default('lb-peers') }}
+{%   for p in load_balancer_haproxy_peers %}
+  peer {{ p.name }} {{ p.addr }}:1024
+{%   endfor %}
+{% endif %}
+
+{% for fe in load_balancer_haproxy_frontends %}
+frontend {{ fe.name }}
+  bind {{ fe.bind }}
+{%   if fe.mode is defined %}
+  mode {{ fe.mode }}
+{%   endif %}
+{%   if fe.tcp_request_inspect_delay is defined %}
+  tcp-request inspect-delay {{ fe.tcp_request_inspect_delay }}
+{%   endif %}
+{%   if fe.tcp_request_content_accept is defined %}
+  tcp-request content accept if {{ fe.tcp_request_content_accept }}
+{%   endif %}
+  default_backend {{ fe.default_backend }}
+{%   if fe.extra is defined %}
+{%     for line in fe.extra %}
+  {{ line }}
+{%     endfor %}
+{%   endif %}
+{% endfor %}
+
+{% for be in load_balancer_haproxy_backends %}
+backend {{ be.name }}
+  balance {{ be.balance | default('roundrobin') }}
+{%   if be.mode is defined %}
+  mode {{ be.mode }}
+{%   endif %}
+{%   if be.http_check_connect is defined %}
+  http-check connect {{ be.http_check_connect }}
+{%   endif %}
+{%   if be.httpchk is defined %}
+  option httpchk {{ be.httpchk }}
+{%   endif %}
+{%   if be.http_check_send is defined %}
+  http-check send {{ be.http_check_send | join(' ') }}
+{%   endif %}
+{%   if be.http_check_expect is defined %}
+  http-check expect {{ be.http_check_expect }}
+{%   endif %}
+{%   if be.default_server is defined %}
+  default-server {{ be.default_server }}
+{%   endif %}
+{%   if be.stick_table is defined %}
+  stick-table {{ be.stick_table }}
+{%   endif %}
+{%   if be.stick_on is defined %}
+  stick on {{ be.stick_on }}
+{%   endif %}
+{%   for s in be.servers %}
+  server {{ s.name }} {{ s.addr }}:{{ s.port }} {{ s.opts | default('check') }}
+  {%   endfor %}
+{%   if be.extra is defined %}
+{%     for line in be.extra %}
+  {{ line }}
+{%     endfor %}
+{%   endif %}
+{% endfor %}

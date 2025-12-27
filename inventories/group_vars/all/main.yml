@@ -20,3 +20,6 @@ vault_controller_install_keychain: login
 
 # Controller (macOS) browser trust switch
 firefox_enable_enterprise_roots: true
+
+# HAProxy VIP (included automatically in SANs by TLS role when defined)
+load_balancer_virtual_ip: 192.168.0.253
