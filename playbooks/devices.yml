@@ -283,35 +283,6 @@
         - tls
         - trust
 
-    - name: Debug TLS Information
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "TLS Setup Complete for {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Paths:"
-          - "  Intermediate CA: {{ tls_dir }}/intermediate-ca.pem"
-          - "  System Anchor:   {{ tls_bundle_anchor_path | default('/etc/ca-certificates/trust-source/anchors/ca-bundle.pem') }}"
-          - "  Server Cert:     {{ tls_dir }}/api.crt"
-          - "  Server Key:      {{ tls_dir }}/api.key"
-          - "-----------------------------------------------------------"
-          - "Expected SANs (Ansible Logic):"
-          - "  DNS: {{ _tls_san_dns | default([]) }}"
-          - "  IPs: {{ _tls_san_ips | default([]) }}"
-          - "-----------------------------------------------------------"
-          - "Deployed Certificate Info (OpenSSL):"
-          - "{{ _tls_inspect_details.stdout_lines | default(['N/A']) }}"
-          - "-----------------------------------------------------------"
-          - "Deployed SANs (OpenSSL):"
-          - "{{ _tls_inspect_sans.stdout_lines | default(['N/A']) }}"
-          - "-----------------------------------------------------------"
-          - "Chain Verification:"
-          - "  Result: {{ _tls_inspect_chain.stdout | default(_tls_inspect_chain.stderr, true) | trim }}"
-          - "-----------------------------------------------------------"
-      tags:
-        - tls
-        - trust
-
 - name: "Setup Pi-hole cluster (primary + replicas)"
   hosts: pihole_cluster
   gather_facts: true

@@ -202,12 +202,16 @@
   register: _tls_inspect_details
   changed_when: false
   become: true
+  tags:
+    - health
 
 - name: Capture deployed SANs
   ansible.builtin.command: openssl x509 -in {{ tls_dir }}/api.crt -noout -ext subjectAltName
   register: _tls_inspect_sans
   changed_when: false
   become: true
+  tags:
+    - health
 
 - name: Verify certificate chain locally
   ansible.builtin.command: openssl verify -CAfile {{ tls_dir }}/ca-bundle.pem {{ tls_dir }}/api.crt
@@ -215,3 +219,5 @@
   changed_when: false
   failed_when: false
   become: true
+  tags:
+    - health
