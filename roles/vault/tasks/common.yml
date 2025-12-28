@@ -1,5 +1,6 @@
 ---
 # Common preparation tasks for all Vault nodes (no container start here)
+# Removed: install_vault_cli.yml is now included in the vault_init stage
 
 - name: Ensure vault group exists
   ansible.builtin.group:
@@ -58,5 +59,3 @@
       fi
       exec sh -lc "vault server -config={{ vault_cfg_path_in_container }} 2>&1 | tee -a '$log_ts' '$log_cur'"
   become: true
-
-# Ensure root token is available to Vault CLI inside the container when we have it

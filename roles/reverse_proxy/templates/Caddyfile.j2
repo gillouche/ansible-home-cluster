@@ -1,7 +1,7 @@
 {
 # Use Vault ACME endpoint for certificate management
 acme_ca {{ vault_acme_directory_url }}
-acme_ca_root /etc/ssl/certs/vault-cluster-ca.pem
+acme_ca_root /etc/ssl/certs/ca-bundle.pem
 {% if reverse_proxy_acme_email is defined and (reverse_proxy_acme_email | length) > 0 %}
     email {{ reverse_proxy_acme_email }}
 {% endif %}

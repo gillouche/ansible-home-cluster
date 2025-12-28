@@ -12,6 +12,11 @@ ansible_become_password: "{{ vault_device_become_password }}"
 # Global variables for all hosts
 base_domain: gillouche.homelab
 target_user: alarm
+tls_dir: "/etc/tls"
+lan_subnet: "192.168.0.0/24"
+podman_subnet: "10.88.0.0/16"
+
+
 
 # Vault trust/CA distribution (controller + hosts)
 vault_install_root_ca_on_hosts: true
@@ -23,3 +28,34 @@ firefox_enable_enterprise_roots: true
 
 # HAProxy VIP (included automatically in SANs by TLS role when defined)
 load_balancer_virtual_ip: 192.168.0.253
+
+# Centralized Networking Configuration
+# ------------------------------------
+
+# Vault
+vault_api_port: 8200
+vault_cluster_port: 8201
+
+# Pi-hole
+pihole_virtual_ip: 192.168.0.251
+pihole_dns_tcp_port: 53
+pihole_dns_udp_port: 53
+pihole_http_host_port: 8080
+pihole_https_host_port: 8443
+
+# Reverse Proxy (Caddy)
+reverse_proxy_virtual_ip: 192.168.0.252
+reverse_proxy_http_port: 80
+reverse_proxy_https_port: 443
+
+# Vault PKI Role Name (shared between vault setup and tls provisioning)
+vault_pki_int_role_name: "homelab-server"
+
+# Controller-side CA paths
+vault_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
+vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.crt"
+vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.key"
+
+# Global System Trust Anchor Paths
+tls_root_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-root-ca.pem"
+tls_intermediate_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-intermediate-ca.pem"

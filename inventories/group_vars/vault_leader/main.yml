@@ -1,4 +1,0 @@
----
-# Additional SANs for Vault leader nodes only (additive)
-tls_additional_san_dns:
-  - vault.gillouche.homelab

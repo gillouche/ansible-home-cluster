@@ -1,16 +1,83 @@
 ---
-# Bootstrap stage: run full preparation on rpi5b8g1 to provide Transit for auto-unseal
-# and prepare HTTPS/TLS and controller artifacts.
+# Removed: common.yml is now included in the vault_init stage
 
-- name: Mark this host as the bootstrap Vault
+- name: Ensure TLS directory exists
+  ansible.builtin.file:
+    path: "{{ vault_host_tls_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Construct dynamic SANs list for Transit Vault certificate
   ansible.builtin.set_fact:
-    vault_is_bootstrap: true
+    _vault_server_sansa: "{{
+      (
+        ( [ 'DNS:' ~ inventory_hostname ] if inventory_hostname is defined else [] ) +
+        ( [ 'DNS:' ~ inventory_hostname ~ '.' ~ base_domain ] if base_domain is defined else [] ) +
+        [ 'DNS:localhost' ] +
+        ( vault_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if vault_additional_san_dns is defined and vault_additional_san_dns | length > 0 else [] ) +
+        ( tls_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if tls_additional_san_dns is defined and tls_additional_san_dns | length > 0 else [] ) +
+        ( [ 'IP:' ~ ansible_facts.default_ipv4.address ] if ansible_facts.default_ipv4.address is defined else [] ) +
+        [ 'IP:127.0.0.1' ] +
+        ( vault_additional_san_ips | map('regex_replace', '^(.*)$', 'IP:\\1') | list if vault_additional_san_ips is defined and vault_additional_san_ips | length > 0 else [] ) +
+        ( [ 'IP:' ~ load_balancer_virtual_ip ] if load_balancer_virtual_ip is defined and load_balancer_virtual_ip | length > 0 else [] )
+      ) | unique | sort | list
+    }}"
 
-# Reuse existing common tasks to generate CA, host certs, config, etc.
-- name: Run common preparation (CA, TLS, config) on bootstrap host
-  ansible.builtin.include_tasks: common.yml
+- name: Debug generated SANs for Transit Vault certificate
+  ansible.builtin.debug:
+    msg: "Generated SANs for {{ inventory_hostname }}: {{ _vault_server_sansa }}"
 
-- name: Render bootstrap Vault configuration (transit)
+- name: Generate a private key for the transit vault
+  community.crypto.openssl_privatekey:
+    path: "{{ vault_host_tls_dir }}/api.key"
+    size: 2048
+    owner: root
+    group: root
+    mode: '0600'
+    force: "{{ vault_force_tls_regen | default(false) }}"
+  become: true
+
+- name: Check if Transit Vault certificate exists
+  ansible.builtin.stat:
+    path: "{{ vault_host_tls_dir }}/api.crt"
+    get_checksum: no
+  register: _api_crt_stat
+  become: true
+
+- name: Generate a self-signed certificate for the transit vault (using openssl)
+  ansible.builtin.shell: |
+    openssl req -x509 -new -sha256 \
+      -key "{{ vault_host_tls_dir }}/api.key" \
+      -out "{{ vault_host_tls_dir }}/api.crt" \
+      -days 3650 \
+      -subj "/CN={{ inventory_hostname }}" \
+      -addext "subjectAltName={{ _vault_server_sansa | join(',') }}" \
+      -nodes
+  when: (not _api_crt_stat.stat.exists) or (vault_force_tls_regen | default(false))
+  become: true
+
+- name: Set permissions for transit vault certificate
+  ansible.builtin.file:
+    path: "{{ vault_host_tls_dir }}/api.crt"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Ensure ca-bundle.pem exists for transit vault
+  ansible.builtin.copy:
+    src: "{{ vault_host_tls_dir }}/api.crt"
+    dest: "{{ vault_host_tls_dir }}/ca-bundle.pem"
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Render Vault configuration (bootstrap)
   ansible.builtin.template:
     src: "vault.bootstrap.hcl.j2"
     dest: "{{ vault_host_config_dir }}/vault.hcl"
@@ -18,38 +85,8 @@
     group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: '0644'
   become: true
-  # Do not restart container via handler in transit bootstrap; we'll manage start/unseal explicitly
-  notify: []
   vars:
-    # Compute effective Vault public URL used by the template
-    vault_public_url_effective: >-
-      {{
-        (vault_public_url | default(''))
-        if ((vault_public_url | default('') | length) > 0)
-        else (
-          'https://'
-          ~ (
-              (
-                hostvars is defined
-                and hostvars[inventory_hostname] is defined
-                and hostvars[inventory_hostname].ansible_facts is defined
-                and hostvars[inventory_hostname].ansible_facts.default_ipv4 is defined
-              )
-              | ternary(
-                  hostvars[inventory_hostname].ansible_facts.default_ipv4.address,
-                  ansible_facts.default_ipv4.address
-                )
-            )
-          ~ ':' ~ (vault_api_port | string)
-        )
-      }}
-
-# Start a single Vault (bootstrap-specific start; no inclusion of leader.yml)
-- name: Assert Transit seal is disabled for bootstrap
-  ansible.builtin.assert:
-    that:
-      - not (vault_enable_transit_seal | default(false)) | bool
-    fail_msg: "Bootstrap stage requires vault_enable_transit_seal: false"
+    vault_public_url_effective: "https://{{ ansible_facts.default_ipv4.address }}:{{ vault_api_port }}"
 
 - name: Ensure Vault container is running on bootstrap
   containers.podman.podman_container:
@@ -69,9 +106,8 @@
       SKIP_CHOWN: "true"
       SKIP_SETCAP: "true"
       VAULT_LOG_LEVEL: "{{ vault_log_level | default('debug') }}"
-      VAULT_CACERT: "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
+      VAULT_CACERT: "{{ vault_tls_dir_in_container }}/ca-bundle.pem"
       VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
-      # CLI will use /root/.vault-token when needed (no VAULT_TOKEN env)
     command: >-
       {{ (vault_enable_log_wrapper | default(true))
           | ternary('/bin/sh -lc /vault/bin/start-vault.sh', 'server -config=' ~ vault_cfg_path_in_container) }}
@@ -83,718 +119,157 @@
       - "{{ vault_host_bin_dir }}:/vault/bin"
   become: true
 
-- name: Flush any pending handlers (transit bootstrap)
-  meta: flush_handlers
+- name: Wait for vault to be ready
+  ansible.builtin.wait_for:
+    port: "{{ vault_api_port }}"
+    host: "{{ ansible_facts.default_ipv4.address }}"
+    timeout: 60
 
-- name: Pause briefly after starting container
-  ansible.builtin.pause:
-    seconds: 5
-
-# Wait for API to respond while sealed (501/503 acceptable)
-- name: Write /root/.vault-token inside container when vault_root_token is available (bootstrap)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "printf '%s' '{{ vault_root_token }}' > /root/.vault-token && chmod 0600 /root/.vault-token"
-  changed_when: true
-  failed_when: false
-  become: true
-  when:
-    - (vault_root_token | default('') | length) > 0
-
-- name: Verify CLI token inside container (lookup, bootstrap)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "vault token lookup -format=json"
-  register: _bootstrap_token_lookup
+- name: Check if Vault is initialized
+  ansible.builtin.command: /usr/local/bin/vault status -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _vault_status_check
   changed_when: false
   failed_when: false
   become: true
-  when:
-    - (vault_root_token | default('') | length) > 0
-- name: Wait for bootstrap Vault API to respond (sealed ok)
-  ansible.builtin.command: >-
-    curl -sS --max-time 5 --retry 0 --cacert {{ vault_host_tls_dir }}/cluster-ca.pem \
-      -o /dev/null -w "%{http_code}" https://{{ ansible_facts.default_ipv4.address }}:{{ vault_api_port }}/v1/sys/health
-  register: _bootstrap_health
-  changed_when: false
-  failed_when: false
-  retries: "{{ vault_wait_retries | default(150) }}"
-  delay: "{{ vault_wait_delay | default(2) }}"
-  until: >-
-    (_bootstrap_health.rc | default(1)) == 0 and
-    ((_bootstrap_health.stdout | default('000')) in ['501','503','429','200'])
 
-- name: Pause briefly before applying first unseal key
-  ansible.builtin.pause:
-    seconds: 1
+- name: Detect if Transit Vault needs initialization (Fresh install or wipe)
+  ansible.builtin.set_fact:
+    vault_needs_init: "{{ not ((_vault_status_check.stdout | default('{}') | from_json).initialized | default(false)) }}"
 
-# Initialize only if we don't already have init JSON on the controller
-- name: Check for existing init JSON on controller
+- name: Check for existing transit init JSON on controller
   ansible.builtin.stat:
-    path: "{{ vault_transit_init_export_path | expanduser }}"
-  register: _init_json_stat
+    path: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
+  register: _transit_init_stat
   delegate_to: localhost
   run_once: true
 
-- name: Check current Vault initialization status (in-container)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "vault status -format=json"
-  register: _bootstrap_status_preinit
-  changed_when: false
-  failed_when: false
-  become: true
-
-- name: Initialize bootstrap Vault (Shamir)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }}
-    sh -lc 'f=/tmp/vault-init.json;
-    VAULT_FORMAT=json /bin/vault operator init
-      -key-shares={{ vault_unseal_shares }}
-      -key-threshold={{ vault_unseal_threshold }}
-      -format=json > "$f"; cat "$f"'
-  register: _bootstrap_init
-  changed_when: true
-  failed_when: >-
-    (_bootstrap_init.rc | default(1)) != 0 or
-    (
-      (
-        (_bootstrap_init.stdout | default('')) | length
-      ) == 0
-    )
-  when: >-
-    (not (_init_json_stat.stat.exists | default(false)))
-    or (
-      (
-        (_bootstrap_status_preinit.stdout | default('{}')) | length > 0
-      )
-      and (
-        ((_bootstrap_status_preinit.stdout | default('{}')) | from_json).initialized | default(false) == false
-      )
-    )
-  become: true
-
-# Strict reuse path: if controller init JSON exists and is valid JSON, parse and reuse it
-- name: Load existing init JSON (strict reuse)
-  ansible.builtin.slurp:
-    src: "{{ vault_transit_init_export_path | expanduser }}"
-  register: _reuse_init_loaded
-  delegate_to: localhost
-  run_once: true
-  when:
-    - _init_json_stat.stat.exists | default(false)
-
-- name: Fail fast if existing init JSON is not valid JSON (strict reuse)
-  ansible.builtin.fail:
-    msg: >-
-      Existing vault_transit_init_export_path ({{ vault_transit_init_export_path | expanduser }}) is not valid JSON. Delete it or replace
-      with the JSON output from 'vault operator init -format=json'. The bootstrap will not proceed with a non-JSON file.
-  when:
-    - _init_json_stat.stat.exists | default(false)
-    - (
-        (_reuse_init_loaded.content | default('') | b64decode | regex_search('^\s*[\[{]') | default('')) == ''
-      )
-  delegate_to: localhost
-  run_once: true
-
-- name: Extract unseal keys and root token from existing JSON (strict reuse)
-  ansible.builtin.set_fact:
-    cacheable: true
-    vault_unseal_keys_b64: >-
-      {{ (((_reuse_init_loaded.content | b64decode | default('{}', true)) | from_json).unseal_keys_b64 | default([])) }}
-    vault_root_token: >-
-      {{ (((_reuse_init_loaded.content | b64decode | default('{}', true)) | from_json).root_token | default('')) }}
-  when:
-    - _init_json_stat.stat.exists | default(false)
-    - (
-        (_reuse_init_loaded.content | default('') | b64decode | regex_search('^\s*[\[{]') | default('')) != ''
-      )
-  delegate_to: localhost
-  run_once: true
-
-# Safety check: validate controller token against VIP before using it
-# Move validation AFTER API is reachable to avoid HTTP 000 race conditions.
-# We place validation below the initial API wait and unseal steps, with retries.
-
-- name: Assert init output is valid JSON (bootstrap)
-  ansible.builtin.assert:
-    that:
-      - (_bootstrap_init.stdout | default('') | regex_search('^\s*[\[{]')) != ''
-    fail_msg: >-
-      Vault init output was not JSON. Ensure the CLI honors -format=json. The role sets VAULT_FORMAT=json, but the output looked like text.
-  when:
-    - _bootstrap_init is defined
-    - (_bootstrap_init.rc | default(1)) == 0
-
-- name: Persist init JSON to controller
+- name: Backup stale transit-init.json if Vault is fresh
   ansible.builtin.copy:
-    dest: "{{ vault_transit_init_export_path | expanduser }}"
+    src: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
+    dest: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}.bak.{{ ansible_date_time.iso8601 }}"
+    remote_src: true
+  delegate_to: localhost
+  when:
+    - vault_needs_init
+    - _transit_init_stat.stat.exists | default(false)
+
+- name: Load transit init JSON from controller if present
+  ansible.builtin.slurp:
+    src: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
+  register: _transit_init_loaded
+  delegate_to: localhost
+  run_once: true
+  when:
+    - _transit_init_stat.stat.exists
+    - not vault_needs_init
+
+- name: Set unseal keys and root token from loaded init JSON (if present)
+  ansible.builtin.set_fact:
+    vault_unseal_keys_b64: "{{ (_transit_init_loaded.content | default('') | b64decode | from_json).unseal_keys_b64 | default([]) }}"
+    vault_root_token: "{{ (_transit_init_loaded.content | default('') | b64decode | from_json).root_token | default('') }}"
+  when:
+    - _transit_init_loaded is defined
+    - not (_transit_init_loaded.skipped | default(false))
+    - (_transit_init_loaded.content | default('') | length) > 0
+
+- name: Initialize Vault (if not already initialized)
+  ansible.builtin.command: /usr/local/bin/vault operator init -key-shares=1 -key-threshold=1 -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _vault_init_output
+  changed_when: _vault_init_output.rc == 0
+  become: true
+  when: vault_needs_init
+
+- name: Store transit init JSON to controller
+  ansible.builtin.copy:
+    content: "{{ _vault_init_output.stdout }}"
+    dest: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
     mode: '0600'
-    content: "{{ (_bootstrap_init.stdout | from_json) | to_nice_json }}"
   delegate_to: localhost
-  run_once: true
-  when:
-    - _bootstrap_init is defined
-    - (_bootstrap_init.rc | default(1)) == 0
-    # Always write the freshly generated init JSON when available
+  when: _vault_init_output.changed
 
-- name: Load init JSON (controller)
-  ansible.builtin.slurp:
-    src: "{{ vault_transit_init_export_path | expanduser }}"
-  register: _bootstrap_init_loaded
-  delegate_to: localhost
-  run_once: true
-
-- name: Fail if vault-init file is not JSON and Vault is already initialized
-  ansible.builtin.fail:
-    msg: >-
-      vault_transit_init_export_path exists but is not JSON. Vault is already initialized, so the role cannot re-initialize.
-      Replace the file with the JSON output from 'vault operator init -format=json' captured at initialization.
-  when:
-    - _bootstrap_init_loaded is defined
-    - (_bootstrap_init_loaded.content | default('') | length) > 0
-    - (
-        (_bootstrap_init_loaded.content | b64decode | regex_search('^\s*[\[{]') | default(''))
-      ) == ''
-    - (
-        (
-          (_bootstrap_status_preinit.stdout | default('{}')) | length > 0
-        ) and (((_bootstrap_status_preinit.stdout | from_json).initialized | default(false)) == true)
-      )
-
-- name: Extract unseal keys and root token (bootstrap)
+- name: Set unseal keys and root token from NEW init output (if initialization just happened)
   ansible.builtin.set_fact:
-    cacheable: true
-    vault_unseal_keys_b64: >-
-      {{
-        (
-          (
-            (_bootstrap_init_loaded.content | b64decode | default('{}', true))
-          ) | from_json
-        ).unseal_keys_b64 | default([])
-      }}
-    vault_root_token: >-
-      {{
-        (
-          (
-            (_bootstrap_init_loaded.content | b64decode | default('{}', true))
-          ) | from_json
-        ).root_token | default('')
-      }}
-  when:
-    - (_init_json_stat.stat.exists | default(false)) == false
-    - _bootstrap_init_loaded is defined
-    - (_bootstrap_init_loaded.content | default('') | length) > 0
-    - ((_bootstrap_init_loaded.content | b64decode | regex_search('^\s*[\[{]') | default('')) != '')
+    vault_unseal_keys_b64: "{{ (_vault_init_output.stdout | from_json).unseal_keys_b64 }}"
+    vault_root_token: "{{ (_vault_init_output.stdout | from_json).root_token }}"
+  when: _vault_init_output.changed
 
-# Note: If the file is not JSON and Vault is not initialized yet, the role will
-# have initialized Vault earlier and written a proper JSON file above.
-
-- name: Apply first unseal key (sequential)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc \
-    "/bin/vault operator unseal {{ (vault_unseal_keys_b64 | default([]))[0] }}"
-  register: _bootstrap_unseal_first
-  changed_when: true
-  failed_when: false
-  when:
-    - (vault_unseal_keys_b64 | default([])) | length >= (vault_unseal_threshold | int)
-    - (
-        (
-          (_bootstrap_status_preinit.stdout | default('{}')) | length > 0
-        ) and (((_bootstrap_status_preinit.stdout | from_json).sealed | default(true)) == true)
-      )
+- name: Unseal Vault
+  ansible.builtin.command: /usr/local/bin/vault operator unseal {{ item }}
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_SKIP_VERIFY: "true"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+  loop: "{{ vault_unseal_keys_b64 }}"
   become: true
+  when: >
+    (vault_unseal_keys_b64 | default([])) | length > 0 and
+    (_vault_status_check.stdout | default('{}') | from_json).sealed | default(true) == true
 
-# Persist CLI token early (before any Vault CLI API calls) when token exists from reuse or fresh init
-- name: Write /root/.vault-token inside container when vault_root_token is available (transit)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "printf '%s' '{{ vault_root_token }}' > /root/.vault-token && chmod 0600 /root/.vault-token"
-  changed_when: true
-  failed_when: false
-  become: true
-  when:
-    - (vault_root_token | default('') | length) > 0
-
-- name: Verify CLI token inside container (lookup, transit)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "vault token lookup -format=json"
-  register: _transit_token_lookup
-  changed_when: false
-  failed_when: false
-  become: true
-  when:
-    - (vault_root_token | default('') | length) > 0
-
-- name: Pause 5s after first unseal key
-  ansible.builtin.pause:
-    seconds: 1
-  when:
-    - (_bootstrap_unseal_first is defined)
-
-- name: Apply second unseal key
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault operator unseal {{ (vault_unseal_keys_b64 | default([]))[1] }}"
-  register: _bootstrap_unseal_second
-  changed_when: true
-  failed_when: false
-  when:
-    - (vault_unseal_keys_b64 | default([])) | length >= 2
-    - (
-        (
-          (_bootstrap_status_preinit.stdout | default('{}')) | length > 0
-        ) and (((_bootstrap_status_preinit.stdout | from_json).sealed | default(true)) == true)
-      )
-  become: true
-
-- name: Pause 2s after second unseal key
-  ansible.builtin.pause:
-    seconds: 2
-  when:
-    - (_bootstrap_unseal_second is defined)
-
-- name: Check seal status after second key
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
-  register: _bootstrap_status_after_second
-  changed_when: false
-  failed_when: false
-  become: true
-
-- name: Re-apply all unseal keys once if still sealed (fallback pass)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc \
-    "PATH=/bin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin:/usr/local/sbin; exec /bin/vault operator unseal {{ item }}"
-  loop: "{{ (vault_unseal_keys_b64 | default([])) }}"
-  async: 15
-  poll: 0
-  register: _bootstrap_unseal_retry
-  changed_when: true
-  failed_when: false
-  when:
-    - _bootstrap_status_after_second is defined
-    - ((_bootstrap_status_after_second.stdout | default('{}')) | from_json).sealed | default(true)
-  become: true
-
-- name: Ensure final unseal key applied when threshold == 2 and progress is stuck
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc \
-    "/bin/vault operator unseal {{ (vault_unseal_keys_b64 | default([]))[1] }}"
-  register: _bootstrap_unseal_fallback
-  changed_when: true
-  failed_when: false
-  when:
-    - (vault_unseal_threshold | int) == 2
-    - (vault_unseal_keys_b64 | default([])) | length >= 2
-    - (
-        (
-          (_bootstrap_status_preinit.stdout | default('{}')) | length > 0
-        ) and (((_bootstrap_status_preinit.stdout | from_json).sealed | default(true)) == true)
-      )
-  become: true
-
-- name: Wait for bootstrap Vault to be unsealed
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
-  register: _bootstrap_status
-  changed_when: false
-  failed_when: false
-  retries: "{{ vault_wait_retries | default(150) }}"
-  delay: "{{ vault_wait_delay | default(2) }}"
-  until: >-
-    (_bootstrap_status.rc | default(1)) == 0 and
-    (((_bootstrap_status.stdout | from_json).sealed | default(true)) == false)
-  become: true
-
-# In-container validation: ensure the token from vault-init.json is usable (no external curl dependencies)
-- name: Validate in-container token via lookup-self (post-unseal)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "vault token lookup -format=json"
-  register: _post_unseal_token_lookup
-  changed_when: false
-  failed_when: false
-  become: true
-  when:
-    - (vault_root_token | default('') | length) > 0
-
-- name: Fail if in-container token lookup fails (post-unseal)
-  ansible.builtin.fail:
-    msg: >-
-      Token from vault_transit_init_export_path appears invalid inside the container. Ensure transit-init.json belongs to this transit instance
-      or provide a valid admin token via vault_root_token.
-  when:
-    - (vault_root_token | default('') | length) > 0
-    - (_post_unseal_token_lookup.rc | default(1)) != 0
-
-# Enable Transit and mint the unseal token; save to controller
-# Ensure root token is available to the CLI inside container (no env in exec)
-- name: Read current container token (root context)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc 'cat /root/.vault-token 2>/dev/null || true'
-  register: _cur_root_container_token
-  changed_when: false
-  failed_when: false
-  become: true
-
-- name: Write root token into container token file when changed
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }}
-    sh -lc 'printf "%s" "{{ vault_root_token }}" > /root/.vault-token &&
-    chmod 600 /root/.vault-token'
-  when: (_cur_root_container_token.stdout | default('') | trim) != (vault_root_token | default('') | trim)
-  changed_when: true
-  failed_when: false
-  become: true
-
-- name: Read init JSON from controller to obtain root token (best-effort)
-  ansible.builtin.slurp:
-    src: "{{ vault_transit_init_export_path | expanduser }}"
-  register: _transit_init_json
-  delegate_to: localhost
-  run_once: true
-  failed_when: false
-
-- name: Set vault_root_token from init JSON when not already provided
-  ansible.builtin.set_fact:
-    vault_root_token: >-
-      {{
-        (vault_root_token | default(''))
-        if ((vault_root_token | default('') | string | length) > 0)
-        else (
-          (
-            (_transit_init_json.content | default(''))
-            | string | length
-          )
-          | ternary(
-              (_transit_init_json.content | b64decode | from_json).root_token | default(''),
-              ''
-            )
-        )
-      }}
-
-- name: Fail if no admin token available to configure transit
-  ansible.builtin.fail:
-    msg: "vault_root_token is required to bootstrap transit on this node."
-  when: (vault_root_token | default('')) | length == 0
-
-- name: List current secrets engines (JSON)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets list -format=json"
-  register: _secrets_list
-  changed_when: false
-  failed_when: false
-  become: true
-
-- name: Parse existing secrets engines
-  ansible.builtin.set_fact:
-    _secrets_mounts: >-
-      {{ (_secrets_list.stdout | default('{}') | length > 0)
-         | ternary((_secrets_list.stdout | from_json), {}) }}
-
-- name: Enable transit engine when missing
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets enable -path='{{ vault_transit_mount_path.rstrip('/') }}' transit"
+- name: Enable transit secrets engine
+  ansible.builtin.command: /usr/local/bin/vault secrets enable -path=transit transit
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
   register: _enable_transit
-  changed_when: true
-  failed_when: false
+  changed_when: "'Success!' in _enable_transit.stdout"
+  failed_when: _enable_transit.rc != 0 and 'path is already in use' not in _enable_transit.stderr
   become: true
-  when: _secrets_mounts.get((vault_transit_mount_path.rstrip('/') ~ '/'), none) is none
 
-- name: Wait until transit mount appears
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets list -format=json"
-  register: _secrets_list_after
+- name: Create transit key
+  ansible.builtin.command: /usr/local/bin/vault write -f transit/keys/autounseal
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
   changed_when: false
-  failed_when: false
-  retries: 10
-  delay: 1
-  until: >-
-    (
-      (_secrets_list_after.stdout | default('{}') | length) > 0
-    ) and (
-      ((_secrets_list_after.stdout | from_json).get((vault_transit_mount_path.rstrip('/') ~ '/')) is not none)
-    )
   become: true
 
-- name: Check if transit key exists
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_transit_mount_path.rstrip('/') }}/keys/{{ vault_transit_key_name }}'"
-  register: _transit_key_read
-  changed_when: false
-  failed_when: false
-  become: true
-
-- name: Create transit key when missing
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -f '{{ vault_transit_mount_path.rstrip('/') }}/keys/{{ vault_transit_key_name }}'"
-  when: (_transit_key_read.rc | default(1)) != 0
-  changed_when: true
-  become: true
-
-- name: Write/update autounseal policy
-  ansible.builtin.copy:
-    dest: "/tmp/{{ vault_transit_policy_name }}.hcl"
-    mode: '0600'
-    content: |
-      # Autounseal policy for Transit key
-      path "{{ vault_transit_mount_path.rstrip('/') }}/keys/{{ vault_transit_key_name }}" {
-        capabilities = ["read"]
-      }
-      path "{{ vault_transit_mount_path.rstrip('/') }}/encrypt/{{ vault_transit_key_name }}" {
-        capabilities = ["update"]
-      }
-      path "{{ vault_transit_mount_path.rstrip('/') }}/decrypt/{{ vault_transit_key_name }}" {
-        capabilities = ["update"]
-      }
-      path "{{ vault_transit_mount_path.rstrip('/') }}/rewrap/{{ vault_transit_key_name }}" {
-        capabilities = ["update"]
-      }
-  changed_when: false
-
-- name: Read current policy from Vault (JSON) if any
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "vault policy read -format=json {{ vault_transit_policy_name }}"
-  register: _policy_current_json
-  changed_when: false
-  failed_when: false
-  become: true
-
-- name: Read desired policy file from host
-  ansible.builtin.slurp:
-    src: "/tmp/{{ vault_transit_policy_name }}.hcl"
-  register: _policy_desired
-
-- name: Normalize policy contents (desired/current)
-  ansible.builtin.set_fact:
-    # Normalize desired policy (trim + newline). Ensure condition is parenthesized before ternary.
-    _policy_desired_norm: >-
-      {{ ((_policy_desired.content | default('') | b64decode | string) | trim) }}
-    # Parse current policy JSON and extract canonical policy string (Vault 1.21: key is "policy").
-    _policy_current_norm: >-
-      {{ (
-           (
-             (_policy_current_json is defined)
-             and ((_policy_current_json.stdout | default('') | trim) is match('^\{'))
-           )
-           | ternary(((_policy_current_json.stdout | from_json).policy | default('') | string), '')
-         ) | default('') | string | trim }}
-
-- name: Compute policy checksums
-  ansible.builtin.set_fact:
-    # Compute sha1 on versions with a single trailing newline to avoid off-by-one differences
-    _policy_desired_sha1: "{{ ((_policy_desired_norm | default('') ) ~ '\n') | sha1 }}"
-    _policy_current_sha1: "{{ ((_policy_current_norm | default('') ) ~ '\n') | sha1 }}"
-
-- name: Debug policy contents prior to hashing (first 200 chars)
-  ansible.builtin.debug:
-    msg:
-      - "desired_norm_preview={{ _policy_desired_norm[:200] | replace('\n','\\n') }}"
-      - "current_norm_preview={{ _policy_current_norm[:200] | replace('\n','\\n') }}"
-      - "desired_len={{ _policy_desired_norm | length }}"
-      - "current_len={{ _policy_current_norm | length }}"
-      - "desired_sha1={{ _policy_desired_sha1 }}"
-      - "current_sha1={{ _policy_current_sha1 }}"
-
-- name: Apply policy in Vault (only when changed)
+- name: Create transit policy
   ansible.builtin.shell: |
-    set -euo pipefail
-    podman exec -i {{ vault_container_name }} sh -lc "vault policy write '{{ vault_transit_policy_name }}' -" < /tmp/{{ vault_transit_policy_name }}.hcl
-  args:
-    executable: /bin/sh
-  register: _policy_write
-  when: _policy_desired_sha1 != _policy_current_sha1
+    /usr/local/bin/vault policy write autounseal - <<'EOF'
+      path "transit/encrypt/autounseal" {
+        capabilities = ["update"]
+      }
+      path "transit/decrypt/autounseal" {
+        capabilities = ["update"]
+      }
+    EOF
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
   changed_when: false
   become: true
 
-- name: Skip policy write explicitly when identical (no-op)
-  ansible.builtin.debug:
-    msg: "Policy unchanged; skipping write. desired_sha1={{ _policy_desired_sha1 }}, current_sha1={{ _policy_current_sha1 }}"
-  when: _policy_desired_sha1 == _policy_current_sha1
+- name: Create transit token
+  ansible.builtin.command: /usr/local/bin/vault token create -policy="autounseal" -renewable=true -ttl=72h -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _vault_transit_token_output
+  changed_when: _vault_transit_token_output.rc == 0
+  become: true
 
-- name: Policy appears different; show hashes for diagnosis
-  ansible.builtin.debug:
-    msg: "Policy differs; desired_sha1={{ _policy_desired_sha1 }}, current_sha1={{ _policy_current_sha1 }}"
-  when: _policy_desired_sha1 != _policy_current_sha1
-
-- name: Warn when current policy output was not valid JSON (treated as empty)
-  ansible.builtin.debug:
-    msg: "Policy read returned non-JSON output; treating as absent during comparison."
-  when:
-    - (_policy_current_json.stdout | default('') | trim) | length > 0
-    - not ((_policy_current_json.stdout | default('') | trim) is match('^\{'))
-
-- name: Ensure controller directory exists for transit token export
+- name: Ensure Vault controller export directory exists
   ansible.builtin.file:
-    path: "{{ (vault_transit_token_export_path | expanduser) | dirname }}"
+    path: "{{ (vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser) | ansible.builtin.dirname }}"
     state: directory
     mode: '0700'
   delegate_to: localhost
   run_once: true
 
-- name: Check if transit token already saved on controller
-  ansible.builtin.stat:
-    path: "{{ vault_transit_token_export_path | expanduser }}"
-  register: _transit_token_file
-  delegate_to: localhost
-  run_once: true
-
-- name: Create periodic orphan token for autounseal (when missing)
-  ansible.builtin.shell: |
-    set -euo pipefail
-    podman exec {{ vault_container_name }} sh -lc "vault token create -orphan -period='{{ vault_transit_token_period }}' -policy='{{ vault_transit_policy_name }}' -format=json" | jq -r .auth.client_token
-  args:
-    executable: /bin/sh
-  register: _new_transit_token
-  changed_when: (_new_transit_token.stdout | default('')) | length > 0
-  when: not _transit_token_file.stat.exists
-  become: true
-
-- name: Save transit token to controller (when newly created)
+- name: Store transit token on controller
   ansible.builtin.copy:
-    dest: "{{ vault_transit_token_export_path | expanduser }}"
+    content: "{{ (_vault_transit_token_output.stdout | from_json).auth.client_token }}"
+    dest: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
     mode: '0600'
-    content: "{{ _new_transit_token.stdout | default('') }}\n"
   delegate_to: localhost
-  run_once: true
-  when:
-    - _new_transit_token is defined
-    - (_new_transit_token.stdout | default('')) | length > 0
-
-- name: Read transit token from controller into fact
-  ansible.builtin.slurp:
-    src: "{{ vault_transit_token_export_path | expanduser }}"
-  register: _transit_token_slurp
-  delegate_to: localhost
-  run_once: true
-
-- name: Set vault_transit_token fact for subsequent configuration
-  ansible.builtin.set_fact:
-    vault_transit_token: "{{ (_transit_token_slurp.content | b64decode | trim) }}"
-
-- name: Lookup current Transit token TTL (if present)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "vault token lookup -format=json -token='{{ vault_transit_token }}'"
-  register: _transit_token_lookup
-  changed_when: false
-  failed_when: false
-  become: true
-  when: (vault_transit_token | default('')) | length > 0
-
-- name: Decide if Transit token rotation is needed
-  ansible.builtin.set_fact:
-    _rotate_transit_token: >-
-      {{
-        (not _transit_token_file.stat.exists | default(true))
-      }}
-
-- name: Create Transit autounseal token when missing or expiring soon
-  ansible.builtin.shell: |
-    set -euo pipefail
-    OUT=$(podman exec {{ vault_container_name }} sh -lc '/bin/vault token create -policy={{ vault_transit_policy_name | default("autounseal-policy") }} -period={{ vault_transit_token_period | default("720h") }} -orphan -format=json')
-    printf "%s" "$OUT" | sed -n 's/.*"client_token"[[:space:]]*:[[:space:]]*"\([^"]\+\)".*/\1/p' | head -n1
-  register: _transit_token_created
-  when: _rotate_transit_token | bool
-  changed_when: (_transit_token_created.rc | default(1)) == 0 and ((_transit_token_created.stdout | default('')) | length > 0)
-  failed_when: (_transit_token_created.stdout | default('')) | length == 0
-  become: true
-
-- name: Write Transit token to controller (only when created/rotated)
-  ansible.builtin.copy:
-    dest: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault/transit_token.txt') | expanduser }}"
-    mode: '0600'
-    content: "{{ _transit_token_created.stdout | trim }}"
-  delegate_to: localhost
-  run_once: true
-  when:
-    - _transit_token_created is defined
-    - (_transit_token_created.stdout | default('') | length) > 0
-  changed_when: true
-
-- name: Read current container token (if any)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc 'cat /root/.vault-token 2>/dev/null || true'
-  register: _cur_container_token
-  changed_when: false
-  failed_when: false
-  become: true
-
-- name: Write exported Transit token into container token file for verify (only when different)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc 'printf "%s" "{{ _transit_token_created.stdout | trim }}" > /root/.vault-token && chmod 600 /root/.vault-token'
-  when:
-    - _transit_token_created is defined
-    - (_transit_token_created.stdout | default('') | trim) | length > 0
-    - (_cur_container_token.stdout | default('') | trim) != (_transit_token_created.stdout | default('') | trim)
-  register: _exported_token_write
-  changed_when: _exported_token_write.rc == 0
-  failed_when: false
-  become: true
-
-- name: Verify exported Transit token can encrypt with autounseal key
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc '/bin/vault write -format=json {{ vault_transit_mount_path | default('transit/') }}/encrypt/{{ vault_transit_key_name | default("autounseal") }} plaintext=$(printf 00 | xxd -r -p | base64)'
-  register: _transit_token_verify
-  changed_when: false
-  failed_when: (_transit_token_verify.rc | default(1)) != 0
-  become: true
-
-- name: Restore previous container token after verify (only when different)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc 'printf "%s" "{{ _cur_container_token.stdout | default('') | trim }}" > /root/.vault-token && chmod 600 /root/.vault-token'
-  when:
-    - (_exported_token_write is defined) and (_exported_token_write.changed | default(false))
-    - (_cur_container_token.stdout | default('') | length) > 0
-  changed_when: _cur_container_token.stdout | trim | length > 0
-  failed_when: false
-  become: true
-
-# Verify Transit autounseal token by performing a test encrypt using the token
-- name: Verify Transit token can encrypt with autounseal key (bootstrap)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc '/bin/vault write -format=json transit/encrypt/{{ vault_transit_key_name | default("autounseal") }} plaintext=$(printf 00 | xxd -r -p | base64)'
-  register: _transit_verify_encrypt
-  changed_when: false
-  failed_when: (_transit_verify_encrypt.rc | default(1)) != 0
-  become: true
-
-## -------------------------------------------------------------
-## Final guard: ensure transit container remains running and unsealed
-## -------------------------------------------------------------
-- name: Ensure transit container is running (final)
-  containers.podman.podman_container:
-    name: "{{ vault_container_name }}"
-    state: started
-    restart_policy: unless-stopped
-  become: true
-
-- name: Flush any pending handlers (final)
-  meta: flush_handlers
-
-- name: Check final seal status
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
-  register: _final_status
-  changed_when: false
-  failed_when: false
-  become: true
-
-- name: Re-apply unseal keys if sealed at end
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault operator unseal {{ item }}"
-  loop: "{{ (vault_unseal_keys_b64 | default([]))[: (vault_unseal_threshold | int)] }}"
-  when: >-
-    (_final_status.stdout | default('{}') | from_json).sealed | default(true)
-  changed_when: true
-  failed_when: false
-  become: true
-
-- name: Wait until transit is unsealed (final)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
-  register: _final_status_wait
-  changed_when: false
-  failed_when: false
-  retries: 20
-  delay: 1
-  until: >-
-    (
-      (_final_status_wait.stdout | default('{}') | from_json).sealed | default(true)
-    ) == false
-  become: true
+  when: _vault_transit_token_output.changed

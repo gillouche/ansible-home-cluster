@@ -1,13 +1,90 @@
 ---
+- name: "Gather facts for localhost and generate Homelab Root CA"
+  hosts: localhost
+  gather_facts: true
+  become: false
+  tags:
+    - homelab_root_ca
+    - trust
+  vars:
+    ansible_connection: local # Ensure this play runs locally
+  tasks:
+    - name: Ensure Homelab Root CA directory exists
+      ansible.builtin.file:
+        path: "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}"
+        state: directory
+        mode: '0700'
 
-- name: Setup all devices
+    - name: Check if Homelab Root CA key exists
+      ansible.builtin.stat:
+        path: "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/homelab-root-ca.key"
+      register: _homelab_root_ca_key_stat
+
+    - name: Generate Homelab Root CA private key if missing
+      community.crypto.openssl_privatekey:
+        path: "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/homelab-root-ca.key"
+        size: 4096
+        mode: '0600'
+      when: not _homelab_root_ca_key_stat.stat.exists
+
+    - name: Check if Homelab Root certificate exists
+      ansible.builtin.stat:
+        path: "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/homelab-root-ca.crt"
+      register: _homelab_root_ca_certificate_stat
+
+    - name: Create OpenSSL config for Root CA extensions
+      ansible.builtin.copy:
+        dest: "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/root_ca.ext"
+        content: |
+          [req]
+          distinguished_name = req_distinguished_name
+          x509_extensions = v3_ca
+          prompt = no
+
+          [req_distinguished_name]
+          C = BE
+          ST = Brussels
+          L = Brussels
+          O = Homelab
+          CN = Homelab Root CA
+
+          [v3_ca]
+          basicConstraints = critical, CA:TRUE, pathlen:2
+          keyUsage = critical, keyCertSign, cRLSign
+          subjectKeyIdentifier = hash
+          authorityKeyIdentifier = keyid:always,issuer
+      when: not _homelab_root_ca_certificate_stat.stat.exists
+
+    - name: Generate Homelab Root CA certificate if missing
+      ansible.builtin.command: >
+        openssl req -new -x509
+        -key "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/homelab-root-ca.key"
+        -out "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/homelab-root-ca.crt"
+        -days 3650
+        -sha256
+        -config "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/root_ca.ext"
+      when: not _homelab_root_ca_certificate_stat.stat.exists
+
+    - name: Set fact for Homelab Root CA path
+      ansible.builtin.set_fact:
+        homelab_root_ca_cert_path: "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/homelab-root-ca.crt"
+        homelab_root_ca_key_path: "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/homelab-root-ca.key"
+
+    - name: Install Homelab Root CA into macOS login keychain
+      ansible.builtin.command: >-
+        security add-trusted-cert -d -r trustRoot -k /Users/{{ ansible_user_id }}/Library/Keychains/login.keychain-db
+        "{{ homelab_root_ca_cert_path }}"
+      when: _homelab_root_ca_certificate_stat.changed
+      register: macos_trust
+      failed_when: false
+
+- name: "Setup Base System Components"
   hosts: all
   gather_facts: true
   become: false
   tags:
-    - base
+    - base # Keeping the base tag for this play
 
-  # roles executed on all hosts, they shouldn't be a dependency of another role
   roles:
     - role: facts
       tags:
@@ -21,9 +98,6 @@
     - role: utils
       tags:
         - utils
-    - role: tls
-      tags:
-        - tls
     - role: aur
       tags:
         - aur
@@ -35,52 +109,77 @@
       tags:
         - containers
 
-# Pi-hole cluster setup runs only on the pihole_cluster group
-# this creates the virtual IP for the DNS so it must be executed first
-- name: Setup Pi-hole cluster (primary + replicas)
-  hosts: pihole_cluster
+- name: "Vault Environment Initialization"
+  hosts: vault_cluster
   gather_facts: true
   become: false
-
-  roles:
-    - role: pihole
+  tasks:
+    - name: Run vault role for init stage
+      import_role:
+        name: vault
+      vars:
+        vault_stage: init
       tags:
-        - pihole
+        - vault
+        - vault_init
+        - trust
 
-# Bootstrap Transit Vault (single node on rpi5b8g1) — run before main vault cluster
+- name: "Distribute Homelab Root CA to All Devices"
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Copy Homelab Root CA to system anchor path
+      ansible.builtin.copy:
+        src: "{{ hostvars['localhost']['homelab_root_ca_cert_path'] }}"
+        dest: "{{ tls_root_ca_anchor_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Refresh system trust store
+      tags:
+        - tls
+        - root_ca_distribute
+        - trust
+
+  handlers:
+    - name: Refresh system trust store
+      ansible.builtin.shell: |
+        (update-ca-trust || update-ca-trust extract || update-ca-certificates || true)
+      changed_when: false
+      failed_when: false
+      become: true
+
 - name: "Bootstrap Transit Vault on rpi5b8g1"
   hosts: vault_transit
   gather_facts: true
   become: false
-
   tasks:
-    - name: bootstrap end-to-end (CA/TLS + Vault start + Transit)
+    - name: Run vault role for transit stage
       import_role:
         name: vault
       vars:
         vault_stage: transit
-        # Bootstrap must NOT use transit seal (starts with Shamir, then creates transit)
         vault_enable_transit_seal: false
       tags:
         - vault
+        - trust
 
-# HashiCorp Vault cluster (3-node Raft) — staged execution by roles/groups
 - name: "Setup HashiCorp Vault leader"
   hosts: vault_leader
   gather_facts: true
   become: false
-
   pre_tasks:
     - name: Locate bootstrap transit token on controller (if present)
       ansible.builtin.stat:
-        path: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault/transit_token.txt') | expanduser }}"
+        path: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
       register: _bootstrap_transit_token_file
       delegate_to: localhost
       run_once: true
 
     - name: Read bootstrap transit token (controller)
       ansible.builtin.slurp:
-        src: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault/transit_token.txt') | expanduser }}"
+        src: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
       register: _bootstrap_transit_token
       when: _bootstrap_transit_token_file.stat.exists | default(false)
       delegate_to: localhost
@@ -102,178 +201,142 @@
           ((_bootstrap_transit_token.content | default('')) |
            ternary((_bootstrap_transit_token.content | b64decode | trim), '') ) }}"
       run_once: true
-
   tasks:
-    - name: Vault leader bring-up
+    - name: Run vault role for leader stage
       import_role:
         name: vault
       vars:
         vault_stage: leader
       tags:
         - vault
+        - trust
 
 - name: "Setup HashiCorp Vault followers"
   hosts: vault_followers
   gather_facts: true
   become: false
-
   tasks:
-    - name: Vault followers bring-up
+    - name: Run vault role for followers stage
       import_role:
         name: vault
       vars:
         vault_stage: followers
       tags:
         - vault
+        - trust
 
-# Setup load balancer role with haproxy
-- name: Setup load balancer cluster
+- name: "Provision TLS Certificates from Vault PKI"
+  hosts: all
+  gather_facts: true
+  become: false
+  vars:
+    vault_init_export_path: "~/.local/share/ansible-home-cluster/cluster-init.json"
+  pre_tasks:
+    - name: Load cluster init JSON (controller)
+      ansible.builtin.slurp:
+        src: "{{ vault_init_export_path | expanduser }}"
+      register: _cluster_init_content
+      delegate_to: localhost
+      run_once: true
+      tags:
+        - always
+
+    - name: Debug loaded content
+      ansible.builtin.debug:
+        var: _cluster_init_content
+      run_once: true
+      tags:
+        - always
+
+    - name: Set vault_root_token fact
+      ansible.builtin.set_fact:
+        vault_root_token: "{{ (_cluster_init_content.content | b64decode | from_json).root_token }}"
+      when: _cluster_init_content.content is defined
+      tags:
+        - always
+  roles:
+    - role: tls
+      tags:
+        - tls
+        - trust
+
+  post_tasks:
+    - name: Restart Vault to apply new certificates
+      containers.podman.podman_container:
+        name: vault
+        state: started
+        restart: true
+      become: true
+      when: "'vault_leader' in group_names or 'vault_followers' in group_names"
+      tags:
+        - tls
+        - trust
+
+    - name: Restart Caddy to apply new certificates
+      containers.podman.podman_container:
+        name: "{{ reverse_proxy_container_name | default('reverse-proxy') }}"
+        state: started
+        restart: true
+      become: true
+      when: "'reverse_proxy_cluster' in group_names"
+      tags:
+        - tls
+        - trust
+
+    - name: Debug TLS Information
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "TLS Setup Complete for {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Paths:"
+          - "  Intermediate CA: {{ tls_dir }}/intermediate-ca.pem"
+          - "  System Anchor:   {{ tls_bundle_anchor_path | default('/etc/ca-certificates/trust-source/anchors/ca-bundle.pem') }}"
+          - "  Server Cert:     {{ tls_dir }}/api.crt"
+          - "  Server Key:      {{ tls_dir }}/api.key"
+          - "-----------------------------------------------------------"
+          - "Expected SANs (Ansible Logic):"
+          - "  DNS: {{ _tls_san_dns | default([]) }}"
+          - "  IPs: {{ _tls_san_ips | default([]) }}"
+          - "-----------------------------------------------------------"
+          - "Deployed Certificate Info (OpenSSL):"
+          - "{{ _tls_inspect_details.stdout_lines | default(['N/A']) }}"
+          - "-----------------------------------------------------------"
+          - "Deployed SANs (OpenSSL):"
+          - "{{ _tls_inspect_sans.stdout_lines | default(['N/A']) }}"
+          - "-----------------------------------------------------------"
+          - "Chain Verification:"
+          - "  Result: {{ _tls_inspect_chain.stdout | default(_tls_inspect_chain.stderr, true) | trim }}"
+          - "-----------------------------------------------------------"
+      tags:
+        - tls
+        - trust
+
+- name: "Setup Pi-hole cluster (primary + replicas)"
+  hosts: pihole_cluster
+  gather_facts: true
+  become: false
+  roles:
+    - role: pihole
+      tags:
+        - pihole
+
+- name: "Setup Load Balancer"
   hosts: load_balancer_cluster
   gather_facts: true
   become: false
-
   roles:
     - role: load_balancer
       tags:
         - load_balancer
+        - trust
 
-# Reverse proxy cluster (Caddy + keepalived VIP), must be after vault setup
-- name: Setup reverse proxy cluster
+- name: "Setup Reverse Proxy"
   hosts: reverse_proxy_cluster
   gather_facts: true
   become: false
-
   roles:
     - role: reverse_proxy
       tags:
         - proxy
-
-- name: Ping all devices
-  hosts: all
-  gather_facts: false
-  become: false
-  tags:
-    - never
-    - ping
-
-  tasks:
-    - name: Ping
-      ansible.builtin.ping:
-
-- name: Maintenance - Pacman refresh and upgrade
-  hosts: all
-  gather_facts: true
-  become: false
-  tags:
-    - never
-    - maintenance
-
-  roles:
-    - role: maintenance
-      tags:
-        - maintenance
-
-- name: Bootstrap devices (SSH + network)
-  hosts: all
-  gather_facts: false
-  become: false
-  tags:
-    - never
-    - bootstrap_devices
-
-  vars:
-    devices_bootstrap_user: alarm
-    devices_bootstrap_pubkey: "{{ lookup('env','HOME') + '/.ssh/id_ed25519_local.pub' }}"
-    # Relax host-key checking only for this bootstrap run
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-    # Ensure the connection uses the bootstrap user
-    ansible_user: "{{ devices_bootstrap_user }}"
-
-  pre_tasks:
-    - name: Check if inventories/group_vars/all.vault.yml exists
-      ansible.builtin.stat:
-        path: inventories/group_vars/all.vault.yml
-      register: _all_vault_file
-      no_log: true
-
-    - name: Load vaulted credentials from group_vars/all.vault.yml (if present)
-      ansible.builtin.include_vars:
-        file: inventories/group_vars/all.vault.yml
-      when: _all_vault_file.stat.exists | default(false)
-      no_log: true
-
-    - name: Check if inventories/group_vars/bootstrap.vault.yml exists
-      ansible.builtin.stat:
-        path: inventories/group_vars/bootstrap.vault.yml
-      register: _bootstrap_vault_file
-      no_log: true
-
-    - name: Load vaulted credentials from group_vars/bootstrap.vault.yml (if present)
-      ansible.builtin.include_vars:
-        file: inventories/group_vars/bootstrap.vault.yml
-      when: _bootstrap_vault_file.stat.exists | default(false)
-      no_log: true
-
-    - name: Prompt for SSH password if not provided by vault
-      ansible.builtin.pause:
-        prompt: "SSH password for bootstrap user ({{ devices_bootstrap_user }})"
-        echo: no
-      register: bootstrap_pw
-      when: ansible_password is not defined
-      no_log: true
-
-    - name: Set ansible_password from prompt
-      ansible.builtin.set_fact:
-        ansible_password: "{{ bootstrap_pw.user_input }}"
-      when: ansible_password is not defined
-      no_log: true
-
-  roles:
-    - role: devices_ssh
-    - role: devices_network
-
-## --- General purpose firewall rule reset ---
-
-- name: Flush firewall rules existing on devices
-  hosts: all
-  gather_facts: false
-  become: true
-  tags:
-    - never
-    - reset_firewall
-
-  tasks:
-    # need to restart all containers afterwards because the NFT rules from podman will be missing
-    - name: Flush firewall rules
-      ansible.builtin.command: >-
-        nft flush ruleset
-      changed_when: true
-
-
-## --- General purpose staggered reboot (sequential, waits for each host) ---
-
-- name: Reboot devices sequentially (staggered)
-  hosts: all
-  gather_facts: false
-  become: true
-  serial: 1
-  tags:
-    - never
-    - reboot
-
-  vars:
-    # Tune these if needed via -e on the CLI
-    reboot_timeout: 600
-    reboot_connect_timeout: 30
-    reboot_post_reboot_delay: 10
-    reboot_test_command: "true"
-
-  tasks:
-    - name: Reboot host and wait for it to become available
-      ansible.builtin.reboot:
-        msg: "Reboot triggered by ansible-home-cluster"
-        reboot_timeout: "{{ reboot_timeout }}"
-        connect_timeout: "{{ reboot_connect_timeout }}"
-        post_reboot_delay: "{{ reboot_post_reboot_delay }}"
-        test_command: "{{ reboot_test_command }}"
+        - trust

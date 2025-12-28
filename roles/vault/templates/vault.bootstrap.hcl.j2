@@ -19,7 +19,7 @@ address         = "{{ vault_listener_address | default(vault_bind_ip) }}:{{ vaul
 tls_disable     = 0
 tls_cert_file   = "{{ vault_tls_cert_path }}"
 tls_key_file    = "{{ vault_tls_key_path }}"
-tls_client_ca_file = "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
+# tls_client_ca_file = "{{ vault_tls_dir_in_container }}/ca-bundle.pem" # Not needed for self-signed bootstrap Vault
 }
 
 telemetry {

@@ -1,5 +1,6 @@
 ---
 vault_image: "hashicorp/vault:1.21.1"
+vault_version: "1.21.1"
 vault_container_name: "vault"
 vault_api_port: 8200
 lan_subnet: "192.168.0.0/24"
@@ -30,7 +31,7 @@ vault_runtime_group_name: "vault"
 # Requested layout under /home/vault so these paths are bind-mounted into the container
 vault_host_root_dir_data: "/home/vault"
 vault_host_config_dir: "/home/vault/config"
-vault_host_tls_dir: "/etc/tls"
+vault_host_tls_dir: "{{ tls_dir }}"
 vault_host_data_dir: "/home/vault/data"
 vault_host_logs_dir: "/home/vault/logs"
 vault_host_bin_dir: "/home/vault/bin"
@@ -106,8 +107,8 @@ vault_transit_init_export_path: "~/.local/share/ansible-home-cluster/transit-ini
 # Controller-side paths for the cluster CA keypair
 vault_enable_cluster_ca: true
 vault_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
-vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/cluster-ca.pem"
-vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/cluster-ca.key"
+vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.crt"
+vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.key"
 # Certificate validity (days)
 vault_cluster_ca_days: 3650
 vault_server_cert_days: 1825
@@ -315,7 +316,7 @@ vault_transit_tls_skip_verify: false
 # Bootstrap transit policy and token management (for bootstrap Vault stage)
 vault_transit_policy_name: "autounseal-policy"
 vault_transit_token_period: "720h"   # 30 days periodic
-vault_transit_token_export_path: "~/.local/share/ansible-home-cluster/vault/transit_token.txt"
+vault_transit_token_export_path: "~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt"
 
 # Force TLS (server key/CSR/cert) regeneration for the node even if files exist
 vault_force_tls_regen: false

@@ -1,0 +1,89 @@
+---
+- name: Check if Vault CLI exists
+  ansible.builtin.stat:
+    path: /usr/local/bin/vault
+  register: vault_bin
+
+- name: Get installed Vault version
+  ansible.builtin.command: /usr/local/bin/vault version
+  register: vault_version_raw
+  failed_when: false
+  changed_when: false
+  when: vault_bin.stat.exists
+
+- name: Initialize vault_installed_version to 'none'
+  ansible.builtin.set_fact:
+    vault_installed_version: "none"
+  when: not vault_bin.stat.exists or vault_version_raw is not defined or vault_version_raw.rc != 0
+
+- name: Extract Vault version
+  ansible.builtin.set_fact:
+    vault_installed_version: >-
+      {{
+        vault_version_raw.stdout
+        | regex_findall('v(\d+\.\d+\.\d+)')
+        | first
+        | default('none')
+      }}
+  when:
+    - vault_bin.stat.exists
+    - vault_version_raw.rc == 0
+
+- name: "Debug: vault_bin.stat.exists"
+  ansible.builtin.debug:
+    msg: "vault_bin.stat.exists: {{ vault_bin.stat.exists }}"
+
+- name: "Debug: vault_cli_rebuild"
+  ansible.builtin.debug:
+    msg: "vault_cli_rebuild: {{ vault_cli_rebuild | default(false) | bool }}"
+
+- name: "Debug: vault_installed_version"
+  ansible.builtin.debug:
+    msg: "vault_installed_version: {{ vault_installed_version }}"
+
+- name: "Debug: vault_version"
+  ansible.builtin.debug:
+    msg: "vault_version (desired): {{ vault_version }}"
+
+- name: Decide whether Vault must be updated
+  ansible.builtin.set_fact:
+    vault_needs_update: >-
+      {{ vault_cli_rebuild | default(false) | bool or (not vault_bin.stat.exists) or (vault_installed_version != vault_version) }}
+
+- name: "Debug: vault_needs_update value"
+  ansible.builtin.debug:
+    msg: "vault_needs_update is {{ vault_needs_update }}"
+
+- name: Install Vault CLI from binary
+  when: vault_needs_update
+  block:
+    - name: Download Vault zip artifact
+      ansible.builtin.get_url:
+        url: "https://releases.hashicorp.com/vault/{{ vault_version }}/vault_{{ vault_version }}_linux_arm64.zip"
+        dest: "/tmp/vault_{{ vault_version }}_linux_arm64.zip"
+        mode: '0644'
+      become: true
+
+    - name: Unzip Vault binary
+      ansible.builtin.unarchive:
+        src: "/tmp/vault_{{ vault_version }}_linux_arm64.zip"
+        dest: /tmp
+        remote_src: true
+      become: true
+
+    - name: Install Vault binary to /usr/local/bin
+      ansible.builtin.copy:
+        src: /tmp/vault
+        dest: /usr/local/bin/vault
+        mode: '0755'
+        remote_src: true
+      become: true
+
+    - name: Cleanup temporary files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/vault_{{ vault_version }}_linux_arm64.zip"
+        - "/tmp/vault"
+      become: true

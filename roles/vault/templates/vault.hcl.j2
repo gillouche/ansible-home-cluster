@@ -43,7 +43,7 @@ path    = "{{ vault_data_dir_in_container }}"
     leader_api_addr       = "https://{{ _leader_ip }}:{{ vault_api_port }}"
     # Verify the leader's certificate against our cluster CA and set SNI to the leader IP
     leader_tls_servername = "{{ _leader_ip }}"
-    leader_ca_cert_file   = "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
+    leader_ca_cert_file   = "{{ vault_tls_dir_in_container }}/ca-bundle.pem"
     leader_client_cert_file = ""
     leader_client_key_file  = ""
     leader_tls_skip_verify = false
@@ -58,7 +58,7 @@ tls_cert_file   = "{{ vault_tls_cert_path }}"
 tls_key_file    = "{{ vault_tls_key_path }}"
 # Trust our cluster CA for inbound client verification when clients present certs
 # (not enabling mTLS by default; this only supplies CA chain for verification where applicable)
-tls_client_ca_file = "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
+tls_client_ca_file = "{{ vault_tls_dir_in_container }}/ca-bundle.pem"
 }
 
 telemetry {

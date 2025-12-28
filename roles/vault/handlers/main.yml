@@ -8,3 +8,8 @@
     state: started
     restart: true
   become: true
+
+- name: Refresh system trust store
+  ansible.builtin.shell: update-ca-trust extract
+  become: true
+  listen: "Refresh system trust store"

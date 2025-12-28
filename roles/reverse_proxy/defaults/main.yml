@@ -22,7 +22,7 @@ reverse_proxy_acme_ca_url: >-
     "https://"
     ~ (load_balancer_virtual_ip | default(reverse_proxy_virtual_ip | default('127.0.0.1')))
     ~ ":" ~ (vault_api_port | default(8200) | string)
-    ~ "/v1/pki/acme/directory"
+    ~ "/v1/pki_int/acme/directory"
   }}
 
 # VIP and primary host sane defaults (override in group_vars as needed)
@@ -94,7 +94,7 @@ vault_acme_directory_url: >-
     "https://"
     ~ (load_balancer_virtual_ip | default(reverse_proxy_virtual_ip | default('127.0.0.1')))
     ~ ":" ~ (vault_api_port | default(8200) | string)
-    ~ "/v1/pki/acme/directory"
+    ~ "/v1/pki_int/acme/directory"
   }}
 
 # Optional: if your Vault PKI ACME endpoint requires a token/cookie header (most flows do not),

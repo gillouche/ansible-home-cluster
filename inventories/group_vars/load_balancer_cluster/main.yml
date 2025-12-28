@@ -32,12 +32,12 @@ load_balancer_haproxy_backends:
       - name: vault1
         addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
         port: 8200
-        opts: "check check-ssl sni str(rpi5b16g1ssd.gillouche.homelab) ssl-min-ver TLSv1.2 verify required ca-file /etc/ca-certificates/trust-source/anchors/vault-cluster-ca.pem"
+        opts: "check check-ssl sni str(rpi5b16g1ssd.gillouche.homelab) ssl-min-ver TLSv1.2 verify required ca-file /etc/ca-certificates/trust-source/anchors/ca-bundle.pem"
       - name: vault2
         addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
         port: 8200
-        opts: "check check-ssl sni str(rpi5b16g2ssd.gillouche.homelab) ssl-min-ver TLSv1.2 verify required ca-file /etc/ca-certificates/trust-source/anchors/vault-cluster-ca.pem"
+        opts: "check check-ssl sni str(rpi5b16g2ssd.gillouche.homelab) ssl-min-ver TLSv1.2 verify required ca-file /etc/ca-certificates/trust-source/anchors/ca-bundle.pem"
       - name: vault3
         addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 8200
-        opts: "check check-ssl sni str(rpi5b16g3ssd.gillouche.homelab) ssl-min-ver TLSv1.2 verify required ca-file /etc/ca-certificates/trust-source/anchors/vault-cluster-ca.pem"
+        opts: "check check-ssl sni str(rpi5b16g3ssd.gillouche.homelab) ssl-min-ver TLSv1.2 verify required ca-file /etc/ca-certificates/trust-source/anchors/ca-bundle.pem"

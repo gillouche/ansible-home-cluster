@@ -1,0 +1,13 @@
+---
+# Tasks for the vault_init stage
+
+# Homelab Root CA generation moved to playbooks/devices.yml (Gather facts for localhost)
+
+# macOS keychain integration moved to playbooks/devices.yml (Gather facts for localhost)
+
+
+- name: Include common preparation tasks
+  ansible.builtin.include_tasks: common.yml
+
+- name: Install Vault CLI
+  ansible.builtin.include_tasks: install_vault_cli.yml

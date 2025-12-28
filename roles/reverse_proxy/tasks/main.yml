@@ -129,12 +129,14 @@
 
 - name: Copy Vault Cluster CA to reverse proxy trust path (for ACME)
   ansible.builtin.copy:
-    src: "{{ vault_cluster_ca_cert_controller | default('~/.local/share/ansible-home-cluster/vault-ca/cluster-ca.pem') | expanduser }}"
-    dest: "{{ reverse_proxy_certs_dir }}/vault-cluster-ca.pem"
+    src: "{{ tls_dir }}/ca-bundle.pem"
+    remote_src: true
+    dest: "{{ reverse_proxy_certs_dir }}/ca-bundle.pem"
     owner: "reverse_proxy"
     group: "reverse_proxy"
     mode: '0644'
   become: true
+  notify: Restart reverse proxy
 
 - name: Render Caddyfile with Vault ACME configured
   ansible.builtin.template:

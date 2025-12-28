@@ -7,4 +7,5 @@ requires-python = ">=3.14"
 dependencies = [
     "ansible>=13.1.0",
     "ansible-lint>=25.12.1",
+    "hvac>=2.4.0",
 ]

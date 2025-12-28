@@ -1,0 +1,121 @@
+---
+
+- name: Ping all devices
+  hosts: all
+  gather_facts: false
+  become: false
+  tags:
+    - never
+    - ping
+
+  tasks:
+    - name: Ping
+      ansible.builtin.ping:
+
+- name: Maintenance - Pacman refresh and upgrade
+  hosts: all
+  gather_facts: true
+  become: false
+  tags:
+    - never
+    - maintenance
+
+  roles:
+    - role: maintenance
+      tags:
+        - maintenance
+
+- name: Bootstrap devices (SSH + network)
+  hosts: all
+  gather_facts: false
+  become: false
+  tags:
+    - never
+    - bootstrap_devices
+
+  vars:
+    devices_bootstrap_user: alarm
+    devices_bootstrap_pubkey: "{{ lookup('env','HOME') + '/.ssh/id_ed25519_local.pub' }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    ansible_user: "{{ devices_bootstrap_user }}"
+
+  pre_tasks:
+    - name: Check if inventories/group_vars/all.vault.yml exists
+      ansible.builtin.stat:
+        path: inventories/group_vars/all.vault.yml
+      register: _all_vault_file
+      no_log: true
+
+    - name: Load vaulted credentials from group_vars/all.vault.yml (if present)
+      ansible.builtin.include_vars:
+        file: inventories/group_vars/all.vault.yml
+      when: _all_vault_file.stat.exists | default(false)
+      no_log: true
+
+    - name: Check if inventories/group_vars/bootstrap.vault.yml exists
+      ansible.builtin.stat:
+        path: inventories/group_vars/bootstrap.vault.yml
+      register: _bootstrap_vault_file
+      no_log: true
+
+    - name: Load vaulted credentials from group_vars/bootstrap.vault.yml (if present)
+      ansible.builtin.include_vars:
+        file: inventories/group_vars/bootstrap.vault.yml
+      when: _bootstrap_vault_file.stat.exists | default(false)
+      no_log: true
+
+    - name: Prompt for SSH password if not provided by vault
+      ansible.builtin.pause:
+        prompt: "SSH password for bootstrap user ({{ devices_bootstrap_user }})"
+        echo: no
+      register: bootstrap_pw
+      when: ansible_password is not defined
+      no_log: true
+
+    - name: Set ansible_password from prompt
+      ansible.builtin.set_fact:
+        ansible_password: "{{ bootstrap_pw.user_input }}"
+      when: ansible_password is not defined
+      no_log: true
+
+  roles:
+    - role: devices_ssh
+    - role: devices_network
+
+- name: Flush firewall rules existing on devices
+  hosts: all
+  gather_facts: false
+  become: true
+  tags:
+    - never
+    - reset_firewall
+
+  tasks:
+    - name: Flush firewall rules
+      ansible.builtin.command: >-
+        nft flush ruleset
+      changed_when: true
+
+- name: Reboot devices sequentially (staggered)
+  hosts: all
+  gather_facts: true
+  become: true
+  serial: 1
+  tags:
+    - never
+    - reboot
+
+  vars:
+    reboot_timeout: 600
+    reboot_connect_timeout: 30
+    reboot_post_reboot_delay: 10
+    reboot_test_command: "true"
+
+  tasks:
+    - name: Reboot host and wait for it to become available
+      ansible.builtin.reboot:
+        msg: "Reboot triggered by ansible-home-cluster"
+        reboot_timeout: "{{ reboot_timeout }}"
+        connect_timeout: "{{ reboot_connect_timeout }}"
+        post_reboot_delay: "{{ reboot_post_reboot_delay }}"
+        test_command: "{{ reboot_test_command }}"

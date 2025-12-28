@@ -1,9 +1,52 @@
 ---
 # Followers-only stage: wait for leader, then start container (retry_join via config)
 
-# Ensure common prep (users/dirs/mount points) is executed before stage-specific steps
-- name: Include common preparation tasks
-  ansible.builtin.include_tasks: common.yml
+- name: Get Homelab Root CA certificate content (controller)
+  ansible.builtin.slurp:
+    src: "{{ vault_cluster_ca_cert_controller }}"
+  register: _homelab_root_ca_cert_content
+  delegate_to: localhost
+  run_once: true
+
+- name: Get Homelab Root CA private key content (controller)
+  ansible.builtin.slurp:
+    src: "{{ vault_cluster_ca_key_controller }}"
+  register: _homelab_root_ca_key_content
+  delegate_to: localhost
+  run_once: true
+
+- name: Check for existing cluster init JSON on controller
+  ansible.builtin.stat:
+    path: "{{ vault_init_export_path | expanduser }}"
+  register: _cluster_init_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Load cluster init JSON
+  ansible.builtin.slurp:
+    src: "{{ vault_init_export_path | expanduser }}"
+  register: _cluster_init_loaded
+  delegate_to: localhost
+  run_once: true
+  when: _cluster_init_stat.stat.exists | default(false)
+
+- name: Set vault_root_token from controller file
+  ansible.builtin.set_fact:
+    vault_root_token: >-
+      {{ (
+            (_cluster_init_loaded.content | default('') | b64decode | default('{}', true))
+          | from_json
+        ).root_token | default(vault_root_token | default('')) }}
+  when: _cluster_init_loaded.content is defined
+
+- name: Ensure TLS directory exists for follower
+  ansible.builtin.file:
+    path: "{{ vault_host_tls_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
 
 - name: Render Vault configuration (followers)
   ansible.builtin.template:
@@ -48,30 +91,97 @@
       https://{{ hostvars[vault_leader_host].ansible_host |
       default(hostvars[vault_leader_host].ansible_facts.default_ipv4.address) }}:{{ vault_api_port }}
 
-- name: Install startup wrapper on followers to capture early logs
-  ansible.builtin.copy:
-    dest: "/home/vault/bin/start-vault.sh"
-    owner: "{{ vault_runtime_user | default('vault') }}"
-    group: "{{ vault_runtime_group_name | default('vault') }}"
-    mode: '0755'
-    content: |
-      #!/bin/sh
-      set -eu
-      ts="$(date -Iseconds)"
-      mkdir -p /vault/logs
-      log_ts="/vault/logs/startup-${ts}.log"
-      log_cur="/vault/logs/current.log"
-      : > "$log_cur"
-      : "${VAULT_LOG_LEVEL:=info}"
-      export VAULT_LOG_LEVEL
-      old_files=$(ls -1t /vault/logs/startup-*.log 2>/dev/null | sed -n '51,$p' || true)
-      if [ -n "${old_files:-}" ]; then
-        echo "$old_files" | xargs -r rm -f || true
-      fi
-      exec sh -lc "vault server -config={{ vault_cfg_path_in_container }} 2>&1 | tee -a '$log_ts' '$log_cur'"
+- name: Generate a private key for the Vault follower
+  community.crypto.openssl_privatekey:
+    path: "{{ vault_host_tls_dir }}/api.key"
+    size: 2048
+    owner: root
+    group: root
+    mode: '0600'
   become: true
 
-- name: Ensure Vault container is running on follower
+- name: Construct dynamic SANs list for Vault server certificate
+  ansible.builtin.set_fact:
+    _vault_server_sansa: "{{
+      (
+        ( [ 'DNS:' ~ inventory_hostname ] if inventory_hostname is defined else [] ) +
+        ( [ 'DNS:' ~ inventory_hostname ~ '.' ~ base_domain ] if base_domain is defined else [] ) +
+        [ 'DNS:localhost' ] +
+        ( vault_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if vault_additional_san_dns is defined and vault_additional_san_dns | length > 0 else [] ) +
+        ( tls_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if tls_additional_san_dns is defined and tls_additional_san_dns | length > 0 else [] ) +
+        ( [ 'IP:' ~ ansible_facts.default_ipv4.address ] if ansible_facts.default_ipv4.address is defined else [] ) +
+        [ 'IP:127.0.0.1' ] +
+        ( vault_additional_san_ips | map('regex_replace', '^(.*)$', 'IP:\\1') | list if vault_additional_san_ips is defined and vault_additional_san_ips | length > 0 else [] ) +
+        ( [ 'IP:' ~ load_balancer_virtual_ip ] if load_balancer_virtual_ip is defined and load_balancer_virtual_ip | length > 0 else [] )
+      ) | unique | sort | list
+    }}"
+
+- name: Debug generated SANs for Vault follower certificate
+  ansible.builtin.debug:
+    msg: "Generated SANs for {{ inventory_hostname }}: {{ _vault_server_sansa }}"
+
+- name: Generate CSR for the Vault follower
+  community.crypto.openssl_csr:
+    path: "{{ vault_host_tls_dir }}/api.csr"
+    privatekey_path: "{{ vault_host_tls_dir }}/api.key"
+    common_name: "{{ inventory_hostname }}"
+    subject_alt_name: "{{ _vault_server_sansa }}"
+    country_name: "BE"
+    organization_name: "Homelab"
+    state_or_province_name: "Brussels"
+    locality_name: "Brussels"
+  become: true
+
+- name: Fetch Vault follower CSR to controller
+  ansible.builtin.fetch:
+    src: "{{ vault_host_tls_dir }}/api.csr"
+    dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.csr"
+    flat: true
+  become: true
+
+- name: Create OpenSSL config for Vault follower extensions (on controller)
+  ansible.builtin.copy:
+    dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}.ext"
+    content: |
+      authorityKeyIdentifier=keyid,issuer
+      basicConstraints=CA:FALSE
+      keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+      extendedKeyUsage = serverAuth
+      subjectAltName = {{ _vault_server_sansa | join(',') }}
+  delegate_to: localhost
+
+- name: Sign Vault follower certificate with Homelab Root CA (on controller)
+  ansible.builtin.command: >
+    openssl x509 -req
+    -in "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.csr"
+    -CA "{{ homelab_root_ca_cert_path | default(vault_cluster_ca_cert_controller) }}"
+    -CAkey "{{ homelab_root_ca_key_path | default(vault_cluster_ca_key_controller) }}"
+    -CAcreateserial
+    -out "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.crt"
+    -days 1825
+    -sha256
+    -extfile "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}.ext"
+  delegate_to: localhost
+
+- name: Copy signed Vault follower certificate to host
+  ansible.builtin.copy:
+    src: "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.crt"
+    dest: "{{ vault_host_tls_dir }}/api.crt"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Copy Homelab Root CA certificate to Vault follower
+  ansible.builtin.copy:
+    content: "{{ _homelab_root_ca_cert_content.content | b64decode }}"
+    dest: "{{ vault_host_tls_dir }}/ca-bundle.pem"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Ensure Vault container is running - followers
   containers.podman.podman_container:
     name: "{{ vault_container_name }}"
     image: "{{ vault_image }}"
@@ -89,7 +199,7 @@
       SKIP_CHOWN: "true"
       SKIP_SETCAP: "true"
       VAULT_LOG_LEVEL: "{{ vault_log_level | default('debug') }}"
-      VAULT_CACERT: "{{ vault_tls_dir_in_container }}/cluster-ca.pem"
+      VAULT_CACERT: "{{ vault_tls_dir_in_container }}/ca-bundle.pem"
       VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
     command: >-
       {{ (vault_enable_log_wrapper | default(true))
@@ -99,26 +209,28 @@
       - "{{ vault_host_tls_dir }}:/vault/tls"
       - "{{ vault_host_data_dir }}:/vault/data"
       - "{{ vault_logs_dir }}:{{ vault_logs_dir_in_container | default('/vault/logs') }}"
-      - "/home/vault/bin:/vault/bin"
+      - "{{ vault_host_bin_dir }}:/vault/bin"
   become: true
 
 - name: Pause briefly after starting container
   ansible.builtin.pause:
     seconds: 5
 
-# Persist root token for CLI usage inside the container (after container is up)
-- name: Write /root/.vault-token inside container when vault_root_token is available (follower)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "printf '%s' '{{ vault_root_token }}' > /root/.vault-token && chmod 0600 /root/.vault-token"
-  changed_when: true
-  failed_when: false
+# Persist root token for CLI usage (after container is up)
+- name: Write /root/.vault-token when vault_root_token is available (follower)
+  ansible.builtin.copy:
+    content: "{{ vault_root_token }}"
+    dest: /root/.vault-token
+    mode: '0600'
   become: true
   when:
     - (vault_root_token | default('') | length) > 0
 
-- name: Verify CLI token inside container (lookup, follower)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "vault token lookup -format=json"
+- name: Verify CLI token (lookup, follower)
+  ansible.builtin.command: /usr/local/bin/vault token lookup -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_SKIP_VERIFY: "true"
   register: _follower_token_lookup
   changed_when: false
   failed_when: false
@@ -128,129 +240,20 @@
 
 # Detect current follower status once
 - name: Read current follower Vault status (pre-init check)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
+  ansible.builtin.command: /usr/local/bin/vault status -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_SKIP_VERIFY: "true"
   register: _follower_status_preinit
   changed_when: false
   failed_when: false
   become: true
 
-# Auto-initialize the Raft follower when using Transit seal (only when not initialized)
-- name: Pause 5s before follower auto-initialize (transit)
-  ansible.builtin.pause:
-    seconds: 5
-  when:
-    - vault_enable_transit_seal | default(false)
-    - inventory_hostname in (groups['vault_followers'] | default([]))
-    - (_follower_status_preinit.stdout | default('{}')) | length > 0
-    - (((_follower_status_preinit.stdout | from_json).initialized | default(false)) == false)
-
-## -------------------------------------------------------------
-## Validate ACME directory (VIP) and optionally enable PKI+ACME
-## (followers participate in the same cluster; perform the same check)
-## -------------------------------------------------------------
-- name: Compute ACME directory URL (VIP) on follower
-  ansible.builtin.set_fact:
-    _acme_vip_addr: "{{ load_balancer_virtual_ip | default(ansible_facts.default_ipv4.address) }}"
-    _acme_dir_url: >-
-      https://{{ load_balancer_virtual_ip | default(ansible_facts.default_ipv4.address) }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/acme/directory
-  when: vault_acme_validate_enable | default(true) | bool
-
-- name: Read ACME configuration (follower)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_mount | default('pki') }}/config/acme'"
-  register: _acme_cfg_read
-  changed_when: false
-  failed_when: false
-  become: true
-  when: vault_acme_validate_enable | default(true) | bool
-
-- name: List current secrets engines (JSON) for PKI check (follower)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets list -format=json"
-  register: _follower_secrets_list
-  changed_when: false
-  failed_when: false
-  become: true
-  when: (vault_acme_validate_enable | default(true) | bool)
-
-- name: Parse secrets engines (follower)
-  ansible.builtin.set_fact:
-    _follower_mounts: >-
-      {{ (_follower_secrets_list.stdout | default('{}') | length > 0) | ternary((_follower_secrets_list.stdout | from_json), {}) }}
-  when: (vault_acme_validate_enable | default(true) | bool)
-
-- name: Enable PKI engine at mount if missing (follower)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault secrets enable -path='{{ vault_pki_mount | default('pki') }}' pki"
-  register: _enable_pki
-  changed_when: true
-  failed_when: false
-  become: true
-  when: (vault_acme_validate_enable | default(true) | bool) and (vault_configure_pki_on_followers | default(false) | bool) and (_follower_mounts.get(((vault_pki_mount | default('pki')) ~ '/'), none) is none)
-
-- name: Configure PKI URLs to use VIP (follower)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/urls' \
-      issuing_certificates='https://{{ _acme_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/ca' \
-      crl_distribution_points='https://{{ _acme_vip_addr }}:{{ vault_api_port }}/v1/{{ vault_pki_mount | default('pki') }}/crl'"
-  register: _pki_urls
-  changed_when: true
-  failed_when: false
-  become: true
-  when: (vault_acme_validate_enable | default(true) | bool) and (vault_configure_pki_on_followers | default(false) | bool)
-
-- name: Enable ACME on PKI (follower)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault write -format=json '{{ vault_pki_mount | default('pki') }}/config/acme' enabled=true"
-  register: _pki_acme_enable
-  changed_when: true
-  failed_when: false
-  become: true
-  when: (vault_acme_validate_enable | default(true) | bool) and (vault_configure_pki_on_followers | default(false) | bool) and (
-          (_acme_cfg_read.rc | default(1)) != 0 or
-          (
-            (_acme_cfg_read.stdout | default('') | trim | length) == 0 or
-            (((_acme_cfg_read.stdout | default('{}')) | from_json).data.enabled | default(false)) == false          )
-        )
-
-- name: Re-read ACME configuration (follower)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault read -format=json '{{ vault_pki_mount | default('pki') }}/config/acme'"
-  register: _acme_cfg_read_after
-  changed_when: false
-  failed_when: false
-  become: true
-  when: vault_acme_validate_enable | default(true) | bool
-
-- name: Warn if ACME directory on VIP is still not accessible (follower)
-  ansible.builtin.debug:
-    msg: >-
-      ACME directory {{ _acme_dir_url }} not accessible according to configuration readback.
-      Ensure PKI is configured and ACME is enabled, or set vault_acme_validate_enable: false to skip this check.
-  when: (vault_acme_validate_enable | default(true) | bool) and (
-          (_acme_cfg_read_after.rc | default(1)) != 0 or
-          (
-            (_acme_cfg_read_after.stdout | default('') | trim | length) == 0 or
-            (((_acme_cfg_read_after.stdout | default('{}')) | from_json).data.enabled | default(false)) == false          )
-        )
-
-- name: Initialize Raft follower with recovery keys (Transit seal)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "VAULT_FORMAT=json /bin/vault operator init -format=json"
-  register: _follower_init
-  changed_when: (_follower_init.rc | default(1)) == 0
-  failed_when: false
-  become: true
-  when:
-    - vault_enable_transit_seal | default(false)
-    - inventory_hostname in (groups['vault_followers'] | default([]))
-    - (_follower_status_preinit.stdout | default('{}')) | length > 0
-    - (((_follower_status_preinit.stdout | from_json).initialized | default(false)) == false)
-
-- name: Wait for follower to be unsealed (post-init, transit)
-  ansible.builtin.command: >-
-    podman exec {{ vault_container_name }} sh -lc "/bin/vault status -format=json"
+- name: Wait for follower to be unsealed
+  ansible.builtin.command: /usr/local/bin/vault status -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_SKIP_VERIFY: "true"
   register: _follower_status_after_init
   changed_when: false
   failed_when: false
@@ -264,4 +267,4 @@
     - vault_enable_transit_seal | default(false)
     - inventory_hostname in (groups['vault_followers'] | default([]))
     - (_follower_status_preinit.stdout | default('{}')) | length > 0
-    - (((_follower_status_preinit.stdout | from_json).initialized | default(false)) == false)
+    - (((_follower_status_preinit.stdout | from_json).initialized | default(false)) == true)
