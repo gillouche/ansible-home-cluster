@@ -188,8 +188,8 @@
     state: started
     restart_policy: unless-stopped
     published_ports:
-      - "{{ vault_api_port }}:8200/tcp"
-      - "{{ vault_cluster_port }}:8201/tcp"
+      - "{{ vault_api_port }}:{{ vault_api_port }}/tcp"
+      - "{{ vault_cluster_port }}:{{ vault_cluster_port }}/tcp"
     cap_add:
       - IPC_LOCK
       - DAC_OVERRIDE

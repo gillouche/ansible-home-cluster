@@ -1,0 +1,41 @@
+{
+    # Global options
+    email {{ reverse_proxy_acme_email | default('noreply@gillouche.homelab') }}
+
+    # Disable auto-HTTPS. We manage certificates externally via Vault Agent/Script
+    # and simply load them. This avoids ACME complexity and wildcard limitations.
+    auto_https off
+}
+
+{% if reverse_proxy_domains | default([]) | length > 0 %}
+{{ reverse_proxy_domains | join(', ') }} {
+    bind {{ reverse_proxy_bind_ip | default('0.0.0.0') }}
+
+    # Load certificates from the shared/synced directory
+    tls /data/caddy/certificates/wildcard/wildcard.crt /data/caddy/certificates/wildcard/wildcard.key
+
+    reverse_proxy {{ load_balancer_virtual_ip | default('192.168.0.253') }}:80 {
+        header_up Host {host}
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-For {remote}
+    }
+}
+{% else %}
+:443 {
+    bind {{ reverse_proxy_bind_ip | default('0.0.0.0') }}
+
+    tls /data/caddy/certificates/wildcard/wildcard.crt /data/caddy/certificates/wildcard/wildcard.key
+
+    reverse_proxy {{ load_balancer_virtual_ip | default('192.168.0.253') }}:80 {
+        header_up Host {host}
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-For {remote}
+    }
+}
+{% endif %}
+
+# Redirect all HTTP to HTTPS
+:80 {
+    bind {{ reverse_proxy_bind_ip | default('0.0.0.0') }}
+    redir https://{host}{uri} permanent
+}

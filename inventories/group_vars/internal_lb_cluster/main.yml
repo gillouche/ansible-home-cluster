@@ -1,0 +1,100 @@
+---
+
+# HAProxy configuration to front the Vault cluster via the load_balancer role
+# This keeps HAProxy generic and Vault-specific wiring in inventory/group vars.
+
+load_balancer_haproxy_frontends:
+  - name: vault_front
+    bind: "{{ load_balancer_virtual_ip }}:8200"
+    default_backend: vault_back
+    mode: tcp
+
+  - name: http_in
+    bind: "{{ load_balancer_virtual_ip }}:80"
+    mode: http
+    extra:
+      - "option httplog"
+      - "option forwardfor" # Ensure client IP is passed to backends
+
+      # ACLs for Pi-hole Routing
+      - "acl is_pihole_primary hdr(host) -i primary.pihole.{{ base_domain }}"
+      - "acl is_pihole_replica1 hdr(host) -i replica1.pihole.{{ base_domain }}"
+      - "acl is_pihole_replica2 hdr(host) -i replica2.pihole.{{ base_domain }}"
+      - "acl is_pihole_cluster hdr_end(host) -i pihole.{{ base_domain }}"
+
+      # Routing Logic
+      - "use_backend pihole_primary if is_pihole_primary"
+      - "use_backend pihole_replica1 if is_pihole_replica1"
+      - "use_backend pihole_replica2 if is_pihole_replica2"
+      - "use_backend pihole_backend if is_pihole_cluster"
+
+      # Redirect / to /admin for convenience
+      # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
+      - "http-request redirect location /admin code 301 if is_pihole_cluster !{ path_beg /admin } !{ path_beg /api } !{ path_beg /remote.php }"
+
+load_balancer_haproxy_backends:
+  - name: vault_back
+    mode: tcp
+    balance: roundrobin
+
+    # Session Persistence (Stickiness)
+    stick_table: "type ip size 200k expire 30m"
+    stick_on: "src"
+
+    default_server: "check inter 5s fall 2 rise 1"
+
+    servers:
+      - name: vault1
+        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        port: 18200
+        opts: "check ssl verify none"
+      - name: vault2
+        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
+        port: 18200
+        opts: "check ssl verify none"
+      - name: vault3
+        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        port: 18200
+        opts: "check ssl verify none"
+
+  # Pi-hole Backends
+  - name: pihole_primary
+    mode: http
+    servers:
+      - name: pihole_primary
+        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        port: 8080
+        opts: "check"
+
+  - name: pihole_replica1
+    mode: http
+    servers:
+      - name: pihole_replica1
+        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
+        port: 8080
+        opts: "check"
+
+  - name: pihole_replica2
+    mode: http
+    servers:
+      - name: pihole_replica2
+        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        port: 8080
+        opts: "check"
+
+  - name: pihole_backend
+    mode: http
+    balance: roundrobin
+    servers:
+      - name: pihole1
+        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        port: 8080
+        opts: "check"
+      - name: pihole2
+        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
+        port: 8080
+        opts: "check"
+      - name: pihole3
+        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        port: 8080
+        opts: "check"

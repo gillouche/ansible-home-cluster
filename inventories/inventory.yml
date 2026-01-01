@@ -48,55 +48,55 @@ all:
       target_user: alarm
 
   children:
-    pihole_primary:
-      hosts:
-        rpi5b16g4:
-    pihole_replicas:
-      hosts:
-        rpi5b16g5:
-        rpi5b16g6:
-    pihole_cluster:
+    dns_cluster:
       hosts:
         rpi5b16g4:
         rpi5b16g5:
         rpi5b16g6:
-    reverse_proxy_primary:
+    dns_primary:
       hosts:
         rpi5b16g4:
-    reverse_proxy_replicas:
+    dns_replicas:
       hosts:
         rpi5b16g5:
         rpi5b16g6:
-    reverse_proxy_cluster:
+    edge_proxy_cluster:
       hosts:
         rpi5b16g4:
+        rpi5b16g5:
+        rpi5b16g6:
+    edge_proxy_primary:
+      hosts:
+        rpi5b16g4:
+    edge_proxy_replicas:
+      hosts:
         rpi5b16g5:
         rpi5b16g6:
     vault_cluster:
       hosts:
         rpi5b8g1:
-        rpi5b16g1ssd:
-        rpi5b16g2ssd:
-        rpi5b16g3ssd:
+        rpi5b16g4:
+        rpi5b16g5:
+        rpi5b16g6:
     vault_transit:
       hosts:
         rpi5b8g1:
     vault_leader:
       hosts:
-        rpi5b16g1ssd:
+        rpi5b16g4:
     vault_followers:
       hosts:
-        rpi5b16g2ssd:
-        rpi5b16g3ssd:
-    load_balancer_cluster:
+        rpi5b16g5:
+        rpi5b16g6:
+    internal_lb_cluster:
       hosts:
         rpi5b16g4:
         rpi5b16g5:
         rpi5b16g6:
-    load_balancer_primary:
+    internal_lb_primary:
       hosts:
         rpi5b16g4:
-    load_balancer_replicas:
+    internal_lb_replicas:
       hosts:
         rpi5b16g5:
         rpi5b16g6:

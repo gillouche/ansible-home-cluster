@@ -5,7 +5,7 @@ ui = true
 cluster_name = "homelab-vault"
 
 {#
-  Use the effective public URL computed by the role (typically https://<IP>:8200)
+  Use the effective public URL computed by the role (typically https://<IP>:18200)
   to avoid relying on base_domain/FQDN inside the container.
 #}
 api_addr = "{{ vault_public_url_effective | trim | replace('"','\\"') }}"

@@ -26,13 +26,23 @@
   when: devices_resolvconf_stat.stat.islnk | default(false)
   become: true
 
-- name: Ensure /etc/resolv.conf points to desired DNS
+- name: Ensure /etc/nsswitch.conf prefers hosts over dns
+  ansible.builtin.lineinfile:
+    path: /etc/nsswitch.conf
+    regexp: '^hosts:'
+    line: 'hosts: mymachines files myhostname dns'
+    state: present
+  become: true
+  when: devices_manage_nsswitch | default(true) | bool
+
+- name: Ensure /etc/resolv.conf uses Pi-hole with public fallback
   ansible.builtin.copy:
     dest: /etc/resolv.conf
     content: |
-      nameserver {{ devices_desired_dns }}
+      nameserver {{ devices_desired_dns | default('192.168.0.251') }}
+      nameserver 1.1.1.1
     owner: root
     group: root
-    mode: "0644"
+    mode: '0644'
   become: true
-  when: devices_manage_resolv_conf | default(false) | bool
+  when: devices_manage_resolvconf | default(true) | bool

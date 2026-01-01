@@ -1,0 +1,390 @@
+---
+
+- name: Ensure reverse_proxy system user exists with home
+  block:
+    - name: Detect nologin path
+      ansible.builtin.set_fact:
+        _nologin_path: >-
+          {{ '/usr/sbin/nologin' if (ansible_facts['path'] is defined and '/usr/sbin' in ansible_facts['path']) else '/sbin/nologin' }}
+      when: false  # placeholder; below we probe files directly
+
+    - name: Probe available nologin paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /usr/sbin/nologin
+        - /sbin/nologin
+        - /usr/bin/nologin
+      register: _nologin_stats
+
+    - name: Pick first available nologin
+      ansible.builtin.set_fact:
+        reverse_proxy_nologin: "{{ (_nologin_stats.results |
+         selectattr('stat.exists','defined') |
+          selectattr('stat.exists') |
+           map(attribute='invocation.module_args.path') |
+            list | first) | default('/usr/sbin/nologin') }}"
+
+    - name: Create reverse_proxy system user with home
+      ansible.builtin.user:
+        name: reverse_proxy
+        comment: "Reverse Proxy Service User"
+        home: "/home/reverse_proxy"
+        create_home: true
+        shell: "{{ reverse_proxy_nologin }}"
+        system: true
+  become: true
+
+# tasks for reverse_proxy (Caddy + keepalived VIP)
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
+- name: Determine reverse proxy role for this host
+  ansible.builtin.set_fact:
+    reverse_proxy_is_primary: "{{ inventory_hostname in (groups['edge_proxy_primary'] | default([])) }}"
+  become: false
+- name: Warn if VRRP auth password is not set (keepalived will be skipped)
+  ansible.builtin.debug:
+    msg: >-
+      reverse_proxy_vrrp_auth_pass is undefined or too short (<12). Skipping keepalived VRRP configuration on this host.
+      Define it in group_vars/edge_proxy_cluster.vault.yml and encrypt with ansible-vault for HA VIP.
+  when: (reverse_proxy_vrrp_auth_pass is not defined) or ((reverse_proxy_vrrp_auth_pass | length) < 12)
+  become: false
+
+- name: Render reverse proxy VRRP instance into conf.d
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/conf.d/edge-proxy.conf
+    owner: root
+    group: root
+    mode: '0644'
+  vars:
+    vip_address: "{{ reverse_proxy_virtual_ip }}"
+    vrrp_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
+    vrrp_state: "{{ 'MASTER' if reverse_proxy_is_primary | bool else 'BACKUP' }}"
+    vrrp_priority: "{{ 150 if reverse_proxy_is_primary | bool else 100 }}"
+    vrrp_auth_pass: "{{ reverse_proxy_vrrp_auth_pass }}"
+  notify: Restart keepalived
+  become: true
+  when: (reverse_proxy_vrrp_auth_pass is defined) and ((reverse_proxy_vrrp_auth_pass | length) >= 12)
+
+
+- name: Check if /etc/resolv.conf is a symlink (reverse proxy)
+  ansible.builtin.stat:
+    path: /etc/resolv.conf
+  register: reverse_proxy_resolvconf_stat
+  become: true
+  when: reverse_proxy_manage_resolv_conf | default(false) | bool
+
+- name: Remove /etc/resolv.conf symlink if managed by systemd-resolved (reverse proxy)
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: (reverse_proxy_manage_resolv_conf | default(false) | bool) and (reverse_proxy_resolvconf_stat.stat.islnk | default(false))
+  become: true
+
+- name: Ensure /etc/resolv.conf uses Pi-hole VIP with public fallback (reverse proxy)
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ reverse_proxy_resolver_ip }}
+      nameserver {{ reverse_proxy_public_resolver }}
+    owner: root
+    group: root
+    mode: '0644'
+  when: reverse_proxy_manage_resolv_conf | default(false) | bool
+  become: true
+
+# ----------------------------------------
+# Caddy reverse proxy using Podman
+# ----------------------------------------
+
+- name: Ensure reverse proxy host directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "reverse_proxy"
+    group: "reverse_proxy"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ reverse_proxy_root_dir }}", mode: '0755'}
+    - {path: "{{ reverse_proxy_config_dir }}", mode: '0755'}
+    - {path: "{{ reverse_proxy_data_dir }}", mode: '0755'}
+    - {path: "{{ reverse_proxy_certs_dir }}", mode: '0755'}
+  become: true
+
+- name: Ensure Caddy certificates directory exists (for replicas startup)
+  ansible.builtin.file:
+    path: "{{ reverse_proxy_data_dir }}/caddy/certificates"
+    state: directory
+    owner: "reverse_proxy"
+    group: "reverse_proxy"
+    mode: '0755'
+  become: true
+
+- name: Build Caddyfile from reverse_proxy_domains (use Vault ACME)
+  ansible.builtin.template:
+    src: "Caddyfile.j2"
+    dest: "{{ reverse_proxy_config_dir }}/Caddyfile"
+    owner: reverse_proxy
+    group: reverse_proxy
+    mode: '0644'
+  notify: Restart reverse proxy
+  become: true
+
+
+- name: Copy Vault Cluster CA to reverse proxy trust path (for ACME)
+  ansible.builtin.copy:
+    src: "{{ tls_dir }}/ca-bundle.pem"
+    remote_src: true
+    dest: "{{ reverse_proxy_certs_dir }}/ca-bundle.pem"
+    owner: "reverse_proxy"
+    group: "reverse_proxy"
+    mode: '0644'
+  become: true
+  notify: Restart reverse proxy
+
+- name: Render Caddyfile with Vault ACME configured
+  ansible.builtin.template:
+    src: "Caddyfile.j2"
+    dest: "{{ reverse_proxy_config_dir }}/Caddyfile"
+    owner: "reverse_proxy"
+    group: "reverse_proxy"
+    mode: '0644'
+  become: true
+  notify: Restart reverse proxy
+
+- name: Check for edge-proxy token on controller
+  ansible.builtin.stat:
+    path: "{{ vault_eab_export_path | default('~/.local/share/ansible-home-cluster/vault/acme_eab.json') | dirname }}/edge_proxy_token.txt"
+  register: _edge_proxy_token_stat
+  delegate_to: localhost
+  become: false
+
+- name: Read edge-proxy token from controller
+  ansible.builtin.slurp:
+    src: "{{ vault_eab_export_path | default('~/.local/share/ansible-home-cluster/vault/acme_eab.json') | dirname }}/edge_proxy_token.txt"
+  register: _edge_proxy_token_content
+  delegate_to: localhost
+  when: _edge_proxy_token_stat.stat.exists
+  become: false
+
+- name: Set caddy_vault_token from file
+  ansible.builtin.set_fact:
+    caddy_vault_token: "{{ _edge_proxy_token_content.content | b64decode | trim }}"
+  when:
+    - _edge_proxy_token_stat.stat.exists
+    - caddy_vault_token is not defined or (caddy_vault_token | length) == 0
+
+- name: Ensure reverse proxy container is running (rootful Podman)
+  containers.podman.podman_container:
+    name: "{{ reverse_proxy_container_name }}"
+    image: "{{ reverse_proxy_image }}"
+    state: started
+    restart_policy: unless-stopped
+    user: 0
+    network_mode: host
+    env:
+      VAULT_TOKEN: "{{ caddy_vault_token | default('') }}"
+    volumes:
+      - "{{ reverse_proxy_config_dir }}:/etc/caddy"
+      - "{{ reverse_proxy_data_dir }}:/data"
+      - "{{ reverse_proxy_certs_dir }}/ca-bundle.pem:/etc/ssl/certs/internal-ca-bundle.pem"
+  become: true
+
+- name: Ensure alarm user has passwordless sudo for rsync
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/alarm-rsync
+    content: "alarm ALL=(root) NOPASSWD: /usr/bin/rsync\n"
+    mode: '0440'
+    owner: root
+    group: root
+  become: true
+
+- name: Cleanup old pull-based sync on replicas
+  block:
+    - name: Disable and stop old caddy-rsync timer
+      ansible.builtin.systemd:
+        name: caddy-rsync.timer
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Remove old rsync helper and systemd units
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/caddy-rsync-data.sh
+        - /etc/systemd/system/caddy-rsync.service
+        - /etc/systemd/system/caddy-rsync.timer
+  become: true
+  when: not reverse_proxy_is_primary | bool
+
+- name: Setup push-based sync on Primary (Leader)
+  block:
+    - name: Create certificate push script
+      ansible.builtin.copy:
+        dest: "/usr/local/bin/caddy-push-certs.sh"
+        owner: root
+        group: root
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          # Push Caddy data from primary to all replicas
+          # Generated by Ansible
+
+          REPLICAS="{% for host in groups['edge_proxy_cluster'] | difference(groups['edge_proxy_primary']) %}{{ hostvars[host].ansible_host | default(host) }} {% endfor %}"
+          DATA_DIR="{{ reverse_proxy_data_dir }}/"
+
+          for replica in $REPLICAS; do
+            echo "Pushing certs to $replica..."
+            # Sync data
+            rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519" --rsync-path="sudo rsync" $DATA_DIR alarm@$replica:$DATA_DIR
+
+            # Reload Caddy on replica to pick up new certs
+            echo "Reloading Caddy on $replica..."
+            ssh -o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519 alarm@$replica "sudo podman kill -s USR1 {{ reverse_proxy_container_name }}"
+          done
+          echo "Sync complete."
+
+    - name: Create systemd service for Caddy push
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/caddy-push-certs.service
+        content: |
+          [Unit]
+          Description=Push Caddy certificates to replicas
+          After=network.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/caddy-push-certs.sh
+          User=root
+
+    - name: Create systemd path unit to watch for certificate changes
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/caddy-watch-certs.path
+        content: |
+          [Unit]
+          Description=Watch Caddy data directory for changes
+
+          [Path]
+          # Watch the caddy/certificates directory specifically if possible,
+          # or the root data dir if structure varies.
+          # Caddy stores certs in /data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/...
+          # We watch the root data dir to catch all provider updates.
+          PathModified={{ reverse_proxy_data_dir }}
+          Unit=caddy-push-certs.service
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start caddy-watch-certs path
+      ansible.builtin.systemd:
+        name: caddy-watch-certs.path
+        state: started
+        enabled: true
+        daemon_reload: true
+  become: true
+  when: reverse_proxy_is_primary | bool
+
+- name: Setup Certificate Renewal on Primary
+  block:
+    - name: Ensure jq is installed (for cert script)
+      ansible.builtin.package:
+        name: jq
+        state: present
+
+    - name: Create certificate renewal script
+      ansible.builtin.copy:
+        dest: "/usr/local/bin/caddy-renew-certs.sh"
+        owner: root
+        group: root
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          set -e
+
+          # Configuration
+          VAULT_ADDR="https://127.0.0.1:{{ vault_api_port | default(18200) }}"
+          VAULT_TOKEN="{{ caddy_vault_token }}"
+          CERT_DIR="{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard"
+
+          # Ensure directory exists
+          mkdir -p "$CERT_DIR"
+
+          export VAULT_ADDR
+          export VAULT_TOKEN
+          export VAULT_SKIP_VERIFY=true
+
+          echo "Requesting new wildcard certificate from Vault..."
+          DATA=$(/usr/local/bin/vault write -format=json pki_int/issue/homelab-server \
+              common_name="*.{{ base_domain }}" \
+              alt_names="*.pihole.{{ base_domain }},{{ base_domain }}" \
+              ttl=720h)
+
+          echo "Writing certificates..."
+          echo "$DATA" | jq -r .data.private_key > "$CERT_DIR/wildcard.key"
+          # Bundle: Leaf + CA Chain
+          echo "$DATA" | jq -r '.data.certificate + "\n" + (.data.ca_chain | join("\n"))' > "$CERT_DIR/wildcard.crt"
+
+          # Fix permissions
+          chown -R reverse_proxy:reverse_proxy "$CERT_DIR"
+          chmod 600 "$CERT_DIR/wildcard.key"
+
+          echo "Reloading Caddy..."
+          podman kill -s USR1 {{ reverse_proxy_container_name }}
+
+          echo "Done. (Path watcher should trigger sync to replicas)"
+
+    - name: Run renewal script immediately (bootstrap)
+      ansible.builtin.command: /usr/local/bin/caddy-renew-certs.sh
+      register: _cert_renew_run
+      changed_when: "_cert_renew_run.rc == 0"
+
+    - name: Create systemd service for renewal
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/caddy-renew-certs.service
+        content: |
+          [Unit]
+          Description=Renew Caddy Certificates via Vault
+          After=network.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/caddy-renew-certs.sh
+          User=root
+
+    - name: Create systemd timer for renewal (weekly)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/caddy-renew-certs.timer
+        content: |
+          [Unit]
+          Description=Renew Caddy Certificates Weekly
+
+          [Timer]
+          OnCalendar=weekly
+          RandomizedDelaySec=3600
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Enable and start renewal timer
+      ansible.builtin.systemd:
+        name: caddy-renew-certs.timer
+        state: started
+        enabled: true
+        daemon_reload: true
+  become: true
+  when: reverse_proxy_is_primary | bool
+
+- name: Remove old reverse proxy container (safety, ensure clean create)
+  containers.podman.podman_container:
+    name: "{{ reverse_proxy_container_name }}"
+    state: absent
+  become: true
+  when: false  # placeholder disabled; set to true if you need explicit removal before create

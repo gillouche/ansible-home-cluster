@@ -52,6 +52,26 @@
   delay: 5
   until: _fetch_middle_ca is success
 
+- name: Copy Root CA from controller
+  ansible.builtin.copy:
+    src: "{{ tls_cluster_ca_cert_controller }}"
+    dest: "{{ tls_dir }}/root-ca.pem"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Create CA bundle (Intermediate + Middle + Root)
+  ansible.builtin.shell: |
+    for cert in "{{ tls_dir }}/intermediate-ca.pem" "{{ tls_dir }}/middle-ca.pem" "{{ tls_dir }}/root-ca.pem"; do
+      if [ -f "$cert" ]; then
+        cat "$cert"
+        echo ""
+      fi
+    done > "{{ tls_dir }}/ca-bundle.pem"
+  become: true
+  changed_when: false
+
 - name: Install CA bundle into system anchors
   ansible.builtin.copy:
     src: "{{ tls_dir }}/ca-bundle.pem"
@@ -63,161 +83,208 @@
   become: true
   notify: Refresh system trust store
 
-- name: Gather SAN helper lists (VIP, extras, all IPv4)
-  ansible.builtin.set_fact:
-    _tls_extra_ips: >-
-      {{ (
-            (load_balancer_virtual_ip is defined)
-            and ((load_balancer_virtual_ip | string) | length > 0)
-          ) | ternary([load_balancer_virtual_ip], [])
-          + (tls_additional_san_ips | default([]))
-        }}
-    _tls_extra_dns: >-
-      {{ tls_additional_san_dns | default([]) }}
-    _tls_all_ipv4: >-
-      {{ ansible_all_ipv4_addresses | default([]) | reject('match', '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)') | list }}
-
-- name: Gather SANs for this host (stable ordering)
-  ansible.builtin.set_fact:
-    _tls_candidate_dns: >-
-      {{ (
-           ([ inventory_hostname,
-             (ansible_facts.fqdn if (ansible_facts is defined and (ansible_facts.fqdn | default('') | length) > 0) else omit),
-             (inventory_hostname ~ '.' ~ base_domain),
-             'localhost']
-           | reject('equalto', omit) | list)
-           + (_tls_extra_dns | default([]) | list)
-         ) | unique | sort }}
-    _tls_candidate_ips: >-
-      {{ (
-           ([ (ansible_facts.default_ipv4.address if (ansible_facts is defined and (ansible_facts.default_ipv4.address | default('') | length) > 0) else omit),
-             (hostvars[inventory_hostname].ansible_host if (hostvars is defined and (hostvars[inventory_hostname].ansible_host | default('') | length) > 0) else omit),
-             '127.0.0.1'
-           ]
-            | reject('equalto', omit) | list)
-           + (_tls_extra_ips | default([]) | list)
-           + (_tls_all_ipv4 | default([]) | list)
-         ) | unique | sort }}
-
-- name: Finalize SANs for this host
-  ansible.builtin.set_fact:
-    _tls_san_dns: >-
-      {{ _tls_candidate_dns | default([]) }}
-    _tls_san_ips: >-
-      {{ _tls_candidate_ips | default([]) }}
-
-- name: Generate server key
-  community.crypto.openssl_privatekey:
-    path: "{{ tls_dir }}/api.key"
-    size: 2048
-    owner: root
-    group: root
-    mode: '0600'
-  become: true
-
-- name: Check existing server certificate validity and SANs
+- name: Controller-side CA bundle management
   block:
-    - name: Stat existing server certificate
-      ansible.builtin.stat:
-        path: "{{ tls_dir }}/api.crt"
-      register: _tls_cert_stat
-
-    - name: Read existing server certificate info if present
-      community.crypto.x509_certificate_info:
-        path: "{{ tls_dir }}/api.crt"
-      register: _tls_cert_info
-      when: _tls_cert_stat.stat.exists
-
-    - name: Compute if certificate needs renewal or regeneration
-      ansible.builtin.set_fact:
-        _tls_cert_needs_renewal: >-
-          {{ not _tls_cert_stat.stat.exists or
-             ((_tls_cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ')).timestamp() | int) < (ansible_date_time.epoch | int) + (30 * 24 * 60 * 60) or
-             (_tls_cert_info.subject_alt_name_items | default([]) | sort) !=
-             ((_tls_san_dns | map('regex_replace', '^', 'DNS:') | list + _tls_san_ips | map('regex_replace', '^', 'IP Address:') | list) | unique | sort) }}
-      when: _tls_cert_stat.stat.exists
-      # If cert does not exist, _tls_cert_needs_renewal remains undefined, implicitly meaning true for subsequent steps
-
-- name: Generate server CSR and sign with Vault (if renewal/regeneration needed)
-  block:
-    - name: Generate server CSR
-      community.crypto.openssl_csr:
-        path: "{{ tls_dir }}/api.csr"
-        privatekey_path: "{{ tls_dir }}/api.key"
-        common_name: "{{ inventory_hostname }}"
-        subject_alt_name: "{{ ( _tls_san_dns | map('regex_replace', '^', 'DNS:') | list + _tls_san_ips | map('regex_replace', '^', 'IP:') | list ) | unique | sort }}"
-      become: true
-      register: _tls_csr_result
-
-    - name: Read CSR content
-      ansible.builtin.slurp:
-        src: "{{ tls_dir }}/api.csr"
-      register: _tls_csr_content
-      become: true
-
-    - name: Sign CSR with Vault
-      ansible.builtin.uri:
-        url: "https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/pki_int/sign/{{ vault_pki_int_role_name }}"
-        method: POST
-        body_format: json
-        body:
-          csr: "{{ _tls_csr_content.content | b64decode }}"
-          common_name: "{{ inventory_hostname }}"
-        headers:
-          X-Vault-Token: "{{ vault_root_token }}"
+    - name: Fetch Intermediate CAs to controller for bundle creation
+      ansible.builtin.get_url:
+        url: "https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/{{ item.path }}/ca/pem"
+        dest: "{{ tls_cluster_ca_dir_controller | expanduser }}/{{ item.name }}.pem"
         validate_certs: false
-        status_code: [200]
-      register: _vault_signed_cert_raw
+      loop:
+        - { path: 'pki_int', name: 'intermediate-ca' }
+        - { path: 'pki', name: 'middle-ca' }
       delegate_to: localhost
-      retries: 10
-      delay: 5
-      until: _vault_signed_cert_raw is success
+      run_once: true
 
-    - name: Install signed certificate
-      ansible.builtin.copy:
-        content: "{{ ([_vault_signed_cert_raw.json.data.certificate] + _vault_signed_cert_raw.json.data.ca_chain) | join('\n') }}"
-        dest: "{{ tls_dir }}/api.crt"
+    - name: Create CA bundle on controller
+      ansible.builtin.shell: |
+        cat "{{ tls_cluster_ca_dir_controller | expanduser }}/intermediate-ca.pem" \
+            "{{ tls_cluster_ca_dir_controller | expanduser }}/middle-ca.pem" \
+            "{{ tls_cluster_ca_cert_controller | expanduser }}" > "{{ tls_cluster_ca_dir_controller | expanduser }}/ca-bundle.pem"
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+
+    - name: Trust Root CA in macOS keychain (controller)
+      ansible.builtin.command: >
+        security add-trusted-cert -d
+        -r trustRoot
+        -k {{ (ansible_env.HOME ~ '/Library/Keychains/' ~ tls_controller_install_keychain ~ '.keychain-db') if tls_controller_install_keychain != 'login' else (ansible_env.HOME ~ '/Library/Keychains/login.keychain-db') }}
+        "{{ tls_cluster_ca_cert_controller | expanduser }}"
+      delegate_to: localhost
+      run_once: true
+      when:
+        - ansible_os_family == 'Darwin'
+        - tls_trust_ca_on_controller | default(false) | bool
+      changed_when: false
+
+- name: Server certificate generation (optional)
+  when: tls_generate_server_cert | default(false) | bool
+  block:
+    - name: Gather SAN helper lists (VIP, extras, all IPv4)
+      ansible.builtin.set_fact:
+        _tls_extra_ips: >-
+          {{ (
+                (load_balancer_virtual_ip is defined)
+                and ((load_balancer_virtual_ip | string) | length > 0)
+              ) | ternary([load_balancer_virtual_ip], [])
+              + (tls_additional_san_ips | default([]))
+            }}
+        _tls_extra_dns: >-
+          {{ tls_additional_san_dns | default([]) }}
+        _tls_all_ipv4: >-
+          {{ ansible_all_ipv4_addresses | default([]) | reject('match', '^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)') | list }}
+
+    - name: Gather SANs for this host (stable ordering)
+      ansible.builtin.set_fact:
+        _tls_candidate_dns: >-
+          {{ (
+               ([ inventory_hostname,
+                 (ansible_facts.fqdn if (ansible_facts is defined and (ansible_facts.fqdn | default('') | length) > 0) else omit),
+                 (inventory_hostname ~ '.' ~ base_domain),
+                 'localhost']
+               | reject('equalto', omit) | list)
+               + (_tls_extra_dns | default([]) | list)
+             ) | unique | sort }}
+        _tls_candidate_ips: >-
+          {{ (
+               ([ (ansible_facts.default_ipv4.address if (ansible_facts is defined and (ansible_facts.default_ipv4.address | default('') | length) > 0) else omit),
+                 (hostvars[inventory_hostname].ansible_host if (hostvars is defined and (hostvars[inventory_hostname].ansible_host | default('') | length) > 0) else omit),
+                 '127.0.0.1'
+               ]
+                | reject('equalto', omit) | list)
+               + (_tls_extra_ips | default([]) | list)
+               + (_tls_all_ipv4 | default([]) | list)
+             ) | unique | sort }}
+
+    - name: Finalize SANs for this host
+      ansible.builtin.set_fact:
+        _tls_san_dns: >-
+          {{ _tls_candidate_dns | default([]) }}
+        _tls_san_ips: >-
+          {{ _tls_candidate_ips | default([]) }}
+
+    - name: Generate server key
+      community.crypto.openssl_privatekey:
+        path: "{{ tls_dir }}/api.key"
+        size: 2048
         owner: root
         group: root
-        mode: '0644'
+        mode: '0600'
       become: true
-  when: _tls_cert_needs_renewal | default(true) # Run this block if renewal/regeneration is needed or if cert didn't exist
 
-- name: Ensure permissions on TLS assets
+    - name: Check existing server certificate validity and SANs
+      block:
+        - name: Stat existing server certificate
+          ansible.builtin.stat:
+            path: "{{ tls_dir }}/api.crt"
+          register: _tls_cert_stat
+
+        - name: Read existing server certificate info if present
+          community.crypto.x509_certificate_info:
+            path: "{{ tls_dir }}/api.crt"
+          register: _tls_cert_info
+          when: _tls_cert_stat.stat.exists
+
+        - name: Compute if certificate needs renewal or regeneration
+          ansible.builtin.set_fact:
+            _tls_cert_needs_renewal: >-
+              {{ not _tls_cert_stat.stat.exists or
+                 ((_tls_cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ')).timestamp() | int) < (ansible_date_time.epoch | int) + (30 * 24 * 60 * 60) or
+                 (_tls_cert_info.subject_alt_name_items | default([]) | sort) !=
+                 ((_tls_san_dns | map('regex_replace', '^', 'DNS:') | list + _tls_san_ips | map('regex_replace', '^', 'IP Address:') | list) | unique | sort) }}
+          when: _tls_cert_stat.stat.exists
+          # If cert does not exist, _tls_cert_needs_renewal remains undefined, implicitly meaning true for subsequent steps
+
+    - name: Generate server CSR and sign with Vault (if renewal/regeneration needed)
+      block:
+        - name: Generate server CSR
+          community.crypto.openssl_csr:
+            path: "{{ tls_dir }}/api.csr"
+            privatekey_path: "{{ tls_dir }}/api.key"
+            common_name: "{{ inventory_hostname }}"
+            subject_alt_name: "{{ ( _tls_san_dns | map('regex_replace', '^', 'DNS:') | list + _tls_san_ips | map('regex_replace', '^', 'IP:') | list ) | unique | sort }}"
+          become: true
+          register: _tls_csr_result
+
+        - name: Read CSR content
+          ansible.builtin.slurp:
+            src: "{{ tls_dir }}/api.csr"
+          register: _tls_csr_content
+          become: true
+
+        - name: Sign CSR with Vault
+          ansible.builtin.uri:
+            url: "https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/pki_int/sign/{{ vault_pki_int_role_name }}"
+            method: POST
+            body_format: json
+            body:
+              csr: "{{ _tls_csr_content.content | b64decode }}"
+              common_name: "{{ inventory_hostname }}"
+            headers:
+              X-Vault-Token: "{{ vault_root_token }}"
+            validate_certs: false
+            status_code: [200]
+          register: _vault_signed_cert_raw
+          delegate_to: localhost
+          retries: 10
+          delay: 5
+          until: _vault_signed_cert_raw is success
+
+        - name: Install signed certificate
+          ansible.builtin.copy:
+            content: "{{ ([_vault_signed_cert_raw.json.data.certificate] + _vault_signed_cert_raw.json.data.ca_chain) | join('\n') }}"
+            dest: "{{ tls_dir }}/api.crt"
+            owner: root
+            group: root
+            mode: '0644'
+          become: true
+      when: _tls_cert_needs_renewal | default(true) # Run this block if renewal/regeneration is needed or if cert didn't exist
+
+    - name: Ensure permissions on TLS assets (certs only)
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: root
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - {path: "{{ tls_dir }}/api.key", group: 'root', mode: '0600'}
+        - {path: "{{ tls_dir }}/api.crt", group: 'root', mode: '0644'}
+      become: true
+
+    - name: Capture deployed certificate details
+      ansible.builtin.command: openssl x509 -in {{ tls_dir }}/api.crt -noout -subject -issuer -dates
+      register: _tls_inspect_details
+      changed_when: false
+      become: true
+      tags:
+        - health
+
+    - name: Capture deployed SANs
+      ansible.builtin.command: openssl x509 -in {{ tls_dir }}/api.crt -noout -ext subjectAltName
+      register: _tls_inspect_sans
+      changed_when: false
+      become: true
+      tags:
+        - health
+
+    - name: Verify certificate chain locally
+      ansible.builtin.command: openssl verify -CAfile {{ tls_dir }}/ca-bundle.pem {{ tls_dir }}/api.crt
+      register: _tls_inspect_chain
+      changed_when: false
+      failed_when: false
+      become: true
+      tags:
+        - health
+
+- name: Ensure permissions on TLS assets (CA files)
   ansible.builtin.file:
     path: "{{ item.path }}"
     owner: root
     group: "{{ item.group }}"
     mode: "{{ item.mode }}"
   loop:
-    - {path: "{{ tls_dir }}/api.key", group: 'root', mode: '0600'}
-    - {path: "{{ tls_dir }}/api.crt", group: 'root', mode: '0644'}
     - {path: "{{ tls_dir }}/intermediate-ca.pem", group: 'root', mode: '0644'}
     - {path: "{{ tls_dir }}/middle-ca.pem", group: 'root', mode: '0644'}
     - {path: "{{ tls_dir }}/ca-bundle.pem", group: 'root', mode: '0644'}
   become: true
-
-- name: Capture deployed certificate details
-  ansible.builtin.command: openssl x509 -in {{ tls_dir }}/api.crt -noout -subject -issuer -dates
-  register: _tls_inspect_details
-  changed_when: false
-  become: true
-  tags:
-    - health
-
-- name: Capture deployed SANs
-  ansible.builtin.command: openssl x509 -in {{ tls_dir }}/api.crt -noout -ext subjectAltName
-  register: _tls_inspect_sans
-  changed_when: false
-  become: true
-  tags:
-    - health
-
-- name: Verify certificate chain locally
-  ansible.builtin.command: openssl verify -CAfile {{ tls_dir }}/ca-bundle.pem {{ tls_dir }}/api.crt
-  register: _tls_inspect_chain
-  changed_when: false
-  failed_when: false
-  become: true
-  tags:
-    - health

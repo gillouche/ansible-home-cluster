@@ -105,7 +105,6 @@
       when: (_vault_node_health.status | default(0)) == 200
   tags:
     - health
-    - vault
 
 - name: "TLS Health Check"
   hosts: all
@@ -156,10 +155,9 @@
           - "-----------------------------------------------------------"
   tags:
     - health
-    - tls
 
 - name: "Pi-hole Health Check"
-  hosts: pihole_cluster
+  hosts: dns_cluster
   gather_facts: true
   become: false
   tasks:
@@ -191,10 +189,9 @@
           - "-----------------------------------------------------------"
   tags:
     - health
-    - pihole
 
 - name: "Load Balancer Health Check"
-  hosts: load_balancer_cluster
+  hosts: internal_lb_cluster
   gather_facts: true
   become: false
   tasks:
@@ -223,22 +220,21 @@
           - "-----------------------------------------------------------"
   tags:
     - health
-    - load_balancer
 
 - name: "Reverse Proxy Health Check"
-  hosts: reverse_proxy_cluster
+  hosts: edge_proxy_cluster
   gather_facts: true
   become: false
   tasks:
     - name: Get Caddy container logs
-      ansible.builtin.command: "podman logs {{ reverse_proxy_container_name | default('reverse-proxy') }}"
+      ansible.builtin.command: "podman logs {{ reverse_proxy_container_name | default('edge-proxy') }}"
       register: _caddy_logs
       become: true
       failed_when: false
       changed_when: false
 
     - name: Check ACME certificate status in Caddy
-      ansible.builtin.command: "podman exec {{ reverse_proxy_container_name | default('reverse-proxy') }} find /data/caddy/certificates -name '*.crt'"
+      ansible.builtin.command: "podman exec {{ reverse_proxy_container_name | default('edge-proxy') }} find /data/caddy/certificates -name '*.crt'"
       register: _caddy_certs
       become: true
       failed_when: false
@@ -246,7 +242,7 @@
 
     - name: Check network reachability to Vault from Caddy container (using wget)
       ansible.builtin.shell: |
-        podman exec {{ reverse_proxy_container_name | default('reverse-proxy') }} \
+        podman exec {{ reverse_proxy_container_name | default('edge-proxy') }} \
         wget --no-check-certificate -q -O /dev/null --server-response https://192.168.0.253:8200/v1/sys/health 2>&1 | \
         grep "HTTP/" | awk '{print $2}'
       register: _caddy_vault_reachability
@@ -260,7 +256,7 @@
         -X POST
         -H "Content-Type: application/jose+json"
         https://192.168.0.253:8200/v1/pki_int/acme/new-order
-        -d '{"identifiers":[{"type":"dns","value":"example.gillouche.homelab"}]}'
+        -d '{"identifiers":[{"type":"dns","value":"primary-pihole.gillouche.homelab"}]}'
       register: _acme_simulation
       become: false
       failed_when: false
@@ -280,7 +276,7 @@
           - "Caddy Certificate List (Found in /data/caddy/certificates):"
           - "{{ _caddy_certs.stdout_lines if (_caddy_certs is defined and (_caddy_certs.stdout_lines | default([])) | length > 0) else ['None found or error: ' ~ (_caddy_certs.stderr | default('N/A'))] }}"
           - "-----------------------------------------------------------"
-          - "ACME Simulation (example.gillouche.homelab):"
+          - "ACME Simulation (primary-pihole.gillouche.homelab):"
           - "  Status: {{ 'OK (Reachable)' if (_acme_simulation.stdout | from_json | default({})).type == 'urn:ietf:params:acme:error:malformed' else 'FAILED' }}"
           - "  Response (short): {{ _acme_simulation.stdout | truncate(200) }}"
           - "  Note: 'malformed' is EXPECTED here as we send plain JSON instead of JWS. It confirms the ACME endpoint is ACTIVE."
@@ -290,4 +286,3 @@
           - "-----------------------------------------------------------"
   tags:
     - health
-    - proxy

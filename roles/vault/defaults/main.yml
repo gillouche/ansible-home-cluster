@@ -2,7 +2,7 @@
 vault_image: "hashicorp/vault:1.21.1"
 vault_version: "1.21.1"
 vault_container_name: "vault"
-vault_api_port: 8200
+vault_api_port: 18200
 lan_subnet: "192.168.0.0/24"
 
 # Networking policy: all containers use bridge networking with published ports.
@@ -144,7 +144,7 @@ vault_automation_token_renew_threshold_seconds: 604800
 # Example: "192.168.0.81"
 vault_acme_advertise_addr: ""
 
-# Validate ACME directory reachability (VIP:8200) after Vault is up on leader
+# Validate ACME directory reachability (VIP:18200) after Vault is up on leader
 # and optionally self-heal by enabling PKI+ACME if missing.
 vault_acme_validate_enable: true
 
@@ -277,7 +277,7 @@ vault_wait_active_delay: 2
 vault_disable_clustering: false
 
 # Vault cluster (raft) TCP port used for cluster_addr
-vault_cluster_port: 8201
+vault_cluster_port: 18201
 
 # TLS paths inside container (used by listener)
 vault_tls_cert_path: "{{ vault_tls_dir_in_container }}/api.crt"
@@ -299,7 +299,7 @@ vault_enable_transit_seal: true
 # Full address to the bootstrap (Transit) Vault. Prefer HTTPS with LAN IP.
 # Default to your bootstrap node at 192.168.0.80 per homelab layout; you can
 # override this in inventory/group_vars if needed.
-vault_transit_addr: "https://192.168.0.80:8200"
+vault_transit_addr: "https://192.168.0.80:18200"
 
 # Transit token used by the main cluster to perform unseal operations against
 # the bootstrap Vault. Keep empty in defaults; provide via vaulted group_vars.

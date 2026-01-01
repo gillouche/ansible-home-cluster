@@ -308,6 +308,57 @@
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
 
+- name: Create edge-proxy-policy
+  ansible.builtin.shell: |
+    /usr/local/bin/vault policy write edge-proxy-policy - <<'EOF'
+      path "pki_int/issue/{{ vault_pki_int_role_name }}" {
+        capabilities = ["create", "update"]
+      }
+      path "pki_int/sign/{{ vault_pki_int_role_name }}" {
+        capabilities = ["create", "update"]
+      }
+      path "pki_int/cert/*" {
+        capabilities = ["read"]
+      }
+      path "pki_int/ca/pem" {
+        capabilities = ["read"]
+      }
+      path "pki_int/ca_chain" {
+        capabilities = ["read"]
+      }
+    EOF
+  environment:
+    VAULT_ADDR: "{{ _vault_leader_addr }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  changed_when: false
+
+- name: Create edge-proxy token
+  ansible.builtin.command: /usr/local/bin/vault token create -policy="edge-proxy-policy" -period=720h -format=json
+  environment:
+    VAULT_ADDR: "{{ _vault_leader_addr }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _edge_proxy_token_output
+  changed_when: _edge_proxy_token_output.rc == 0
+
+- name: Ensure edge-proxy token directory exists on controller
+  ansible.builtin.file:
+    path: "{{ vault_eab_export_path | default('~/.local/share/ansible-home-cluster/vault/acme_eab.json') | dirname }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  run_once: true
+  become: false
+
+- name: Store edge-proxy token on controller
+  ansible.builtin.copy:
+    content: "{{ (_edge_proxy_token_output.stdout | from_json).auth.client_token }}"
+    dest: "{{ vault_eab_export_path | default('~/.local/share/ansible-home-cluster/vault/acme_eab.json') | dirname }}/edge_proxy_token.txt"
+    mode: '0600'
+  delegate_to: localhost
+  when: _edge_proxy_token_output.changed
+
 - name: Configure intermediate PKI URLs (pki_int)
   ansible.builtin.command: >
     /usr/local/bin/vault write pki_int/config/urls

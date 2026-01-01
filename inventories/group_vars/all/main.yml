@@ -24,7 +24,7 @@ vault_trust_ca_on_controller: false
 vault_controller_install_keychain: login
 
 # Controller (macOS) browser trust switch
-firefox_enable_enterprise_roots: true
+vault_firefox_enable_enterprise_roots: true
 
 # HAProxy VIP (included automatically in SANs by TLS role when defined)
 load_balancer_virtual_ip: 192.168.0.253
@@ -33,15 +33,14 @@ load_balancer_virtual_ip: 192.168.0.253
 # ------------------------------------
 
 # Vault
-vault_api_port: 8200
-vault_cluster_port: 8201
+vault_api_port: 18200
+vault_cluster_port: 18201
 
 # Pi-hole
 pihole_virtual_ip: 192.168.0.251
 pihole_dns_tcp_port: 53
 pihole_dns_udp_port: 53
 pihole_http_host_port: 8080
-pihole_https_host_port: 8443
 
 # Reverse Proxy (Caddy)
 reverse_proxy_virtual_ip: 192.168.0.252

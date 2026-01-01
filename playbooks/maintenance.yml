@@ -12,18 +12,18 @@
     - name: Ping
       ansible.builtin.ping:
 
-- name: Maintenance - Pacman refresh and upgrade
+- name: Update - Pacman refresh and upgrade
   hosts: all
   gather_facts: true
   become: false
   tags:
     - never
-    - maintenance
+    - update
 
   roles:
     - role: maintenance
       tags:
-        - maintenance
+        - update
 
 - name: Bootstrap devices (SSH + network)
   hosts: all
@@ -40,15 +40,15 @@
     ansible_user: "{{ devices_bootstrap_user }}"
 
   pre_tasks:
-    - name: Check if inventories/group_vars/all.vault.yml exists
+    - name: Check if inventories/group_vars/all/vault.yml exists
       ansible.builtin.stat:
-        path: inventories/group_vars/all.vault.yml
+        path: "{{ playbook_dir }}/../inventories/group_vars/all/vault.yml"
       register: _all_vault_file
       no_log: true
 
-    - name: Load vaulted credentials from group_vars/all.vault.yml (if present)
+    - name: Load vaulted credentials from group_vars/all/vault.yml (if present)
       ansible.builtin.include_vars:
-        file: inventories/group_vars/all.vault.yml
+        file: "{{ playbook_dir }}/../inventories/group_vars/all/vault.yml"
       when: _all_vault_file.stat.exists | default(false)
       no_log: true
 
@@ -119,3 +119,34 @@
         connect_timeout: "{{ reboot_connect_timeout }}"
         post_reboot_delay: "{{ reboot_post_reboot_delay }}"
         test_command: "{{ reboot_test_command }}"
+
+- name: Maintenance - Clean devices
+  hosts: all
+  gather_facts: true
+  become: true
+  tags:
+    - never
+    - clean_devices_ssh_network
+
+  tasks:
+    - name: Remove known_hosts file
+      ansible.builtin.file:
+        path: "/home/alarm/.ssh/known_hosts"
+        state: absent
+      become: false
+
+    - name: Remove ~/.ssh/config
+      ansible.builtin.file:
+        path: "/home/alarm/.ssh/config"
+        state: absent
+      become: false
+
+    - name: Restore simple /etc/hosts
+      ansible.builtin.copy:
+        dest: /etc/hosts
+        content: |
+          127.0.0.1   localhost
+          ::1         localhost
+        owner: root
+        group: root
+        mode: '0644'

@@ -103,6 +103,7 @@
     dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.csr"
     flat: true
   become: true
+  register: _vault_leader_csr_fetch
 
 - name: Create OpenSSL config for Vault leader extensions (on controller)
   ansible.builtin.copy:
@@ -114,6 +115,13 @@
       extendedKeyUsage = serverAuth
       subjectAltName = {{ _vault_server_sansa | join(',') }}
   delegate_to: localhost
+  register: _vault_leader_ext_config
+
+- name: Check if Vault leader certificate exists on controller
+  ansible.builtin.stat:
+    path: "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.crt"
+  delegate_to: localhost
+  register: _vault_leader_crt_stat
 
 - name: Sign Vault leader certificate with Homelab Root CA (on controller)
   ansible.builtin.command: >
@@ -127,6 +135,10 @@
     -sha256
     -extfile "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}.ext"
   delegate_to: localhost
+  when: >
+    _vault_leader_csr_fetch.changed
+    or _vault_leader_ext_config.changed
+    or not _vault_leader_crt_stat.stat.exists
 
 - name: Copy signed Vault leader certificate to host
   ansible.builtin.copy:
@@ -153,8 +165,8 @@
     state: started
     restart_policy: unless-stopped
     published_ports:
-      - "{{ vault_api_port }}:8200/tcp"
-      - "{{ vault_cluster_port }}:8201/tcp"
+      - "{{ vault_api_port }}:{{ vault_api_port }}/tcp"
+      - "{{ vault_cluster_port }}:{{ vault_cluster_port }}/tcp"
     cap_add:
       - IPC_LOCK
       - DAC_OVERRIDE
@@ -362,7 +374,6 @@
   when:
     - vault_enable_transit_seal | default(false)
     - inventory_hostname in (groups['vault_leader'] | default([]))
-    - vault_needs_init
 
 - name: Persist cluster init JSON to controller (transit leader)
   ansible.builtin.copy:

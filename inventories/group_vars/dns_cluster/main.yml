@@ -1,0 +1,24 @@
+---
+# Virtual IP and primary node
+pihole_virtual_ip: 192.168.0.251
+pihole_vrrp_interface: end0
+vip_prefixlen: 24
+pihole_primary_host: rpi5b16g4
+
+# Enable wildcard DNS via dnsmasq to point domains to reverse proxy VIP
+pihole_dns_wildcard_enabled: true
+pihole_container_name: pihole
+
+# Replication
+gravity_sync_enabled: true
+gravity_sync_schedule: hourly
+
+# Image pin (override if needed; defaults are pinned in role too)
+pihole_image: pihole/pihole:2025.11.1
+
+pihole_dns_wildcard_domains:
+  - "{{ base_domain }}"
+  - "pihole.{{ base_domain }}"
+
+# Optional: custom DNS A records
+pihole_custom_dns_records: []

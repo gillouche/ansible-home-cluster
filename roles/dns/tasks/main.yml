@@ -3,7 +3,7 @@
 
 - name: Skip role on non-cluster hosts
   ansible.builtin.meta: end_role
-  when: inventory_hostname not in (groups['pihole_cluster'] | default([]))
+  when: inventory_hostname not in (groups['dns_cluster'] | default([]))
   become: false
 
 - name: Gather minimal facts (role safeguard when running with tags)
@@ -59,12 +59,12 @@
       - pihole_virtual_ip is defined
       - pihole_primary_host is defined
     fail_msg: >-
-      Required variables for Pi-hole VRRP are missing. Ensure group_vars/pihole_cluster.yml
+      Required variables for Pi-hole VRRP are missing. Ensure group_vars/dns_cluster.yml
       defines at least:
         pihole_virtual_ip: <VIP address>
         pihole_primary_host: <inventory hostname of primary>
       Current inventory path: {{ inventory_file | default('unknown') }}
-  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
+  when: inventory_hostname in (groups['dns_cluster'] | default([]))
   become: false
 
   # keepalived base setup is handled by the dedicated keepalived role
@@ -190,7 +190,7 @@
     vrrp_auth_pass: "{{ pihole_vrrp_auth_pass | default('p1h0l3') }}"
   notify: Restart keepalived
   become: true
-  when: inventory_hostname in (groups['pihole_cluster'] | default([]))
+  when: inventory_hostname in (groups['dns_cluster'] | default([]))
 
   # keepalived service management and validation handled by keepalived role
 
@@ -285,7 +285,19 @@
       {% for d in (pihole_dns_wildcard_domains | default([])) %}
       address=/{{ d }}/{{ pihole_reverse_proxy_vip }}
       {% endfor %}
-  when: pihole_dns_wildcard_enabled | default(false) | bool
+  when:
+    - pihole_dns_wildcard_enabled | default(false) | bool
+    - (pihole_dns_wildcard_domains | default([])) | length > 0
+  notify: Restart pihole dns
+  become: true
+
+- name: Remove wildcard DNS config if domains list is empty or disabled
+  ansible.builtin.file:
+    path: "/home/{{ target_user }}/pihole/dnsmasq.d/99-wildcard-vip.conf"
+    state: absent
+  when: >
+    (not (pihole_dns_wildcard_enabled | default(false) | bool)) or
+    ((pihole_dns_wildcard_domains | default([])) | length == 0)
   notify: Restart pihole dns
   become: true
 
@@ -312,6 +324,7 @@
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
     state: started
+    hostname: "{{ inventory_hostname }}"
     restart_policy: always
     cap_add:
       - NET_BIND_SERVICE
@@ -322,12 +335,12 @@
       - "{{ pihole_dns_tcp_port }}:53/tcp"
       - "{{ pihole_dns_udp_port }}:53/udp"
       - "{{ pihole_http_host_port }}:80/tcp"
-      - "{{ pihole_https_host_port }}:443/tcp"
     env:
       TZ: "{{ pihole_timezone }}"
       FTLCONF_webserver_api_password: "{{ pihole_web_password }}"
       FTLCONF_dns_listeningMode: "ALL"
       FTLCONF_dns_upstreams: "{{ pihole_dns }}"
+      FTLCONF_dns_piholePtr: "HOSTNAME"
     volumes:
       - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
       - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"

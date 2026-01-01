@@ -15,6 +15,9 @@ tls_include_load_balancer_vip: true
 # Cert validity (days)
 tls_server_cert_days: 1825
 
+# Toggle to generate server certificate for the host (default: false as only specific services need it)
+tls_generate_server_cert: false
+
 # System anchor destination for the Cluster CA
 tls_root_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-root-ca.pem"
 tls_intermediate_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-intermediate-ca.pem"

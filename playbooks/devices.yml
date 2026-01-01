@@ -70,13 +70,45 @@
         homelab_root_ca_cert_path: "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/homelab-root-ca.crt"
         homelab_root_ca_key_path: "{{ vault_cluster_ca_dir_controller | default('~/.local/share/ansible-home-cluster/vault-ca') | expanduser }}/homelab-root-ca.key"
 
+    - name: Check if Homelab Root CA is in macOS keychain
+      ansible.builtin.command: security find-certificate -c "Homelab Root CA"
+      register: _macos_cert_check
+      failed_when: false
+      changed_when: false
+      when: ansible_os_family == 'Darwin'
+
     - name: Install Homelab Root CA into macOS login keychain
       ansible.builtin.command: >-
         security add-trusted-cert -d -r trustRoot -k /Users/{{ ansible_user_id }}/Library/Keychains/login.keychain-db
         "{{ homelab_root_ca_cert_path }}"
-      when: _homelab_root_ca_certificate_stat.changed
+      when:
+        - ansible_os_family == 'Darwin'
+        - _macos_cert_check.rc != 0
       register: macos_trust
       failed_when: false
+
+    - name: Ensure Firefox distribution directory exists (macOS)
+      ansible.builtin.file:
+        path: "~/Library/Application Support/Firefox/distribution"
+        state: directory
+        mode: '0755'
+      when:
+        - ansible_os_family == 'Darwin'
+        - vault_firefox_enable_enterprise_roots | default(false) | bool
+
+    - name: Enable Firefox Enterprise Roots via policies.json (macOS)
+      ansible.builtin.copy:
+        dest: "~/Library/Application Support/Firefox/distribution/policies.json"
+        content: |
+          {
+            "policies": {
+              "ImportEnterpriseRoots": true
+            }
+          }
+        mode: '0644'
+      when:
+        - ansible_os_family == 'Darwin'
+        - vault_firefox_enable_enterprise_roots | default(false) | bool
 
 - name: "Setup Base System Components"
   hosts: all
@@ -274,40 +306,41 @@
 
     - name: Restart Caddy to apply new certificates
       containers.podman.podman_container:
-        name: "{{ reverse_proxy_container_name | default('reverse-proxy') }}"
+        name: "{{ reverse_proxy_container_name | default('edge-proxy') }}"
+        image: "{{ reverse_proxy_image | default('caddy:2.10.2') }}"
         state: started
         restart: true
       become: true
-      when: "'reverse_proxy_cluster' in group_names"
+      when: "'edge_proxy_cluster' in group_names"
       tags:
         - tls
         - trust
 
 - name: "Setup Pi-hole cluster (primary + replicas)"
-  hosts: pihole_cluster
+  hosts: dns_cluster
   gather_facts: true
   become: false
   roles:
-    - role: pihole
+    - role: dns
       tags:
-        - pihole
+        - dns
 
 - name: "Setup Load Balancer"
-  hosts: load_balancer_cluster
+  hosts: internal_lb_cluster
   gather_facts: true
   become: false
   roles:
-    - role: load_balancer
+    - role: internal_lb
       tags:
-        - load_balancer
+        - internal_lb
         - trust
 
 - name: "Setup Reverse Proxy"
-  hosts: reverse_proxy_cluster
+  hosts: edge_proxy_cluster
   gather_facts: true
   become: false
   roles:
-    - role: reverse_proxy
+    - role: edge_proxy
       tags:
-        - proxy
+        - edge_proxy
         - trust

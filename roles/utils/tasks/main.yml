@@ -29,6 +29,7 @@
       - httpie
       - python-pip
       - python-hvac
+      - rsync
       - less
       - unzip
       - iproute2        # provides ss, ip

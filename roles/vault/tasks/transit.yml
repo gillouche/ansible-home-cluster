@@ -95,8 +95,8 @@
     state: started
     restart_policy: unless-stopped
     published_ports:
-      - "{{ vault_api_port }}:8200/tcp"
-      - "{{ vault_cluster_port }}:8201/tcp"
+      - "{{ vault_api_port }}:{{ vault_api_port }}/tcp"
+      - "{{ vault_cluster_port }}:{{ vault_cluster_port }}/tcp"
     cap_add:
       - IPC_LOCK
       - DAC_OVERRIDE
@@ -248,6 +248,13 @@
   changed_when: false
   become: true
 
+- name: Check if transit token file exists on controller
+  ansible.builtin.stat:
+    path: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
+  delegate_to: localhost
+  register: _transit_token_file_stat
+  run_once: true
+
 - name: Create transit token
   ansible.builtin.command: /usr/local/bin/vault token create -policy="autounseal" -renewable=true -ttl=72h -format=json
   environment:
@@ -257,6 +264,7 @@
   register: _vault_transit_token_output
   changed_when: _vault_transit_token_output.rc == 0
   become: true
+  when: not _transit_token_file_stat.stat.exists
 
 - name: Ensure Vault controller export directory exists
   ansible.builtin.file:
@@ -272,4 +280,6 @@
     dest: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
     mode: '0600'
   delegate_to: localhost
-  when: _vault_transit_token_output.changed
+  when:
+    - _vault_transit_token_output.changed
+    - not _transit_token_file_stat.stat.exists

@@ -32,7 +32,7 @@
   ansible.builtin.debug:
     msg: >-
       load_balancer_vrrp_auth_pass is undefined or too short (<12). Skipping keepalived VRRP configuration on this host.
-      Define it in group_vars/load_balancer_cluster.vault.yml and encrypt with ansible-vault for HA VIP.
+      Define it in group_vars/internal_lb_cluster.vault.yml and encrypt with ansible-vault for HA VIP.
   when: (load_balancer_vrrp_auth_pass is not defined) or ((load_balancer_vrrp_auth_pass | length) < 12)
   become: false
 

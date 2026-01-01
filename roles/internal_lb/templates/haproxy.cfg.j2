@@ -30,7 +30,9 @@ frontend {{ fe.name }}
 {%   if fe.tcp_request_content_accept is defined %}
   tcp-request content accept if {{ fe.tcp_request_content_accept }}
 {%   endif %}
+{%   if fe.default_backend is defined %}
   default_backend {{ fe.default_backend }}
+{%   endif %}
 {%   if fe.extra is defined %}
 {%     for line in fe.extra %}
   {{ line }}
