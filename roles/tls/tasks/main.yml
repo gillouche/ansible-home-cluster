@@ -239,6 +239,7 @@
             group: root
             mode: '0644'
           become: true
+          register: _tls_cert_install_result
       when: _tls_cert_needs_renewal | default(true) # Run this block if renewal/regeneration is needed or if cert didn't exist
 
     - name: Ensure permissions on TLS assets (certs only)

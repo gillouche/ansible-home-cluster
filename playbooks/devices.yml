@@ -299,7 +299,9 @@
         state: started
         restart: true
       become: true
-      when: "'vault_leader' in group_names or 'vault_followers' in group_names"
+      when:
+        - "('vault_leader' in group_names or 'vault_followers' in group_names)"
+        - "_tls_cert_install_result is defined and _tls_cert_install_result.changed"
       tags:
         - tls
         - trust
@@ -311,7 +313,9 @@
         state: started
         restart: true
       become: true
-      when: "'edge_proxy_cluster' in group_names"
+      when:
+        - "'edge_proxy_cluster' in group_names"
+        - "_tls_cert_install_result is defined and _tls_cert_install_result.changed"
       tags:
         - tls
         - trust

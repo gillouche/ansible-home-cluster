@@ -252,6 +252,13 @@
   when: pihole_resolvconf_stat.stat.islnk | default(false)
   become: true
 
+- name: Check if resolv.conf already has the desired nameserver
+  ansible.builtin.command: grep -q "nameserver {{ pihole_static_dns }}" /etc/resolv.conf
+  register: _resolv_conf_check
+  failed_when: false
+  changed_when: false
+  when: pihole_static_dns is defined
+
 - name: Ensure host resolv.conf has a usable upstream during startup
   ansible.builtin.copy:
     dest: /etc/resolv.conf
@@ -261,7 +268,9 @@
     group: root
     mode: '0644'
   become: true
-  when: pihole_static_dns is defined
+  when:
+    - pihole_static_dns is defined
+    - _resolv_conf_check.rc != 0
 
 - name: Ensure Pi-hole data directories exist (host mounts)
   ansible.builtin.file:
@@ -324,6 +333,7 @@
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
     state: started
+    recreate: false
     hostname: "{{ inventory_hostname }}"
     restart_policy: always
     cap_add:
