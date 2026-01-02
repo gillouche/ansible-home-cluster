@@ -48,6 +48,8 @@
     state: started
     user: "{{ prometheus_uid }}:{{ prometheus_gid }}"
     restart_policy: always
+    dns:
+      - "{{ pihole_virtual_ip }}"
     publish:
       - "{{ prometheus_port }}:9090"
     volumes:

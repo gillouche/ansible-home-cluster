@@ -253,6 +253,31 @@
           - "Ready: {{ 'YES' if _prometheus_ready.status == 200 else 'NO (' ~ (_prometheus_ready.status | default('N/A')) ~ ')' }}"
           - "-----------------------------------------------------------"
 
+- name: "Node Exporter Health Check"
+  hosts: all
+  gather_facts: true
+  become: false
+  tags: [health, health_node_exporter]
+  vars_files:
+    - ../../../roles/prometheus_node_exporter/defaults/main.yml
+  tasks:
+    - name: Query Node Exporter Metrics
+      ansible.builtin.uri:
+        url: "http://localhost:{{ prometheus_node_exporter_port }}/metrics"
+        method: GET
+        status_code: 200
+      register: _node_exporter_status
+      failed_when: false
+
+    - name: Debug Node Exporter Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Node Exporter Health: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Status: {{ 'UP' if _node_exporter_status.status == 200 else 'DOWN (' ~ (_node_exporter_status.status | default('N/A')) ~ ')' }}"
+          - "-----------------------------------------------------------"
+
 - name: "Cluster Summary"
   hosts: localhost
   gather_facts: false

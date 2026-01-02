@@ -65,3 +65,6 @@ vault_edge_proxy_token_path: "{{ vault_init_export_path | dirname }}/edge_proxy_
 tls_root_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-root-ca.pem"
 tls_intermediate_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-intermediate-ca.pem"
 tls_bundle_anchor_path: "/etc/ca-certificates/trust-source/anchors/ca-bundle.pem"
+
+# Monitoring
+prometheus_node_exporter_port: 9100

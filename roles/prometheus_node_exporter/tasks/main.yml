@@ -1,0 +1,14 @@
+---
+- name: Run node-exporter container
+  containers.podman.podman_container:
+    name: "{{ prometheus_node_exporter_container_name }}"
+    image: "{{ prometheus_node_exporter_image }}"
+    state: started
+    restart_policy: always
+    network_mode: host
+    pid: host
+    volumes:
+      - "/:/host:ro,rslave"
+    command:
+      - '--path.rootfs=/host'
+  become: true
