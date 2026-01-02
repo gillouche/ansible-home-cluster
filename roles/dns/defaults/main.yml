@@ -1,29 +1,36 @@
 ---
-# Docker image and container name (pinned by default; override in group_vars if needed)
+# Docker image and container name
 pihole_image: "pihole/pihole:2025.11.1"
 pihole_container_name: "pihole"
 
+# User and directory configuration
+pihole_user: "pihole"
+pihole_group: "pihole"
+pihole_root_dir: "/home/{{ pihole_user }}"
+# Old path for migration logic
+pihole_old_root_dir: "/home/{{ target_user | default('alarm') }}/pihole"
+
 # Environment defaults
 pihole_web_password: "changeme"
-# Upstream DNS servers for Pi-hole inside the container (semicolon-separated per Pi-hole docs)
+# Upstream DNS servers for Pi-hole inside the container
 pihole_dns: "1.1.1.1;8.8.8.8"
-# Secondary DNS for Docker daemon to use when starting container (host resolver fallback)
+# Secondary DNS for Docker daemon to use when starting container
 pihole_static_dns: "1.1.1.1"
 
-# Timezone (will typically be provided globally via inventory)
+# Timezone
 pihole_timezone: "Europe/Brussels"
 
 # Optional: custom DNS A records to publish via Pi-hole (on primary only)
 pihole_custom_dns_records: []
 
 # Host path that is bind-mounted to /etc/pihole inside the container
-pihole_host_etc_dir: "/home/{{ target_user }}/pihole/pihole"
+pihole_host_etc_dir: "{{ pihole_root_dir }}/pihole"
 
 # Host path that is bind-mounted to /etc/dnsmasq.d inside the container
-pihole_host_dnsmasq_dir: "/home/{{ target_user }}/pihole/dnsmasq.d"
+pihole_host_dnsmasq_dir: "{{ pihole_root_dir }}/dnsmasq.d"
 
 # DNS record management mode:
-# - 'cli'     : use `pihole -a addcustomdns` / `removecustomdns` (appears in UI)
+# - 'cli'     : use `pihole -a addcustomdns` / `removecustomdns`
 # - 'dnsmasq' : write address= lines into /etc/dnsmasq.d/05-ansible-local-dns.conf
 pihole_dns_mode: "dnsmasq"
 
@@ -34,14 +41,14 @@ pihole_dns_wildcard_enabled: false
 pihole_dns_wildcard_domains:
   - "{{ base_domain | default('gillouche.homelab') }}"
 
-# Reverse proxy VIP used for wildcard DNS (defaults to global reverse_proxy_virtual_ip)
+# Reverse proxy VIP used for wildcard DNS
 pihole_reverse_proxy_vip: "{{ reverse_proxy_virtual_ip | default('192.168.0.252') }}"
 
 # VRRP Defaults
 pihole_vrrp_auth_pass: "p1h0l3"
 pihole_vip_prefixlen: 24
 
-# Networking/ports for Podman (always bridge; ports are configurable)
+# Networking/ports for Podman
 pihole_dns_tcp_port: 53
 pihole_dns_udp_port: 53
 pihole_http_host_port: 8080

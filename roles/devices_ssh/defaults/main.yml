@@ -1,6 +1,5 @@
 ---
-# defaults for devices_ssh role
-
-# Default bootstrap user and public key (can be overridden via -e)
-devices_bootstrap_user: "{{ ansible_user | default('alarm') }}"
-devices_bootstrap_pubkey: "{{ lookup('env', 'HOME') + '/.ssh/id_ed25519_local.pub' }}"
+# defaults for devices_ssh (generalized)
+devices_ssh_user: "{{ ansible_user | default('alarm') }}"
+devices_ssh_pubkey: "{{ lookup('env', 'HOME') + '/.ssh/id_ed25519_local.pub' }}"
+devices_ssh_peer_group: "{{ groups['all'] }}"

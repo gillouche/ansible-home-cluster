@@ -12,8 +12,33 @@
       - min
   when: ansible_distribution is not defined
 
+- name: Create pihole group
+  ansible.builtin.group:
+    name: "{{ pihole_group }}"
+    state: present
+    system: true
+  become: true
 
-- name: Allow rootless publish of low ports (enable ports <1024 starting at 53)
+- name: Create pihole user
+  ansible.builtin.user:
+    name: "{{ pihole_user }}"
+    group: "{{ pihole_group }}"
+    home: "{{ pihole_root_dir }}"
+    create_home: true
+    shell: /usr/bin/nologin
+    system: true
+    state: present
+  become: true
+
+- name: Setup SSH environment for pihole user
+  include_role:
+    name: devices_ssh
+  vars:
+    devices_ssh_user: "{{ pihole_user }}"
+    devices_ssh_group: "{{ pihole_group }}"
+    devices_ssh_peer_group: "{{ groups['dns_cluster'] }}"
+
+- name: Allow rootless publish of low ports
   ansible.posix.sysctl:
     name: net.ipv4.ip_unprivileged_port_start
     value: '53'
@@ -22,36 +47,67 @@
     reload: true
   become: true
 
-- name: Create pihole directory
-  ansible.builtin.file:
-    path: "/home/{{ target_user }}/pihole"
-    owner: "{{ target_user }}"
-    group: "{{ target_user }}"
-    state: directory
-    mode: "0755"
-
-# Ensure container-mapped config directories exist on host
-- name: Ensure Pi-hole host etc and dnsmasq.d directories exist
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: "{{ target_user }}"
-    group: "{{ target_user }}"
-    mode: "0755"
-  loop:
-    - "{{ pihole_host_etc_dir }}"
-    - "{{ pihole_host_dnsmasq_dir }}"
-  become: true
-
-# -------------------------
-# Cluster setup (primary + replicas) — keepalived handled by dedicated role
-# -------------------------
-
 - name: Determine Pi-hole cluster role for this host
   ansible.builtin.set_fact:
     pihole_is_primary: "{{ inventory_hostname in (groups['pihole_primary'] | default([])) }}"
     pihole_is_replica: "{{ inventory_hostname in (groups['pihole_replicas'] | default([])) }}"
   become: false
+
+# ------------------------------------------------------------------------------
+# Migration Logic
+# ------------------------------------------------------------------------------
+
+- name: Check if old pihole directory exists
+  ansible.builtin.stat:
+    path: "{{ pihole_old_root_dir }}"
+  register: _old_pihole_dir_stat
+  become: false
+
+- name: Migration Block
+  when:
+    - _old_pihole_dir_stat.stat.exists
+    - _old_pihole_dir_stat.stat.isdir
+  become: true
+  block:
+    - name: Stop running pihole container prior to migration
+      containers.podman.podman_container:
+        name: "{{ pihole_container_name }}"
+        state: stopped
+      failed_when: false
+
+    - name: Migrate data from old to new home (rsync)
+      ansible.builtin.shell: |
+        rsync -avz --ignore-existing "{{ pihole_old_root_dir }}/" "{{ pihole_root_dir }}/"
+      changed_when: true
+
+    - name: Ensure correct ownership on new home
+      ansible.builtin.file:
+        path: "{{ pihole_root_dir }}"
+        owner: "{{ pihole_user }}"
+        group: "{{ pihole_group }}"
+        recurse: true
+        state: directory
+
+    - name: Backup old directory
+      ansible.builtin.command: >
+        mv "{{ pihole_old_root_dir }}" "{{ pihole_old_root_dir }}.migrated.{{ ansible_date_time.iso8601_basic_short }}"
+      changed_when: true
+
+# ------------------------------------------------------------------------------
+# Normal configuration
+# ------------------------------------------------------------------------------
+
+- name: Ensure Pi-hole host config directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ pihole_user }}"
+    group: "{{ pihole_group }}"
+    mode: "0755"
+  loop:
+    - "{{ pihole_host_etc_dir }}"
+    - "{{ pihole_host_dnsmasq_dir }}"
+  become: true
 
 - name: Assert required Pi-hole cluster variables are defined
   ansible.builtin.assert:
@@ -59,24 +115,8 @@
       - pihole_virtual_ip is defined
       - pihole_primary_host is defined
     fail_msg: >-
-      Required variables for Pi-hole VRRP are missing. Ensure group_vars/dns_cluster.yml
-      defines at least:
-        pihole_virtual_ip: <VIP address>
-        pihole_primary_host: <inventory hostname of primary>
-      Current inventory path: {{ inventory_file | default('unknown') }}
+      Required variables for Pi-hole VRRP are missing.
   when: inventory_hostname in (groups['dns_cluster'] | default([]))
-  become: false
-
-  # keepalived base setup is handled by the dedicated keepalived role
-
-### Pi-hole 6: minimally update existing /etc/pihole/pihole.toml (do not overwrite)
-
-- name: Stop running pihole container prior to config edits (best-effort)
-  containers.podman.podman_container:
-    name: "{{ pihole_container_name }}"
-    state: stopped
-  failed_when: false
-  changed_when: false
   become: false
 
 - name: Stat pihole.toml
@@ -89,8 +129,8 @@
   ansible.builtin.file:
     path: "{{ pihole_host_etc_dir }}/pihole.toml"
     state: touch
-    owner: root
-    group: root
+    owner: "{{ pihole_user }}"
+    group: "{{ pihole_group }}"
     mode: '0644'
   when: not (pihole_toml_stat.stat.exists | default(false))
   become: true
@@ -104,7 +144,7 @@
     state: present
   become: true
 
-- name: Enable loading of /etc/dnsmasq.d in pihole.toml (etc_dnsmasq_d = true)
+- name: Enable loading of /etc/dnsmasq.d in pihole.toml
   block:
     - name: Detect if etc_dnsmasq_d already true
       ansible.builtin.command: >-
@@ -142,10 +182,6 @@
       notify: Restart pihole dns
       become: true
 
-# -------------------------
-# Custom DNS A records via dnsmasq.d (preferred automation mode)
-# -------------------------
-
 - name: Manage custom DNS records via dnsmasq (address= lines)
   when:
     - (pihole_dns_mode | default('dnsmasq')) == 'dnsmasq'
@@ -154,16 +190,16 @@
     - name: Render custom DNS records file from template
       ansible.builtin.template:
         src: dnsmasq-custom.conf.j2
-        dest: "/home/{{ target_user }}/pihole/dnsmasq.d/05-ansible-local-dns.conf"
-        owner: root
-        group: root
+        dest: "{{ pihole_host_dnsmasq_dir }}/05-ansible-local-dns.conf"
+        owner: "{{ pihole_user }}"
+        group: "{{ pihole_group }}"
         mode: '0644'
       when: (pihole_custom_dns_records | default([])) | length > 0
       notify: Restart pihole dns
 
     - name: Remove custom DNS records file when list is empty
       ansible.builtin.file:
-        path: "/home/{{ target_user }}/pihole/dnsmasq.d/05-ansible-local-dns.conf"
+        path: "{{ pihole_host_dnsmasq_dir }}/05-ansible-local-dns.conf"
         state: absent
       when: (pihole_custom_dns_records | default([])) | length == 0
 
@@ -192,12 +228,6 @@
   become: true
   when: inventory_hostname in (groups['dns_cluster'] | default([]))
 
-  # keepalived service management and validation handled by keepalived role
-
-# -------------------------
-# Replicas: keep configuration in sync with primary using Gravity Sync (Docker mode)
-# -------------------------
-
 - name: Ensure sync prerequisites on replicas (Arch)
   community.general.pacman:
     name:
@@ -208,7 +238,6 @@
   become: true
   when: (ansible_facts['distribution'] | lower) == 'archlinux' and (pihole_is_replica | bool)
 
-
 - name: Clone Gravity Sync on replicas
   ansible.builtin.git:
     repo: https://github.com/vmstan/gravity-sync.git
@@ -217,10 +246,6 @@
     update: false
   become: true
   when: (pihole_is_replica | bool) and (gravity_sync_enabled | default(true))
-
-# -------------------------
-# Docker container runtime for Pi-hole
-# -------------------------
 
 - name: Stop and disable systemd-resolved (free port 53)
   ansible.builtin.systemd:
@@ -231,7 +256,7 @@
   become: true
   failed_when: false
 
-- name: Stop and disable dnsmasq if present (avoid port 53 conflict)
+- name: Stop and disable dnsmasq if present
   ansible.builtin.systemd:
     name: dnsmasq
     state: stopped
@@ -272,23 +297,11 @@
     - pihole_static_dns is defined
     - _resolv_conf_check.rc != 0
 
-- name: Ensure Pi-hole data directories exist (host mounts)
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: "{{ target_user }}"
-    group: "{{ target_user }}"
-    mode: "0755"
-  loop:
-    - "/home/{{ target_user }}/pihole/pihole"
-    - "/home/{{ target_user }}/pihole/dnsmasq.d"
-  become: true
-
 - name: Configure wildcard DNS to reverse-proxy VIP via dnsmasq (optional)
   ansible.builtin.copy:
-    dest: "/home/{{ target_user }}/pihole/dnsmasq.d/99-wildcard-vip.conf"
-    owner: root
-    group: root
+    dest: "{{ pihole_host_dnsmasq_dir }}/99-wildcard-vip.conf"
+    owner: "{{ pihole_user }}"
+    group: "{{ pihole_group }}"
     mode: '0644'
     content: |
       {% for d in (pihole_dns_wildcard_domains | default([])) %}
@@ -302,31 +315,13 @@
 
 - name: Remove wildcard DNS config if domains list is empty or disabled
   ansible.builtin.file:
-    path: "/home/{{ target_user }}/pihole/dnsmasq.d/99-wildcard-vip.conf"
+    path: "{{ pihole_host_dnsmasq_dir }}/99-wildcard-vip.conf"
     state: absent
   when: >
     (not (pihole_dns_wildcard_enabled | default(false) | bool)) or
     ((pihole_dns_wildcard_domains | default([])) | length == 0)
   notify: Restart pihole dns
   become: true
-
-- name: Get target user UID
-  ansible.builtin.command: id -u {{ target_user }}
-  register: pihole_target_user_uid
-  changed_when: false
-  become: false
-
-- name: Get target user GID
-  ansible.builtin.command: id -g {{ target_user }}
-  register: pihole_target_user_gid
-  changed_when: false
-  become: false
-
-- name: Set UID/GID facts for container
-  ansible.builtin.set_fact:
-    pihole_target_uid: "{{ (pihole_target_user_uid.stdout | default('')) | trim }}"
-    pihole_target_gid: "{{ (pihole_target_user_gid.stdout | default('')) | trim }}"
-  become: false
 
 - name: Start/Update pihole container (Podman, rootful)
   containers.podman.podman_container:
@@ -352,8 +347,8 @@
       FTLCONF_dns_upstreams: "{{ pihole_dns }}"
       FTLCONF_dns_piholePtr: "HOSTNAME"
     volumes:
-      - "/home/{{ target_user }}/pihole/pihole/:/etc/pihole/"
-      - "/home/{{ target_user }}/pihole/dnsmasq.d/:/etc/dnsmasq.d/"
+      - "{{ pihole_host_etc_dir }}/:/etc/pihole/"
+      - "{{ pihole_host_dnsmasq_dir }}/:/etc/dnsmasq.d/"
   become: true
 
 - name: Wait for pihole web UI to be up
@@ -383,7 +378,7 @@
     mode: '0644'
   vars:
     gs_primary_host: "{{ hostvars[pihole_primary_host].ansible_host | default(pihole_primary_host) }}"
-    gs_primary_user: "{{ hostvars[pihole_primary_host].ansible_ssh_user | default(target_user) }}"
+    gs_primary_user: "{{ pihole_user }}"
     gs_primary_port: "{{ hostvars[pihole_primary_host].ansible_port | default(22) }}"
     gs_container_name: "{{ pihole_container_name | default('pihole') }}"
   become: true
@@ -417,5 +412,3 @@
   become: true
   when: (pihole_is_replica | bool) and (gravity_sync_enabled | default(true))
   check_mode: no
-
-## Removed role execution flag mechanism; rely on idempotent tasks

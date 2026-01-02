@@ -10,13 +10,13 @@ GS_PRIMARY_PORT={{ gs_primary_port }}
 GS_DOCKER_ENABLED=true
 GS_DOCKER_CONTAINER={{ gs_container_name }}
 # Local and remote (inside container) standard paths
-GS_LOCAL_PATH_PIHOLE=/etc/pihole
-GS_LOCAL_PATH_DNSMASQ=/etc/dnsmasq.d
+GS_LOCAL_PATH_PIHOLE={{ pihole_host_etc_dir }}
+GS_LOCAL_PATH_DNSMASQ={{ pihole_host_dnsmasq_dir }}
 GS_REMOTE_PATH_PIHOLE=/etc/pihole
 GS_REMOTE_PATH_DNSMASQ=/etc/dnsmasq.d
 
-# Optional: SSH key path (defaults to the user's default key if omitted)
-# GS_SSH_KEY=/home/{{ hostvars[inventory_hostname].ansible_ssh_user | default(target_user) }}/.ssh/id_ed25519
+# Optional: SSH key path
+GS_SSH_KEY=/home/{{ pihole_user }}/.ssh/id_ed25519
 
 # Optional: Log level (info|debug)
 # GS_LOG_LEVEL=info
