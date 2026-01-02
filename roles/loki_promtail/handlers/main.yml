@@ -1,0 +1,8 @@
+---
+- name: Restart promtail
+  containers.podman.podman_container:
+    name: "{{ loki_promtail_container_name }}"
+    image: "{{ loki_promtail_image }}"
+    state: started
+    restart: yes
+  become: true

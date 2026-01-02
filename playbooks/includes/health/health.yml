@@ -7,9 +7,10 @@
   vars:
     ansible_connection: local
   tasks:
-    - name: Set fact for Homelab Root CA path
-      ansible.builtin.set_fact:
-        homelab_root_ca_cert_path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
+    - name: Ensure facts are gathered
+      ansible.builtin.debug:
+        msg: "Facts gathered for {{ inventory_hostname }}"
+      run_once: true
 
 - name: "Vault Cluster Health Check"
   hosts: vault_cluster
@@ -278,6 +279,31 @@
           - "Status: {{ 'UP' if _node_exporter_status.status == 200 else 'DOWN (' ~ (_node_exporter_status.status | default('N/A')) ~ ')' }}"
           - "-----------------------------------------------------------"
 
+- name: "Promtail Health Check"
+  hosts: all
+  gather_facts: true
+  become: false
+  tags: [health, health_promtail]
+  vars_files:
+    - ../../../roles/loki_promtail/defaults/main.yml
+  tasks:
+    - name: Query Promtail Health
+      ansible.builtin.uri:
+        url: "http://localhost:{{ loki_promtail_http_listen_port }}/ready"
+        method: GET
+        status_code: 200
+      register: _promtail_ready
+      failed_when: false
+
+    - name: Debug Promtail Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Promtail Health: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Ready: {{ 'YES' if _promtail_ready.status == 200 else 'NO (' ~ (_promtail_ready.status | default('N/A')) ~ ')' }}"
+          - "-----------------------------------------------------------"
+
 - name: "Loki Health Check"
   hosts: loki
   gather_facts: true
@@ -294,13 +320,62 @@
       register: _loki_ready
       failed_when: false
 
+    - name: Query Loki Log Level
+      ansible.builtin.uri:
+        url: "http://localhost:{{ loki_port }}/log_level"
+        method: GET
+        status_code: 200
+      register: _loki_log_level
+      failed_when: false
+
+    - name: Query Loki Build Info
+      ansible.builtin.uri:
+        url: "http://localhost:{{ loki_port }}/loki/api/v1/status/buildinfo"
+        method: GET
+        status_code: 200
+      register: _loki_build_info
+      failed_when: false
+
     - name: Debug Loki Health
       ansible.builtin.debug:
         msg:
           - "-----------------------------------------------------------"
           - "Loki Health Check: {{ inventory_hostname }}"
           - "-----------------------------------------------------------"
-          - "Ready: {{ 'YES' if _loki_ready.status == 200 else 'NO (' ~ (_loki_ready.status | default('N/A')) ~ ')' }}"
+          - "Ready:      {{ 'YES' if _loki_ready.status == 200 else 'NO (' ~ (_loki_ready.status | default('N/A')) ~ ')' }}"
+          - "Log Level:  {{ (_loki_log_level.json.message | default('N/A')) if (_loki_log_level.json is defined and 'message' in _loki_log_level.json) else (_loki_log_level.content | default('N/A') | trim) if _loki_log_level.status == 200 else 'ERROR (' ~ (_loki_log_level.status | default('N/A')) ~ ')' }}"
+          - "Version:    {{ _loki_build_info.json.version if (_loki_build_info.json is defined and 'version' in _loki_build_info.json) else 'N/A' }}"
+          - "Revision:   {{ _loki_build_info.json.revision if (_loki_build_info.json is defined and 'revision' in _loki_build_info.json) else 'N/A' }}"
+          - "-----------------------------------------------------------"
+
+- name: "External Services Health Check (via Proxy)"
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tags: [health, health_external]
+  tasks:
+    - name: Verify Prometheus via External Proxy (HTTPS)
+      ansible.builtin.command:
+        cmd: "curl --fail --silent --cacert {{ homelab_root_ca_cert_path | expanduser }} https://prometheus.{{ base_domain }}/-/ready"
+      register: _external_prometheus_ready
+      changed_when: false
+      failed_when: false
+
+    - name: Verify Loki via External Proxy (HTTPS)
+      ansible.builtin.command:
+        cmd: "curl --fail --silent --cacert {{ homelab_root_ca_cert_path | expanduser }} https://loki.{{ base_domain }}/ready"
+      register: _external_loki_ready
+      changed_when: false
+      failed_when: false
+
+    - name: Debug External Services Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "External Proxy Health Check"
+          - "-----------------------------------------------------------"
+          - "Prometheus (HTTPS): {{ 'UP' if _external_prometheus_ready.rc == 0 else 'DOWN (' ~ _external_prometheus_ready.rc ~ ')' }}"
+          - "Loki (HTTPS):       {{ 'UP' if _external_loki_ready.rc == 0 else 'DOWN (' ~ _external_loki_ready.rc ~ ')' }}"
           - "-----------------------------------------------------------"
 
 - name: "Cluster Summary"

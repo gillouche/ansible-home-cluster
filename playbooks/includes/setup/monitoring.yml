@@ -1,10 +1,11 @@
-- name: "Setup Prometheus Node Exporter"
+- name: "Setup Monitoring Agents (Exporters)"
   hosts: all
   gather_facts: true
   become: false
-  tags: [infra, prometheus_node_exporter, monitoring]
+  tags: [infra, monitoring_agents, monitoring]
   roles:
     - role: prometheus_node_exporter
+    - role: loki_promtail
 
 - name: "Setup Prometheus"
   hosts: prometheus

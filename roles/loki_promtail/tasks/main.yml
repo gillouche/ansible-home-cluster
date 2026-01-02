@@ -1,0 +1,32 @@
+---
+- name: Ensure configuration directory exists
+  ansible.builtin.file:
+    path: "{{ loki_promtail_config_dir }}"
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Deploy promtail configuration
+  ansible.builtin.template:
+    src: promtail-config.yml.j2
+    dest: "{{ loki_promtail_config_dir }}/promtail-config.yml"
+    mode: '0644'
+  become: true
+  notify: Restart promtail
+
+- name: Run promtail container
+  containers.podman.podman_container:
+    name: "{{ loki_promtail_container_name }}"
+    image: "{{ loki_promtail_image }}"
+    state: started
+    restart_policy: always
+    network_mode: host
+    volumes:
+      - "{{ loki_promtail_config_dir }}/promtail-config.yml:/etc/promtail/config.yml:Z"
+      - "/var/log:/var/log:ro"
+      - "/run/log/journal:/run/log/journal:ro"
+    env:
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+  become: true

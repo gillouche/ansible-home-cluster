@@ -1,0 +1,37 @@
+server:
+  http_listen_port: {{ loki_promtail_http_listen_port }}
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: {{ loki_url }}
+
+scrape_configs:
+{% for scrape_config in loki_promtail_scrape_configs %}
+  - job_name: {{ scrape_config.job_name }}
+{% if scrape_config.type | default('static') == 'static' %}
+    static_configs:
+    - targets:
+        - localhost
+      labels:
+        host: {{ inventory_hostname }}
+{% if scrape_config.labels is defined %}
+{% for key, value in scrape_config.labels.items() %}
+        {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+        __path__: {{ scrape_config.path }}
+{% elif scrape_config.type == 'journal' %}
+    journal:
+      max_age: 12h
+      labels:
+        host: {{ inventory_hostname }}
+{% if scrape_config.labels is defined %}
+{% for key, value in scrape_config.labels.items() %}
+        {{ key }}: {{ value }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% endfor %}

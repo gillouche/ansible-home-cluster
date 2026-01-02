@@ -30,6 +30,7 @@ load_balancer_haproxy_frontends:
 
       # ACLs for Loki
       - "acl is_loki hdr(host) -i loki.{{ base_domain }}"
+      - "acl is_loki_path path_beg /loki/"
 
       # Routing Logic
       - "use_backend pihole_primary if is_pihole_primary"
@@ -44,11 +45,14 @@ load_balancer_haproxy_frontends:
       - "use_backend prometheus_backend if is_prometheus"
 
       # Routing Logic for Loki
-      - "use_backend loki_backend if is_loki"
+      - "use_backend loki_backend if is_loki || is_loki_path"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
       - "http-request redirect location /admin code 301 if is_pihole_cluster !{ path_beg /admin } !{ path_beg /api } !{ path_beg /remote.php }"
+
+      # Loki Root Redirect (Loki has no UI, redirect / to /loki/ready)
+      - "http-request redirect location /loki/ready code 301 if is_loki { path / }"
 
 load_balancer_haproxy_backends:
   - name: vault_back

@@ -54,6 +54,7 @@ vault_pki_int_role_name: "homelab-server"
 vault_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
 vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.crt"
 vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.key"
+homelab_root_ca_cert_path: "{{ vault_cluster_ca_dir_controller }}/ca-bundle.pem"
 
 # Controller-side Initialization and Token Paths
 vault_init_export_path: "~/.local/share/ansible-home-cluster/cluster-init.json"
@@ -69,4 +70,7 @@ tls_bundle_anchor_path: "/etc/ca-certificates/trust-source/anchors/ca-bundle.pem
 # Monitoring
 prometheus_node_exporter_port: 9100
 prometheus_node_exporter_image: prom/node-exporter:v1.10.2
+loki_port: 3100
 loki_image: docker.io/grafana/loki:3.6.3
+loki_promtail_http_listen_port: 9080
+loki_promtail_image: docker.io/grafana/promtail:3.6.3
