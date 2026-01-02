@@ -20,11 +20,11 @@ seal "transit" {
   {% set _bootstrap_ip = hostvars[_bootstrap_host].ansible_host | default(hostvars[_bootstrap_host].ansible_facts.default_ipv4.address) %}
   address         = "https://{{ _bootstrap_ip }}:{{ vault_api_port }}"
   {# Read the transit token directly from the controller file and sanitize quotes/newlines #}
-  {% set _transit_token = lookup('file', (vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault/transit_token.txt')) | expanduser) | trim | replace('"','\\"') %}
+  {% set _transit_token = lookup('file', vault_transit_token_export_path | expanduser) | trim | replace('"','\\"') %}
   token           = "{{ _transit_token }}"
-  key_name        = "{{ (vault_transit_key_name | default('autounseal')) | trim | replace('"','\\"') }}"
-  mount_path      = "{{ (vault_transit_mount_path | default('transit/')) | trim | replace('"','\\"') }}"
-  tls_skip_verify = {{ (vault_transit_tls_skip_verify | default(false)) | ternary('true','false') }}
+  key_name        = "{{ vault_transit_key_name | trim | replace('"','\\"') }}"
+  mount_path      = "{{ vault_transit_mount_path | trim | replace('"','\\"') }}"
+  tls_skip_verify = {{ vault_transit_tls_skip_verify | ternary('true','false') }}
 }
 {% endif %}
 

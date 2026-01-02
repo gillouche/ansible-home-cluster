@@ -11,6 +11,6 @@ vrrp_instance VI_LoadBalancer {
   }
 
   virtual_ipaddress {
-    {{ vip_address }}/{{ vip_prefixlen | default(24) }}
+    {{ vip_address }}/{{ load_balancer_vip_prefixlen }}
   }
 }

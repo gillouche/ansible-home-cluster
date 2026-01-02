@@ -2,110 +2,31 @@
 # Caddy container configuration
 reverse_proxy_container_name: "edge-proxy"
 reverse_proxy_image: "caddy:2.10.2"
-lan_subnet: "192.168.0.0/24"
-
-# TLS settings — Vault ACME by default (no file certs)
-# Modes:
-#   vault_acme -> Caddy obtains/renews certs from Vault's ACME endpoint
-#   none       -> serve HTTP only (auto_https disabled)
-reverse_proxy_tls_mode: "vault_acme"
-
-# Vault ACME settings
-# Email used for ACME account registration in Caddy
-reverse_proxy_acme_email: ""
-# EAB is not used by default in this homelab setup; keep configuration minimal
-# ACME directory URL served by Vault. Use the HAProxy VIP on port 8200 so
-# ACME always targets the active Vault leader via the load balancer.
-# Falls back to reverse_proxy_virtual_ip, then localhost if VIP not defined.
-reverse_proxy_acme_ca_url: >-
-  {{
-    "https://"
-    ~ (load_balancer_virtual_ip | default(reverse_proxy_virtual_ip | default('127.0.0.1')))
-    ~ ":" ~ (vault_api_port | default(8200) | string)
-    ~ "/v1/pki_int/acme/directory"
-  }}
 
 # VIP and primary host sane defaults (override in group_vars as needed)
 reverse_proxy_virtual_ip: "192.168.0.252"
 reverse_proxy_bind_ip: "{{ reverse_proxy_virtual_ip }}"
 reverse_proxy_primary_host: "rpi5b16g4"
 
-# Simple default backend example (Pi-hole on same node)
-reverse_proxy_sites:
-  - host: "primary-pihole.{{ base_domain | default('gillouche.homelab') }}"
-    upstream: "192.168.0.84:8443"
-    endpoint: "/admin"
-  - host: "replica1-pihole.{{ base_domain | default('gillouche.homelab') }}"
-    upstream: "192.168.0.85:8443"
-    endpoint: "/admin"
-  - host: "replica2-pihole.{{ base_domain | default('gillouche.homelab') }}"
-    upstream: "192.168.0.86:8443"
-    endpoint: "/admin"
-
-# Provide Vault CA to Caddy so it can reach Vault's ACME over TLS
-# On Arch, the consolidated trust bundle is /etc/ssl/cert.pem by default.
-# We mount the host bundle read-only into the container and point SSL_CERT_FILE to it.
-reverse_proxy_mount_host_ca_bundle: true
-reverse_proxy_ca_host_file: "/etc/ssl/cert.pem"
-reverse_proxy_ca_container_file: "/etc/ssl/certs/host-ca-bundle.pem"
+# Default ACME email if not provided in group_vars
+reverse_proxy_acme_email: "noreply@{{ base_domain | default('gillouche.homelab') }}"
 
 # Resolver IP to prefer on reverse proxy hosts when managing /etc/resolv.conf.
-# Defaults to the Pi-hole VIP if available, else falls back to the reverse proxy VIP.
-reverse_proxy_resolver_ip: "{{ pihole_virtual_ip | default(reverse_proxy_virtual_ip) }}"
+reverse_proxy_resolver_ip: "{{ pihole_virtual_ip | default('192.168.0.251') }}"
 
 # Fallback option: if set to true explicitly, we will write /etc/resolv.conf
-# directly.
 reverse_proxy_manage_resolv_conf: true
 reverse_proxy_public_resolver: "1.1.1.1"
 
-# Staggered start for Caddy when using ACME to reduce concurrent registration bursts
-# Enable to introduce a small randomized delay before (re)starting the Caddy container
-reverse_proxy_acme_stagger_enabled: true
-# Maximum random delay in seconds (actual delay is 1..N)
-reverse_proxy_acme_start_delay_max: 60
-
-# One-time restart toggle for play runs. Keep false by default; set to true when you
-# want the role to force-restart Caddy containers during deployment.
-reverse_proxy_restart_now: false
-
-# Ensure host-side Caddy data tree is group-readable by this group and that new
-# files inherit the group via setgid + default ACLs. The project uses 'alarm'.
-reverse_proxy_data_group: "alarm"
-# Reverse proxy defaults (Vault ACME + rootful Podman)
-
-# Bind ports
-reverse_proxy_http_port: 80
-reverse_proxy_https_port: 443
-
-# Host paths
+# Reverse proxy directory structure
 reverse_proxy_root_dir: "/home/reverse_proxy"
 reverse_proxy_config_dir: "{{ reverse_proxy_root_dir }}/config"
 reverse_proxy_data_dir: "{{ reverse_proxy_root_dir }}/data"
 reverse_proxy_certs_dir: "{{ reverse_proxy_root_dir }}/certs"
 
-# Runtime user/group for file ownership on host (rootful container; keep root:root)
-reverse_proxy_owner: "root"
-reverse_proxy_group: "root"
-
 # Domains to serve (list of hostnames/FQDNs)
 reverse_proxy_domains: []
 
-# Vault ACME directory URL consumed by Caddy. Point to HAProxy VIP:8200 so
-# ACME requests are directed to the current leader. Override if needed.
-vault_acme_directory_url: >-
-  {{
-    "https://"
-    ~ (load_balancer_virtual_ip | default(reverse_proxy_virtual_ip | default('127.0.0.1')))
-    ~ ":" ~ (vault_api_port | default(8200) | string)
-    ~ "/v1/pki_int/acme/directory"
-  }}
-
-# Optional: if your Vault PKI ACME endpoint requires a token/cookie header (most flows do not),
-# you can pass it here to Caddy via global headers (advanced use only)
-reverse_proxy_extra_global_headers: {}
-
-# Whether to force HTTPS on all hosts
-reverse_proxy_force_https: true
-
-# Extra site blocks (advanced): list of Caddyfile snippets to append
-reverse_proxy_extra_sites: []
+# Vault ACME directory URL consumed by Caddy.
+# Defaults to localhost since Caddy runs in host network mode to reach the local Vault.
+reverse_proxy_acme_ca_url: "https://127.0.0.1:{{ vault_api_port | default(18200) }}/v1/pki_int/acme/directory"

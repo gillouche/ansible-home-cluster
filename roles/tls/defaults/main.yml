@@ -9,30 +9,11 @@ tls_cluster_ca_key_controller: "{{ tls_cluster_ca_dir_controller }}/homelab-root
 tls_additional_san_ips: []
 tls_additional_san_dns: []
 
-# Include HAProxy VIP automatically when available in inventory
-tls_include_load_balancer_vip: true
-
 # Cert validity (days)
 tls_server_cert_days: 1825
 
-# Toggle to generate server certificate for the host (default: false as only specific services need it)
+# Toggle to generate server certificate for the host
 tls_generate_server_cert: false
-
-# System anchor destination for the Cluster CA
-tls_root_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-root-ca.pem"
-tls_intermediate_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-intermediate-ca.pem"
-tls_bundle_anchor_path: "/etc/ca-certificates/trust-source/anchors/ca-bundle.pem"
-tls_system_anchor_path: "{{ tls_bundle_anchor_path }}"
 
 # Group to allow non-root read access to private keys (optional)
 tls_group_name: "tls"
-
-# Diagnostics and retention
-tls_debug: false
-# Keep CSRs on controller for N days (set to an integer to enable). When undefined, CSRs are deleted after signing.
-tls_keep_csrs_days: ""
-
-# Optional: import Cluster CA into macOS keychain on controller
-tls_trust_ca_on_controller: false
-# 'login' or 'system'
-tls_controller_install_keychain: login

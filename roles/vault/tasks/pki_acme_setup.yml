@@ -354,10 +354,9 @@
 - name: Store edge-proxy token on controller
   ansible.builtin.copy:
     content: "{{ (_edge_proxy_token_output.stdout | from_json).auth.client_token }}"
-    dest: "{{ vault_eab_export_path | default('~/.local/share/ansible-home-cluster/vault/acme_eab.json') | dirname }}/edge_proxy_token.txt"
-    mode: '0600'
+    dest: "{{ vault_edge_proxy_token_path }}"
   delegate_to: localhost
-  when: _edge_proxy_token_output.changed
+  become: false
 
 - name: Configure intermediate PKI URLs (pki_int)
   ansible.builtin.command: >

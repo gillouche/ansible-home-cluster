@@ -208,7 +208,7 @@
       - "{{ vault_host_config_dir }}:/vault/config"
       - "{{ vault_host_tls_dir }}:/vault/tls"
       - "{{ vault_host_data_dir }}:/vault/data"
-      - "{{ vault_logs_dir }}:{{ vault_logs_dir_in_container | default('/vault/logs') }}"
+      - "{{ vault_host_logs_dir }}:{{ vault_logs_dir_in_container | default('/vault/logs') }}"
       - "{{ vault_host_bin_dir }}:/vault/bin"
   become: true
 

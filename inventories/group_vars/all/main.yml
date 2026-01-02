@@ -55,6 +55,13 @@ vault_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
 vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.crt"
 vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.key"
 
+# Controller-side Initialization and Token Paths
+vault_init_export_path: "~/.local/share/ansible-home-cluster/cluster-init.json"
+vault_transit_init_export_path: "~/.local/share/ansible-home-cluster/transit-init.json"
+vault_transit_token_export_path: "~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt"
+vault_edge_proxy_token_path: "{{ vault_init_export_path | dirname }}/edge_proxy_token.txt"
+
 # Global System Trust Anchor Paths
 tls_root_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-root-ca.pem"
 tls_intermediate_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-intermediate-ca.pem"
+tls_bundle_anchor_path: "/etc/ca-certificates/trust-source/anchors/ca-bundle.pem"

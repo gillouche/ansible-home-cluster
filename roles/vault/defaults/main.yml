@@ -3,320 +3,80 @@ vault_image: "hashicorp/vault:1.21.1"
 vault_version: "1.21.1"
 vault_container_name: "vault"
 vault_api_port: 18200
-lan_subnet: "192.168.0.0/24"
 
-# Networking policy: all containers use bridge networking with published ports.
-# Host networking is not supported and should not be used.
-
-# Container-internal paths (for config/TLS/data mounts)
+# Container-internal paths
 vault_cfg_path_in_container: "/vault/config/vault.hcl"
 vault_tls_dir_in_container: "/vault/tls"
 vault_data_dir_in_container: "/vault/data"
 vault_logs_dir_in_container: "/vault/logs"
 
-# Host logs directory (bind-mounted) to persist container app logs
-vault_logs_dir: "/home/vault/logs"
-
-# Host bin directory to store startup wrapper (bind-mounted)
-vault_bin_dir: "/home/vault/bin"
-
-# Runtime user that will own Vault files on host and be used inside the container
-# Create/manage a dedicated vault:vault account on vault_cluster hosts
+# Runtime user
 vault_runtime_user: "vault"
-vault_runtime_uid: 100
-vault_runtime_gid: 1000   # optional hint, not enforced; group name below is authoritative
 vault_runtime_group_name: "vault"
 
-# Host paths for Vault configuration, TLS, and data (will be created)
-# Requested layout under /home/vault so these paths are bind-mounted into the container
+# Host paths
 vault_host_root_dir_data: "/home/vault"
 vault_host_config_dir: "/home/vault/config"
-vault_host_tls_dir: "{{ tls_dir }}"
+vault_host_tls_dir: "{{ tls_dir | default('/etc/tls') }}"
 vault_host_data_dir: "/home/vault/data"
 vault_host_logs_dir: "/home/vault/logs"
 vault_host_bin_dir: "/home/vault/bin"
 
-# Docker logging options (persist stdout/stderr via json-file)
-# For deep debugging, you can increase size and keep a single file
-vault_docker_log_driver: "json-file"
-vault_docker_log_max_size: "1g"
-vault_docker_log_max_file: "1"
-
-# Container user
-# Run Vault container as root (per request) for maximum access to mounted folders
+# Container options
 vault_container_user: "root"
-
-# Write full startup logs to files inside the container via a wrapper (tee)
-# Enabled by default to capture complete logs from process start.
 vault_enable_log_wrapper: true
-
-# Log level for Vault (when using wrapper)
 vault_log_level: "debug"
 
-# Optional admin token (otherwise the role will prefer the stored automation token,
-# or fall back to root token from vault-init.json when needed for initial setup)
-vault_admin_token: ""
+# Networking
+vault_listener_address: "0.0.0.0"
+vault_bind_ip: "0.0.0.0"
 
-# Recreate container on image/config change (docker task toggle)
-vault_docker_recreate: false
-
-# Extra entries to inject into the container's /etc/hosts (docker etc_hosts)
-vault_etc_hosts: {}
-
-# You can override these per environment if needed.
-# When unset, the role will use Vault defaults where appropriate.
-vault_acme_enabled: true
-vault_acme_account_key_type: "ec256"   # ec256 | ec384 | rsa2048 | rsa4096
-vault_acme_allowed_roles:
-  - "*"
-vault_acme_allowed_issuers:
-  - "*"
-vault_acme_default_directory_policy: "sign-verbatim"
-# Max TTL for ACME-issued certs (in seconds). Leave empty to keep Vault default (90d).
-vault_acme_max_ttl_seconds: ""
-
-# Validation and recovery controls for ACME nonce behavior
-# If true, when ACME new-nonce validation fails, the role will temporarily
-# disable then re-enable ACME (with configured settings) and retry validation.
-vault_acme_reconfigure: false
-
-# How many times to try fetching a Replay-Nonce header during validation
-vault_acme_nonce_validate_attempts: 3
-
-# Seconds to wait between attempts when validating the Replay-Nonce header
-vault_acme_nonce_validate_delay: 2
-
-# When true, fail the play if Replay-Nonce header cannot be validated.
-# When false (default), emit a warning and continue after retries.
-vault_acme_nonce_strict: false
-
-
-# ---------------------------------------------
-# Automatic Raft bootstrap values (always active via state detection)
-vault_unseal_shares: 3
-vault_unseal_threshold: 2
-# Where to store the Raft cluster init payload on the controller (leader/followers)
-vault_init_export_path: "~/.local/share/ansible-home-cluster/cluster-init.json"
-
-# Where to store the Transit bootstrap init payload on the controller (transit-only)
-vault_transit_init_export_path: "~/.local/share/ansible-home-cluster/transit-init.json"
-
-# ---------------------------------------------
-# Cluster CA for secure inter-node TLS (Raft join)
-# ---------------------------------------------
-# Controller-side paths for the cluster CA keypair
+# TLS/CA Defaults
 vault_enable_cluster_ca: true
 vault_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
 vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.crt"
 vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.key"
-# Certificate validity (days)
 vault_cluster_ca_days: 3650
 vault_server_cert_days: 1825
 
-# ---------------------------------------------
-# TLS certificate SAN customization
-# ---------------------------------------------
-# Additional Subject Alternative Names to include when issuing Vault's server cert.
-# Use this to add VIPs (e.g., HAProxy VRRP address) or extra DNS names.
-vault_additional_san_ips: []        # e.g., ["192.168.0.253"]
-vault_additional_san_dns: []        # e.g., ["vault.gillouche.homelab"]
+# SAN customization
+vault_additional_san_ips: []
+vault_additional_san_dns: []
 
-# Automation token storage on controller (encrypted via Ansible Vault if configured)
-vault_automation_token_path: "~/.local/share/ansible-home-cluster/vault-ansible-token.json"
-
-# Automation token parameters
-vault_automation_token_ttl: "720h"           # 30 days
-vault_automation_token_renewable: true        # allow renewal
-# Renew when remaining TTL is below this threshold (in seconds). Default: 7 days
-vault_automation_token_renew_threshold_seconds: 604800
-
-
-# -------------------------------------------------------------
-# ACME advertise address for Vault PKI cluster (optional)
-# -------------------------------------------------------------
-# By default, the role configures Vault PKI's cluster path to the active leader
-# address discovered from /v1/sys/leader. On clusters where reverse proxy (Caddy)
-# runs on the same nodes as Pi-hole and internal DNS is required, redirects to the
-# leader hostname may fail if the system resolver doesn't know the internal zone.
-#
-# Set this to a stable address (e.g., Vault VIP/LAN IP) to advertise an IP-based
-# cluster path for ACME, avoiding internal DNS dependency during ACME flows.
-# Example: "192.168.0.81"
-vault_acme_advertise_addr: ""
-
-# Validate ACME directory reachability (VIP:18200) after Vault is up on leader
-# and optionally self-heal by enabling PKI+ACME if missing.
-vault_acme_validate_enable: true
-
-# Whether followers are allowed to configure PKI/ACME (writes) themselves.
-# By default, only the leader should perform PKI/ACME configuration; followers validate only.
-vault_configure_pki_on_followers: false
-
-
-# Listener bind address inside the container. Default to 0.0.0.0 so peers can reach it.
-# You may override to a specific LAN IP if desired.
-vault_listener_address: "0.0.0.0"
-
-# -------------------------------------------------------------
-# Root CA trust distribution
-# -------------------------------------------------------------
-# Whether to install/update the Vault Root CA on all managed hosts (inventory 'all').
-# Default: true (install across the fleet)
-vault_install_root_ca_on_hosts: true
-
-# Whether to install the Vault Root CA on the controller (localhost). macOS is supported.
-# Defaults to false; enable in inventory to apply on your Mac.
-vault_trust_ca_on_controller: false
-
-# macOS keychain to target when installing the CA on the controller.
-# login (default) doesn’t require sudo; system requires sudo.
-vault_controller_install_keychain: "login"
-
-# Optional: sudo password to allow installing CA into the System keychain on macOS
-# Leave empty by default; set via inventory or Ansible Vault if you want the role
-# to automatically elevate when falling back to System keychain on the controller.
-vault_controller_become_password: ""
-
-# Controller-side CA bundle for tools that don't use macOS Keychain (e.g., Homebrew curl)
-# When enabled, a PEM bundle containing both the Vault Cluster CA and PKI Root CA will be
-# written to this path on the controller (localhost).
-vault_controller_create_ca_bundle: true
-vault_controller_ca_bundle_path: "~/.local/share/ansible-home-cluster/ca-bundle.pem"
-
-# Firefox (macOS controller) — enable trusting system keychain in Firefox via policy
-# When true, Ansible will install a policies.json enabling ImportEnterpriseRoots
-vault_firefox_enable_enterprise_roots: false
-vault_firefox_policies_json_path: "~/Library/Application Support/Firefox/distribution/policies.json"
-# Defaults for Vault role (PKI + ACME via Vault CLI)
-
-# Whether to configure PKI+ACME using a script executed inside the container.
-# When true, the role will write /home/vault/bin/pki_acme_setup.sh, mount it,
-# and run it via podman exec with the container's vault CLI.
-vault_use_setup_script: true
-
-# Root token (MUST be provided via vaulted vars; default empty to force user to set)
-vault_root_token: ""
-
-# PKI mount path per tutorial
+# PKI/ACME Defaults
 vault_pki_mount: "pki"
-
-# Intermediate PKI for issuance and ACME (best practice)
 vault_pki_int_mount: "pki_int"
-
-# Controller-side Root CA path (offline/protected root used to sign intermediate)
-vault_root_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-root"
-vault_root_ca_cert_controller: "{{ vault_root_ca_dir_controller }}/root-ca.pem"
-vault_root_ca_key_controller: "{{ vault_root_ca_dir_controller }}/root-ca.key"
-vault_root_ca_days: 3650
-
-# Intermediate certificate parameters
 vault_intermediate_common_name: "Homelab Intermediate CA"
 vault_intermediate_key_type: "rsa"
 vault_intermediate_key_bits: 4096
-vault_intermediate_days: 1825
-
-# Default role policy constraints for PKI issuance
-vault_pki_default_role_name: "default"
-vault_pki_allowed_domains:
-  - "gillouche.homelab"
-vault_pki_allow_subdomains: true
-
-# Issuer naming consistent with homelab
-vault_pki_root_issuer_name: "homelab-root"
-vault_pki_int_issuer_name: "homelab-intermediate"
-
-# Max TTL for the PKI as per tutorial (10 years)
+vault_pki_int_role_name: "homelab-server"
 vault_pki_max_ttl: "87600h"
-
-# Default base domain for issuance (can be a list). Example: ["gillouche.homelab", "*.gillouche.homelab"]
-# Pre-set to match your environment; override in inventory if needed.
 vault_pki_base_domains:
   - "gillouche.homelab"
   - "*.gillouche.homelab"
 
-# Name of the issuance role per tutorial
-vault_pki_role_name: "acme"
-
-# ACME directory (default from tutorial)
-vault_acme_directory_path: "/v1/pki/acme/directory"
-
-# Where to persist EAB credentials (controller-side file). Optional; alternatively store in vaulted group_vars.
-# Note: EAB export is disabled by default in this homelab; this path remains for optional future use.
-vault_eab_export_path: "~/.local/share/ansible-home-cluster/vault/acme_eab.json"
-
-# Root CA subject defaults
-vault_root_ca_common_name: "{{ (vault_pki_base_domains[0] if (vault_pki_base_domains | length) > 0 else 'Homelab') ~ ' Root CA' }}"
-vault_root_ca_org: "Homelab"
-vault_root_ca_country: "FR"
-
-# Whether to export artifacts
-vault_export_root_ca: true
-# Disable EAB export by default (no EAB in homelab)
-vault_export_eab: false
-
-# Public Vault URL used in PKI URLs config. If empty, tasks compute from host IP.
-vault_public_url: ""
-
-# -------------------------------
 # Readiness/wait tuning
-# -------------------------------
-# How many retries and delay (seconds) when waiting for Vault readiness/unseal
 vault_wait_retries: 45
 vault_wait_delay: 2
-# If true, keep current behavior and do not fail the play when Vault remains
-# sealed after all retries. If false (default), fail fast to surface the issue.
-vault_allow_sealed_continue: false
-
-# How many retries and delay (seconds) when waiting for Vault node
-# to become HA active leader before performing PKI/ACME writes
 vault_wait_active_retries: 45
 vault_wait_active_delay: 2
 
 # Clustering control
-# Force-disable clustering (HA) — useful for single-device deployments or initial bring-up
-vault_disable_clustering: false
-
-# Vault cluster (raft) TCP port used for cluster_addr
 vault_cluster_port: 18201
-
-# TLS paths inside container (used by listener)
 vault_tls_cert_path: "{{ vault_tls_dir_in_container }}/api.crt"
 vault_tls_key_path: "{{ vault_tls_dir_in_container }}/api.key"
 
-# Fresh bootstrap controls (DANGEROUS: wipes local Raft data when true)
-# Use this only when you intentionally want to recreate the cluster from scratch
-# or when no data must be preserved. When true, each host will remove its
-# local Vault data directory before (re)starting the container.
-vault_force_fresh_bootstrap: false
-
-# ---------------------------------------------
-# Transit Seal (ENABLED by default)
-# ---------------------------------------------
-# When enabled, the template will render a seal "transit" block so Vault can
-# auto-unseal using a remote Transit engine (bootstrap Vault).
+# Transit Seal Defaults
 vault_enable_transit_seal: true
-
-# Full address to the bootstrap (Transit) Vault. Prefer HTTPS with LAN IP.
-# Default to your bootstrap node at 192.168.0.80 per homelab layout; you can
-# override this in inventory/group_vars if needed.
 vault_transit_addr: "https://192.168.0.80:18200"
-
-# Transit token used by the main cluster to perform unseal operations against
-# the bootstrap Vault. Keep empty in defaults; provide via vaulted group_vars.
 vault_transit_token: ""
-
-# Name and mount path of the transit key used for unseal operations.
 vault_transit_key_name: "autounseal"
 vault_transit_mount_path: "transit/"
-
-# Allow skipping TLS verification when the bootstrap Vault runs HTTP or has
-# a self-signed cert not yet trusted. Prefer false in production.
 vault_transit_tls_skip_verify: false
 
-# Bootstrap transit policy and token management (for bootstrap Vault stage)
-vault_transit_policy_name: "autounseal-policy"
-vault_transit_token_period: "720h"   # 30 days periodic
-vault_transit_token_export_path: "~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt"
-
-# Force TLS (server key/CSR/cert) regeneration for the node even if files exist
+# Force flags
+vault_force_fresh_bootstrap: false
 vault_force_tls_regen: false
+
+# Firefox (macOS controller)
+vault_firefox_enable_enterprise_roots: false
