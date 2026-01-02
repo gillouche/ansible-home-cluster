@@ -1,0 +1,9 @@
+---
+- name: Ping all devices
+  hosts: all
+  gather_facts: false
+  become: false
+  tags: [ping]
+  tasks:
+    - name: Ping
+      ansible.builtin.ping:

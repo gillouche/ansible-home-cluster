@@ -1,0 +1,21 @@
+---
+- name: "Setup Base System Components"
+  hosts: all
+  gather_facts: true
+  become: false
+  tags: [base, system]
+  roles:
+    - role: facts
+      tags: facts
+    - role: ntp
+      tags: ntp
+    - role: devices_os
+      tags: os
+    - role: utils
+      tags: utils
+    - role: aur
+      tags: [aur, aur_rebuild_yay]
+    - role: firewall
+      tags: firewall
+    - role: containers
+      tags: containers

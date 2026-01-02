@@ -1,0 +1,125 @@
+---
+- name: "Generate Homelab Root CA (Localhost)"
+  hosts: localhost
+  gather_facts: true
+  become: false
+  tags: [trust, tls]
+  vars:
+    ansible_connection: local
+  tasks:
+    - name: Ensure Homelab Root CA directory exists
+      ansible.builtin.file:
+        path: "{{ vault_cluster_ca_dir_controller | expanduser }}"
+        state: directory
+        mode: '0700'
+
+    - name: Check if Homelab Root CA key exists
+      ansible.builtin.stat:
+        path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.key"
+      register: _homelab_root_ca_key_stat
+
+    - name: Generate Homelab Root CA private key if missing
+      community.crypto.openssl_privatekey:
+        path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.key"
+        size: 4096
+        type: RSA
+        state: present
+        mode: '0600'
+      when: not _homelab_root_ca_key_stat.stat.exists
+
+    - name: Check if Homelab Root certificate exists
+      ansible.builtin.stat:
+        path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
+      register: _homelab_root_ca_certificate_stat
+
+    - name: Create OpenSSL config for Root CA extensions
+      ansible.builtin.copy:
+        dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/root_ca.ext"
+        content: |
+          [req]
+          distinguished_name = req_distinguished_name
+          x509_extensions = v3_ca
+          prompt = no
+          [req_distinguished_name]
+          C = BE
+          ST = Brussels
+          L = Brussels
+          O = Homelab
+          CN = Homelab Root CA
+          [v3_ca]
+          basicConstraints = critical, CA:TRUE, pathlen:2
+          keyUsage = critical, keyCertSign, cRLSign
+          subjectKeyIdentifier = hash
+          authorityKeyIdentifier = keyid:always,issuer
+      when: not _homelab_root_ca_certificate_stat.stat.exists
+
+    - name: Generate Homelab Root CA certificate if missing
+      ansible.builtin.command: >
+        openssl req -new -x509
+        -key "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.key"
+        -out "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
+        -days 3650
+        -sha256
+        -config "{{ vault_cluster_ca_dir_controller | expanduser }}/root_ca.ext"
+      when: not _homelab_root_ca_certificate_stat.stat.exists
+
+    - name: Set fact for Homelab Root CA path
+      ansible.builtin.set_fact:
+        homelab_root_ca_cert_path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
+
+    - name: Browser and System Trust (macOS)
+      when: ansible_os_family == 'Darwin'
+      block:
+        - name: Check if Homelab Root CA is in macOS keychain
+          ansible.builtin.command: security find-certificate -c "Homelab Root CA"
+          register: _macos_cert_check
+          failed_when: false
+          changed_when: false
+
+        - name: Install Homelab Root CA into macOS login keychain
+          ansible.builtin.command: >-
+            security add-trusted-cert -d -r trustRoot -k /Users/{{ ansible_user_id }}/Library/Keychains/login.keychain-db
+            "{{ homelab_root_ca_cert_path }}"
+          when: _macos_cert_check.rc != 0
+
+        - name: Firefox Enterprise Roots (macOS)
+          when: vault_firefox_enable_enterprise_roots | default(false) | bool
+          block:
+            - name: Ensure Firefox distribution directory exists
+              ansible.builtin.file:
+                path: "~/Library/Application Support/Firefox/distribution"
+                state: directory
+                mode: '0755'
+
+            - name: Enable Firefox Enterprise Roots via policies.json
+              ansible.builtin.copy:
+                dest: "~/Library/Application Support/Firefox/distribution/policies.json"
+                content: |
+                  {
+                    "policies": {
+                      "ImportEnterpriseRoots": true
+                    }
+                  }
+                mode: '0644'
+
+- name: "Distribute Homelab Root CA to All Devices"
+  hosts: all
+  gather_facts: false
+  become: true
+  tags: [trust, tls]
+  tasks:
+    - name: Copy Homelab Root CA to system anchor path
+      ansible.builtin.copy:
+        src: "{{ hostvars['localhost']['homelab_root_ca_cert_path'] }}"
+        dest: "{{ tls_root_ca_anchor_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Refresh system trust store
+
+  handlers:
+    - name: Refresh system trust store
+      ansible.builtin.shell: |
+        (update-ca-trust || update-ca-trust extract || update-ca-certificates || true)
+      changed_when: false
+      failed_when: false

@@ -1,0 +1,10 @@
+---
+- name: "Flush firewall rules existing on devices"
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Flush firewall rules
+      ansible.builtin.command: >-
+        nft flush ruleset
+      changed_when: true

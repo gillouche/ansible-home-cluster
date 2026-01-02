@@ -1,0 +1,27 @@
+---
+- name: "Maintenance - Clean devices"
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Remove known_hosts file
+      ansible.builtin.file:
+        path: "/home/{{ target_user | default('alarm') }}/.ssh/known_hosts"
+        state: absent
+      become: false
+
+    - name: Remove ~/.ssh/config
+      ansible.builtin.file:
+        path: "/home/{{ target_user | default('alarm') }}/.ssh/config"
+        state: absent
+      become: false
+
+    - name: Restore simple /etc/hosts
+      ansible.builtin.copy:
+        dest: /etc/hosts
+        content: |
+          127.0.0.1   localhost
+          ::1         localhost
+        owner: root
+        group: root
+        mode: '0644'

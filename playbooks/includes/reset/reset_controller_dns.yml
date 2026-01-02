@@ -1,22 +1,4 @@
 ---
-- name: Bootstrap controller host for SSH and network configuration
-  hosts: localhost
-  gather_facts: true
-  become: false
-  tags:
-    - never
-    - bootstrap_controller_host
-
-  pre_tasks:
-    - name: Load vaulted credentials from group_vars/all/vault.yml
-      ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../inventories/group_vars/all/vault.yml"
-      no_log: true
-
-  roles:
-    - role: controller_network
-    - role: controller_ssh
-
 - name: Reset controller DNS to public resolver and flush caches (macOS)
   hosts: localhost
   gather_facts: true
@@ -32,9 +14,9 @@
       no_log: true
 
   tasks:
-    - name: Set macOS DNS server to Pi-hole VIP (networksetup)
+    - name: Set macOS DNS server to public resolvers (networksetup)
       ansible.builtin.command: >-
-        networksetup -setdnsservers "Wi-Fi" 192.168.0.251 1.1.1.1
+        networksetup -setdnsservers "Wi-Fi" 1.1.1.1 8.8.8.8
       changed_when: true
       when: (ansible_facts.get('os_family', '') | lower) == 'darwin'
 

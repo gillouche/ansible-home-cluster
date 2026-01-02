@@ -1,0 +1,44 @@
+---
+- name: "Provision TLS Certificates"
+  hosts: all
+  gather_facts: true
+  become: false
+  tags: [infra, tls, trust] # Part of trust chain
+  pre_tasks:
+    - name: Load cluster init JSON
+      ansible.builtin.slurp:
+        src: "{{ vault_init_export_path | expanduser }}"
+      register: _cluster_init_content
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set vault_root_token fact
+      ansible.builtin.set_fact:
+        vault_root_token: "{{ (_cluster_init_content.content | b64decode | from_json).root_token }}"
+      when: _cluster_init_content.content is defined
+  roles:
+    - role: tls
+
+- name: "Setup Pi-hole Cluster"
+  hosts: dns_cluster
+  gather_facts: true
+  become: false
+  tags: [infra, dns] # NOT part of trust tag
+  roles:
+    - role: dns
+
+- name: "Setup Internal Load Balancer"
+  hosts: internal_lb_cluster
+  gather_facts: true
+  become: false
+  tags: [infra, lb, trust] # Part of trust chain (balances Vault)
+  roles:
+    - role: internal_lb
+
+- name: "Setup Edge Proxy"
+  hosts: edge_proxy_cluster
+  gather_facts: true
+  become: false
+  tags: [infra, proxy, trust] # Part of trust chain (TLS terminator)
+  roles:
+    - role: edge_proxy

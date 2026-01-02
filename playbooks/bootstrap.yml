@@ -1,0 +1,12 @@
+---
+# ==============================================================================
+# Homelab Cluster Bootstrap Orchestrator
+# ==============================================================================
+
+# 1. Bootstrap controller host (SSH, Network)
+- import_playbook: includes/bootstrap/bootstrap_controller.yml
+  tags: [bootstrap_controller]
+
+# 2. Bootstrap devices (Initial SSH access, Network)
+- import_playbook: includes/bootstrap/bootstrap_devices.yml
+  tags: [bootstrap_devices]

@@ -1,0 +1,200 @@
+---
+- name: "Gather facts for localhost"
+  hosts: localhost
+  gather_facts: true
+  become: false
+  tags: [health, health_local]
+  vars:
+    ansible_connection: local
+  tasks:
+    - name: Set fact for Homelab Root CA path
+      ansible.builtin.set_fact:
+        homelab_root_ca_cert_path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
+
+- name: "Vault Cluster Health Check"
+  hosts: vault_cluster
+  gather_facts: true
+  become: false
+  tags: [health, health_vault]
+  vars_files:
+    - ../../../roles/vault/defaults/main.yml
+  pre_tasks:
+    - name: Load cluster init JSON
+      ansible.builtin.slurp:
+        src: "{{ vault_init_export_path | expanduser }}"
+      register: _cluster_init_content
+      delegate_to: localhost
+      run_once: true
+      failed_when: false
+
+    - name: Set vault_root_token fact
+      ansible.builtin.set_fact:
+        vault_root_token: "{{ (_cluster_init_content.content | b64decode | from_json).root_token }}"
+      when: _cluster_init_content.content is defined
+  tasks:
+    - name: Query Vault health status (Individual Nodes)
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}:{{ vault_api_port }}/v1/sys/health"
+        method: GET
+        status_code: [200, 429, 501, 503]
+        validate_certs: false
+      register: _vault_node_health
+      failed_when: false
+
+    - name: Debug Vault Cluster Node Information
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Vault Node Health: {{ inventory_hostname }} ({{ ansible_host }})"
+          - "-----------------------------------------------------------"
+          - "  Status: {{ 'HEALTHY (Leader)' if (_vault_node_health.status | default(0)) == 200 else
+                       'HEALTHY (Follower/Standby)' if (_vault_node_health.status | default(0)) == 429 else
+                       'UNINITIALIZED' if (_vault_node_health.status | default(0)) == 501 else
+                       'SEALED' if (_vault_node_health.status | default(0)) == 503 else 'DOWN/ERROR' }}"
+          - "  Response Code: {{ _vault_node_health.status | default('N/A') }}"
+          - "  Version: {{ _vault_node_health.json.version if (_vault_node_health.json is defined and 'version' in _vault_node_health.json) else 'N/A' }}"
+          - "  Is Leader: {{ 'YES' if (_vault_node_health.status | default(0)) == 200 else 'NO' }}"
+          - "-----------------------------------------------------------"
+
+- name: "TLS Health Check"
+  hosts: all
+  gather_facts: true
+  become: false
+  tags: [health, health_tls]
+  tasks:
+    - name: Check for api.crt
+      ansible.builtin.stat:
+        path: "{{ tls_dir }}/api.crt"
+      register: _tls_cert_stat
+
+    - name: Capture deployed certificate details
+      ansible.builtin.command: openssl x509 -in {{ tls_dir }}/api.crt -noout -subject -issuer -dates
+      register: _tls_inspect_details
+      changed_when: false
+      failed_when: false
+      become: true
+      when: _tls_cert_stat.stat.exists
+
+    - name: Verify certificate chain locally
+      ansible.builtin.command: >-
+        openssl verify
+        -CAfile {{ (inventory_hostname in (groups['vault_transit'] | default(['rpi5b8g1']))) | ternary(tls_dir ~ '/api.crt', tls_dir ~ '/ca-bundle.pem') }}
+        {{ tls_dir }}/api.crt
+      register: _tls_inspect_chain
+      changed_when: false
+      failed_when: false
+      become: true
+      when: _tls_cert_stat.stat.exists
+
+    - name: Debug TLS Information
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "TLS Health Check for {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Status: {{ 'PROVISIONED' if _tls_cert_stat.stat.exists else 'MISSING' }}"
+          - "Chain: {{ (_tls_inspect_chain.stdout | default(_tls_inspect_chain.stderr, true) | trim) if (_tls_inspect_chain is defined and 'stdout' in _tls_inspect_chain) else 'N/A' }}"
+          - "Issuer: {{ (_tls_inspect_details.stdout_lines | select('match', '^issuer=') | list | first) if (_tls_inspect_details is defined and 'stdout_lines' in _tls_inspect_details) else 'N/A' }}"
+          - "-----------------------------------------------------------"
+
+- name: "Pi-hole Health Check"
+  hosts: dns_cluster
+  gather_facts: true
+  become: false
+  tags: [health, health_dns]
+  tasks:
+    - name: Verify DNS resolution via Pi-hole VIP
+      ansible.builtin.command: "dig +short @{{ pihole_virtual_ip }} google.com"
+      register: _pihole_vip_dns_check
+      failed_when: false
+      changed_when: false
+
+    - name: Verify DNS resolution via Local Node
+      ansible.builtin.command: "dig +short @127.0.0.1 google.com"
+      register: _pihole_local_dns_check
+      failed_when: false
+      changed_when: false
+
+    - name: Debug Pi-hole Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Pi-hole Health Information for {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "VIP ({{ pihole_virtual_ip }}) Resolution: {{ 'SUCCESS' if _pihole_vip_dns_check.rc == 0 and _pihole_vip_dns_check.stdout != '' else 'FAILED' }}"
+          - "Local (127.0.0.1) Resolution: {{ 'SUCCESS' if _pihole_local_dns_check.rc == 0 and _pihole_local_dns_check.stdout != '' else 'FAILED' }}"
+          - "-----------------------------------------------------------"
+
+- name: "Load Balancer Health Check"
+  hosts: internal_lb_cluster
+  gather_facts: true
+  become: false
+  tags: [health, health_lb]
+  tasks:
+    - name: Verify Vault Health via Load Balancer VIP
+      ansible.builtin.uri:
+        url: "https://{{ load_balancer_virtual_ip }}:{{ vault_api_port }}/v1/sys/health"
+        method: GET
+        status_code: [200, 429]
+        validate_certs: false
+      register: _lb_vault_health_check
+      failed_when: false
+
+    - name: Debug Load Balancer Information
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Load Balancer Health: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Vault via LB VIP ({{ load_balancer_virtual_ip }}): {{ 'UP' if (_lb_vault_health_check.status | default(0)) in [200, 429] else 'DOWN' }}"
+          - "Response Code: {{ _lb_vault_health_check.status | default('N/A') }}"
+          - "-----------------------------------------------------------"
+
+- name: "Reverse Proxy Health Check"
+  hosts: edge_proxy_cluster
+  gather_facts: true
+  become: false
+  tags: [health, health_proxy]
+  vars_files:
+    - ../../../roles/edge_proxy/defaults/main.yml
+  tasks:
+    - name: Check Wildcard Certificate Presence
+      ansible.builtin.stat:
+        path: "{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard/wildcard.crt"
+      register: _proxy_wildcard_stat
+
+    - name: Verify Backend Reachability (HAProxy) from Proxy
+      ansible.builtin.uri:
+        url: "https://{{ load_balancer_virtual_ip }}:{{ vault_api_port }}/v1/sys/health"
+        method: GET
+        validate_certs: false
+      register: _proxy_backend_check
+      failed_when: false
+
+    - name: Debug Reverse Proxy Information
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Reverse Proxy Health: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Wildcard Cert: {{ 'PRESENT' if _proxy_wildcard_stat.stat.exists else 'MISSING' }}"
+          - "Backend (HAProxy VIP) reachable: {{ 'YES' if _proxy_backend_check.status is defined else 'NO' }}"
+          - "-----------------------------------------------------------"
+
+- name: "Cluster Summary"
+  hosts: localhost
+  gather_facts: false
+  tags: [health, health_summary]
+  tasks:
+    - name: Print Critical Endpoints Summary
+      ansible.builtin.debug:
+        msg:
+          - "==========================================================="
+          - "           HOMELAB CLUSTER ENDPOINTS SUMMARY               "
+          - "==========================================================="
+          - "Vault API (VIP):      https://{{ load_balancer_virtual_ip }}:{{ vault_api_port }}"
+          - "Pi-hole DNS (VIP):    {{ pihole_virtual_ip }}"
+          - "Pi-hole Web (Proxy):  https://pihole.{{ base_domain }}"
+          - "Edge Proxy VIP:       {{ reverse_proxy_virtual_ip }}"
+          - "Vault Leader:         https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}"
+          - "==========================================================="

@@ -29,26 +29,23 @@ seal "transit" {
 {% endif %}
 
 storage "raft" {
-path    = "{{ vault_data_dir_in_container }}"
+  path    = "{{ vault_data_dir_in_container }}"
 
-{#
-    Build retry_join only on non-leader nodes and target the designated raft leader
-    (first host in vault_cluster group) by IP. The leader itself renders no retry_join.
+  {#
+    All nodes should have retry_join blocks pointing to all other potential nodes in the cluster.
+    This ensures that any node can find the leader and join, and also facilitates leader election.
   #}
-{% set leader_host = (groups['vault_leader'] | default([])) | length > 0 and (groups['vault_leader'][0]) or inventory_hostname %}
-{% if inventory_hostname != leader_host %}
-    retry_join {
-    # Target the Raft leader API address (use IP to avoid DNS dependency)
-    {% set _leader_ip = hostvars[leader_host].ansible_host | default(hostvars[leader_host].ansible_facts.default_ipv4.address) %}
-    leader_api_addr       = "https://{{ _leader_ip }}:{{ vault_api_port }}"
-    # Verify the leader's certificate against our cluster CA and set SNI to the leader IP
-    leader_tls_servername = "{{ _leader_ip }}"
-    leader_ca_cert_file   = "{{ vault_tls_dir_in_container }}/ca-bundle.pem"
-    leader_client_cert_file = ""
-    leader_client_key_file  = ""
-    leader_tls_skip_verify = false
-    }
-{% endif %}
+  {% for host in (groups['vault_cluster'] | default([])) %}
+  {% if host != inventory_hostname %}
+  {% set _peer_ip = hostvars[host].ansible_host | default(hostvars[host].ansible_facts.default_ipv4.address) %}
+  retry_join {
+    leader_api_addr         = "https://{{ _peer_ip }}:{{ vault_api_port }}"
+    leader_tls_servername   = "{{ _peer_ip }}"
+    leader_ca_cert_file     = "{{ vault_tls_dir_in_container }}/ca-bundle.pem"
+    leader_tls_skip_verify  = false
+  }
+  {% endif %}
+  {% endfor %}
 }
 
 listener "tcp" {

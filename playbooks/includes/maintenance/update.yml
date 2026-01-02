@@ -1,0 +1,8 @@
+---
+- name: Update - Pacman refresh and upgrade
+  hosts: all
+  gather_facts: true
+  become: false
+  tags: [update]
+  roles:
+    - role: maintenance
