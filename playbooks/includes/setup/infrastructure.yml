@@ -50,3 +50,11 @@
   tags: [infra, artifactory]
   roles:
     - role: artifactory
+
+- name: "Setup Prometheus"
+  hosts: prometheus
+  gather_facts: true
+  become: false
+  tags: [infra, prometheus]
+  roles:
+    - role: prometheus

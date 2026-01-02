@@ -25,6 +25,9 @@ load_balancer_haproxy_frontends:
       # ACLs for Nexus
       - "acl is_nexus hdr(host) -i nexus.{{ base_domain }}"
 
+      # ACLs for Prometheus
+      - "acl is_prometheus hdr(host) -i prometheus.{{ base_domain }}"
+
       # Routing Logic
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
@@ -33,6 +36,9 @@ load_balancer_haproxy_frontends:
 
       # Routing Logic for Nexus
       - "use_backend nexus_backend if is_nexus"
+
+      # Routing Logic for Prometheus
+      - "use_backend prometheus_backend if is_prometheus"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
@@ -112,4 +118,13 @@ load_balancer_haproxy_backends:
       - name: nexus
         addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
         port: 8081
+        opts: "check"
+
+  # Prometheus Backend
+  - name: prometheus_backend
+    mode: http
+    servers:
+      - name: prometheus
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9090
         opts: "check"

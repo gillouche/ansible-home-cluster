@@ -219,6 +219,40 @@
           - "Total Requests: {{ _nexus_metrics.json.timers['org.sonatype.nexus.internal.web.HeaderPatternFilter.request'].count if (_nexus_metrics.status == 200 and 'org.sonatype.nexus.internal.web.HeaderPatternFilter.request' in _nexus_metrics.json.timers) else 'N/A' }}"
           - "-----------------------------------------------------------"
 
+- name: "Prometheus Health Check"
+  hosts: prometheus
+  gather_facts: true
+  become: false
+  tags: [health, health_prometheus]
+  vars_files:
+    - ../../../roles/prometheus/defaults/main.yml
+  tasks:
+    - name: Query Prometheus Health
+      ansible.builtin.uri:
+        url: "http://localhost:{{ prometheus_port }}/-/healthy"
+        method: GET
+        status_code: 200
+      register: _prometheus_health
+      failed_when: false
+
+    - name: Query Prometheus Ready
+      ansible.builtin.uri:
+        url: "http://localhost:{{ prometheus_port }}/-/ready"
+        method: GET
+        status_code: 200
+      register: _prometheus_ready
+      failed_when: false
+
+    - name: Debug Prometheus Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Prometheus Health Check: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Healthy: {{ 'YES' if _prometheus_health.status == 200 else 'NO (' ~ (_prometheus_health.status | default('N/A')) ~ ')' }}"
+          - "Ready: {{ 'YES' if _prometheus_ready.status == 200 else 'NO (' ~ (_prometheus_ready.status | default('N/A')) ~ ')' }}"
+          - "-----------------------------------------------------------"
+
 - name: "Cluster Summary"
   hosts: localhost
   gather_facts: false
@@ -234,6 +268,7 @@
           - "Pi-hole DNS (VIP):    {{ pihole_virtual_ip }}"
           - "Pi-hole Web (Proxy):  https://pihole.{{ base_domain }}"
           - "Nexus UI (Proxy):     https://nexus.{{ base_domain }}"
+          - "Prometheus UI (Proxy): https://prometheus.{{ base_domain }}"
           - "Edge Proxy VIP:       {{ reverse_proxy_virtual_ip }}"
           - "Vault Leader:         https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}"
           - "==========================================================="
