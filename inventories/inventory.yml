@@ -106,6 +106,9 @@ all:
     prometheus:
       hosts:
         rpi5b16g2ssd:
+    loki:
+      hosts:
+        rpi5b16g3ssd:
 #    k3s_cluster:
 #      children:
 #        k3s_server:

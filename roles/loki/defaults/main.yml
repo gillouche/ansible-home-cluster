@@ -1,0 +1,11 @@
+---
+loki_user: loki
+loki_group: loki
+loki_uid: 10002
+loki_gid: 10002
+loki_home: /home/loki
+loki_config_dir: "{{ loki_home }}/config"
+loki_data_dir: /mnt/data/loki
+loki_image: docker.io/grafana/loki:latest
+loki_container_name: loki
+loki_port: 3100

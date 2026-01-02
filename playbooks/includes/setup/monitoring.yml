@@ -1,0 +1,23 @@
+- name: "Setup Prometheus Node Exporter"
+  hosts: all
+  gather_facts: true
+  become: false
+  tags: [infra, prometheus_node_exporter, monitoring]
+  roles:
+    - role: prometheus_node_exporter
+
+- name: "Setup Prometheus"
+  hosts: prometheus
+  gather_facts: true
+  become: false
+  tags: [infra, prometheus, monitoring]
+  roles:
+    - role: prometheus
+
+- name: "Setup Loki"
+  hosts: loki
+  gather_facts: true
+  become: false
+  tags: [infra, loki, monitoring]
+  roles:
+    - role: loki

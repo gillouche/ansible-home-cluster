@@ -1,4 +1,4 @@
 ---
-prometheus_node_exporter_port: "{{ prometheus_node_exporter_port | default(9100) }}"
-prometheus_node_exporter_image: prom/node-exporter:v1.10.2
+prometheus_node_exporter_port: 9100
+prometheus_node_exporter_image: prom/node-exporter:latest
 prometheus_node_exporter_container_name: node-exporter

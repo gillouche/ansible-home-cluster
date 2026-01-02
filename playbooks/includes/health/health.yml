@@ -278,6 +278,31 @@
           - "Status: {{ 'UP' if _node_exporter_status.status == 200 else 'DOWN (' ~ (_node_exporter_status.status | default('N/A')) ~ ')' }}"
           - "-----------------------------------------------------------"
 
+- name: "Loki Health Check"
+  hosts: loki
+  gather_facts: true
+  become: false
+  tags: [health, health_loki]
+  vars_files:
+    - ../../../roles/loki/defaults/main.yml
+  tasks:
+    - name: Query Loki Ready
+      ansible.builtin.uri:
+        url: "http://localhost:{{ loki_port }}/ready"
+        method: GET
+        status_code: 200
+      register: _loki_ready
+      failed_when: false
+
+    - name: Debug Loki Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Loki Health Check: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Ready: {{ 'YES' if _loki_ready.status == 200 else 'NO (' ~ (_loki_ready.status | default('N/A')) ~ ')' }}"
+          - "-----------------------------------------------------------"
+
 - name: "Cluster Summary"
   hosts: localhost
   gather_facts: false
@@ -294,6 +319,7 @@
           - "Pi-hole Web (Proxy):  https://pihole.{{ base_domain }}"
           - "Nexus UI (Proxy):     https://nexus.{{ base_domain }}"
           - "Prometheus UI (Proxy): https://prometheus.{{ base_domain }}"
+          - "Loki API (Proxy):     https://loki.{{ base_domain }}"
           - "Edge Proxy VIP:       {{ reverse_proxy_virtual_ip }}"
           - "Vault Leader:         https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}"
           - "==========================================================="

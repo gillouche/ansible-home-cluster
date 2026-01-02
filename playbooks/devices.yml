@@ -14,3 +14,6 @@
 
 # 4. Infrastructure: TLS Provisioning, DNS, Load Balancer, Edge Proxy
 - import_playbook: includes/setup/infrastructure.yml
+
+# 5. Monitoring: prometheus, loki, exporters, grafana
+- import_playbook: includes/setup/monitoring.yml
