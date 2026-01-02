@@ -6,7 +6,7 @@
   tags: [vault, trust]
   tasks:
     - name: Run vault role for init stage
-      import_role:
+      ansible.builtin.import_role:
         name: vault
       vars:
         vault_stage: init
@@ -18,7 +18,7 @@
   tags: [vault, trust]
   tasks:
     - name: Run vault role for transit stage
-      import_role:
+      ansible.builtin.import_role:
         name: vault
       vars:
         vault_stage: transit
@@ -32,14 +32,14 @@
   pre_tasks:
     - name: Load Transit Token
       block:
-        - name: Locate bootstrap transit token
+        - name: Locate bootstrap transit token # noqa: run-once
           ansible.builtin.stat:
             path: "{{ vault_transit_token_export_path | expanduser }}"
           register: _bootstrap_transit_token_file
           delegate_to: localhost
           run_once: true
 
-        - name: Read bootstrap transit token
+        - name: Read bootstrap transit token # noqa: run-once
           ansible.builtin.slurp:
             src: "{{ vault_transit_token_export_path | expanduser }}"
           register: _bootstrap_transit_token
@@ -47,21 +47,23 @@
           delegate_to: localhost
           run_once: true
 
-        - name: Compute bootstrap vault address
+        - name: Compute bootstrap vault address # noqa: run-once
           ansible.builtin.set_fact:
             _bootstrap_vault_addr_default:
               "https://{{ hostvars['rpi5b8g1'].ansible_host | default('192.168.0.80') }}:{{ vault_api_port }}"
           run_once: true
 
-        - name: Set Transit seal defaults
+        - name: Set Transit seal defaults # noqa: run-once
           ansible.builtin.set_fact:
             vault_enable_transit_seal: true
             vault_transit_addr: "{{ _bootstrap_vault_addr_default }}"
-            vault_transit_token: "{{ (_bootstrap_transit_token.content | b64decode | trim) if _bootstrap_transit_token.content is defined else '' }}"
+            vault_transit_token: >-
+              {{ (_bootstrap_transit_token.content | b64decode | trim)
+                 if _bootstrap_transit_token.content is defined else '' }}
           run_once: true
   tasks:
     - name: Run vault role for leader stage
-      import_role:
+      ansible.builtin.import_role:
         name: vault
       vars:
         vault_stage: leader
@@ -73,7 +75,7 @@
   tags: [vault, trust]
   tasks:
     - name: Run vault role for followers stage
-      import_role:
+      ansible.builtin.import_role:
         name: vault
       vars:
         vault_stage: followers

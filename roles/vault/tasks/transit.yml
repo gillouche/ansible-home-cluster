@@ -17,12 +17,16 @@
         ( [ 'DNS:' ~ inventory_hostname ] if inventory_hostname is defined else [] ) +
         ( [ 'DNS:' ~ inventory_hostname ~ '.' ~ base_domain ] if base_domain is defined else [] ) +
         [ 'DNS:localhost' ] +
-        ( vault_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if vault_additional_san_dns is defined and vault_additional_san_dns | length > 0 else [] ) +
-        ( tls_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if tls_additional_san_dns is defined and tls_additional_san_dns | length > 0 else [] ) +
+        ( vault_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list
+          if vault_additional_san_dns is defined and vault_additional_san_dns | length > 0 else [] ) +
+        ( tls_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list
+          if tls_additional_san_dns is defined and tls_additional_san_dns | length > 0 else [] ) +
         ( [ 'IP:' ~ ansible_facts.default_ipv4.address ] if ansible_facts.default_ipv4.address is defined else [] ) +
         [ 'IP:127.0.0.1' ] +
-        ( vault_additional_san_ips | map('regex_replace', '^(.*)$', 'IP:\\1') | list if vault_additional_san_ips is defined and vault_additional_san_ips | length > 0 else [] ) +
-        ( [ 'IP:' ~ load_balancer_virtual_ip ] if load_balancer_virtual_ip is defined and load_balancer_virtual_ip | length > 0 else [] )
+        ( vault_additional_san_ips | map('regex_replace', '^(.*)$', 'IP:\\1') | list
+          if vault_additional_san_ips is defined and vault_additional_san_ips | length > 0 else [] ) +
+        ( [ 'IP:' ~ load_balancer_virtual_ip ]
+          if load_balancer_virtual_ip is defined and load_balancer_virtual_ip | length > 0 else [] )
       ) | unique | sort | list
     }}"
 
@@ -56,6 +60,7 @@
       -subj "/CN={{ inventory_hostname }}" \
       -addext "subjectAltName={{ _vault_server_sansa | join(',') }}" \
       -nodes
+  changed_when: true
   when: (not _api_crt_stat.stat.exists) or (vault_force_tls_regen | default(false))
   become: true
 
@@ -148,9 +153,15 @@
 
 - name: Backup stale transit-init.json if Vault is fresh
   ansible.builtin.copy:
-    src: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
-    dest: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}.bak.{{ ansible_date_time.iso8601 }}"
+    src: >-
+      {{ vault_transit_init_export_path |
+      default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}
+    dest: >-
+      {{ vault_transit_init_export_path |
+      default('~/.local/share/ansible-home-cluster/vault/transit-init.json') |
+      expanduser }}.bak.{{ ansible_date_time.iso8601 }}
     remote_src: true
+    mode: '0600'
   delegate_to: localhost
   when:
     - vault_needs_init
@@ -168,8 +179,10 @@
 
 - name: Set unseal keys and root token from loaded init JSON (if present)
   ansible.builtin.set_fact:
-    vault_unseal_keys_b64: "{{ (_transit_init_loaded.content | default('') | b64decode | from_json).unseal_keys_b64 | default([]) }}"
-    vault_root_token: "{{ (_transit_init_loaded.content | default('') | b64decode | from_json).root_token | default('') }}"
+    vault_unseal_keys_b64: >-
+      {{ (_transit_init_loaded.content | default('') | b64decode | from_json).unseal_keys_b64 | default([]) }}
+    vault_root_token: >-
+      {{ (_transit_init_loaded.content | default('') | b64decode | from_json).root_token | default('') }}
   when:
     - _transit_init_loaded is defined
     - not (_transit_init_loaded.skipped | default(false))
@@ -185,7 +198,7 @@
   become: true
   when: vault_needs_init
 
-- name: Store transit init JSON to controller
+- name: Store transit init JSON to controller # noqa: no-handler
   ansible.builtin.copy:
     content: "{{ _vault_init_output.stdout }}"
     dest: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
@@ -193,7 +206,7 @@
   delegate_to: localhost
   when: _vault_init_output.changed
 
-- name: Set unseal keys and root token from NEW init output (if initialization just happened)
+- name: Set unseal keys and root token from NEW init output (if initialization just happened) # noqa: no-handler
   ansible.builtin.set_fact:
     vault_unseal_keys_b64: "{{ (_vault_init_output.stdout | from_json).unseal_keys_b64 }}"
     vault_root_token: "{{ (_vault_init_output.stdout | from_json).root_token }}"
@@ -206,10 +219,11 @@
     VAULT_SKIP_VERIFY: "true"
     VAULT_TOKEN: "{{ vault_root_token }}"
   loop: "{{ vault_unseal_keys_b64 }}"
+  changed_when: true
   become: true
   when: >
     (vault_unseal_keys_b64 | default([])) | length > 0 and
-    (_vault_status_check.stdout | default('{}') | from_json).sealed | default(true) == true
+    (_vault_status_check.stdout | default('{}') | from_json).sealed | default(true)
 
 - name: Enable transit secrets engine
   ansible.builtin.command: /usr/local/bin/vault secrets enable -path=transit transit
@@ -250,7 +264,9 @@
 
 - name: Check if transit token file exists on controller
   ansible.builtin.stat:
-    path: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
+    path: >-
+      {{ vault_transit_token_export_path |
+      default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}
   delegate_to: localhost
   register: _transit_token_file_stat
   run_once: true
@@ -268,7 +284,10 @@
 
 - name: Ensure Vault controller export directory exists
   ansible.builtin.file:
-    path: "{{ (vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser) | ansible.builtin.dirname }}"
+    path: >-
+      {{ (vault_transit_token_export_path |
+      default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') |
+      expanduser) | ansible.builtin.dirname }}
     state: directory
     mode: '0700'
   delegate_to: localhost
@@ -277,7 +296,9 @@
 - name: Store transit token on controller
   ansible.builtin.copy:
     content: "{{ (_vault_transit_token_output.stdout | from_json).auth.client_token }}"
-    dest: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
+    dest: >-
+      {{ vault_transit_token_export_path |
+      default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}
     mode: '0600'
   delegate_to: localhost
   when:

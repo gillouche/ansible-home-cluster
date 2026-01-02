@@ -57,7 +57,7 @@
 
 - name: Enable non-local bind if requested (allows HAProxy to start without VIP)
   when: load_balancer_enable_nonlocal_bind | default(true) | bool
-  ansible.builtin.sysctl:
+  ansible.posix.sysctl:
     name: net.ipv4.ip_nonlocal_bind
     value: '1'
     state: present

@@ -16,8 +16,6 @@ tls_dir: "/etc/tls"
 lan_subnet: "192.168.0.0/24"
 podman_subnet: "10.88.0.0/16"
 
-
-
 # Vault trust/CA distribution (controller + hosts)
 vault_install_root_ca_on_hosts: true
 vault_trust_ca_on_controller: false
@@ -54,7 +52,7 @@ vault_pki_int_role_name: "homelab-server"
 vault_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
 vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.crt"
 vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.key"
-homelab_root_ca_cert_path: "{{ vault_cluster_ca_dir_controller }}/ca-bundle.pem"
+homelab_ca_bundle_path: "{{ vault_cluster_ca_dir_controller }}/ca-bundle.pem"
 
 # Controller-side Initialization and Token Paths
 vault_init_export_path: "~/.local/share/ansible-home-cluster/cluster-init.json"

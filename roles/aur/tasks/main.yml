@@ -35,7 +35,7 @@
 # Detect Arch Linux safely using gathered facts
 - name: Detect Arch Linux hosts for AUR flow
   ansible.builtin.set_fact:
-    aur_is_arch: "{{ (ansible_facts.get('distribution','') | lower) == 'archlinux' }}"
+    aur_is_arch: "{{ (ansible_facts.get('distribution', '') | lower) == 'archlinux' }}"
   tags: [aur, aur_rebuild_yay]
 
 ### Main AUR build flow (tagged to run with either --tags aur or --tags aur_rebuild_yay)
@@ -71,11 +71,13 @@
 
     - name: Determine if yay-bin is installed and if build is required
       ansible.builtin.set_fact:
-        aur_helper_bin_installed: "{{ ('yay-bin' in (ansible_facts.packages | default({}))) or
-         ((aur_helper_yay_q.rc | default(1)) == 0) }}"
-        aur_helper_should_build: "{{ (not(( 'yay-bin' in (ansible_facts.packages |
-         default({})) ) or ((aur_helper_yay_q.rc | default(1)) == 0))) or
-          (aur_helper_force_build | bool) }}"
+        aur_helper_bin_installed: >-
+          {{ ('yay-bin' in (ansible_facts.packages | default({}))) or
+             ((aur_helper_yay_q.rc | default(1)) == 0) }}
+        aur_helper_should_build: >-
+          {{ (not (('yay-bin' in (ansible_facts.packages | default({}))) or
+             ((aur_helper_yay_q.rc | default(1)) == 0))) or
+             (aur_helper_force_build | bool) }}
       become: false
 
     - name: Install build prerequisites for AUR (when build is required)
@@ -123,6 +125,7 @@
       ansible.builtin.command: makepkg --noconfirm
       args:
         chdir: "{{ aur_helper_work_dir_path }}"
+      changed_when: true
       when: aur_helper_should_build | bool
       become: false
 

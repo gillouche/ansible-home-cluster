@@ -87,8 +87,10 @@
   block:
     - name: Fetch Intermediate CAs to controller for bundle creation
       ansible.builtin.get_url:
-        url: "https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/{{ item.path }}/ca/pem"
+        url: >-
+          https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/{{ item.path }}/ca/pem
         dest: "{{ tls_cluster_ca_dir_controller | expanduser }}/{{ item.name }}.pem"
+        mode: '0644'
         validate_certs: false
       loop:
         - { path: 'pki_int', name: 'intermediate-ca' }
@@ -112,7 +114,10 @@
       ansible.builtin.command: >
         security add-trusted-cert -d
         -r trustRoot
-        -k {{ (ansible_env.HOME ~ '/Library/Keychains/' ~ tls_controller_install_keychain ~ '.keychain-db') if tls_controller_install_keychain != 'login' else (ansible_env.HOME ~ '/Library/Keychains/login.keychain-db') }}
+        -k {{ (ansible_env.HOME ~ '/Library/Keychains/' ~
+               tls_controller_install_keychain ~ '.keychain-db')
+               if tls_controller_install_keychain != 'login'
+               else (ansible_env.HOME ~ '/Library/Keychains/login.keychain-db') }}
         "{{ tls_cluster_ca_cert_controller | expanduser }}"
       delegate_to: localhost
       run_once: true
@@ -151,8 +156,14 @@
              ) | unique | sort }}
         _tls_candidate_ips: >-
           {{ (
-               ([ (ansible_facts.default_ipv4.address if (ansible_facts is defined and (ansible_facts.default_ipv4.address | default('') | length) > 0) else omit),
-                 (hostvars[inventory_hostname].ansible_host if (hostvars is defined and (hostvars[inventory_hostname].ansible_host | default('') | length) > 0) else omit),
+               ([ (ansible_facts.default_ipv4.address
+                   if (ansible_facts is defined and
+                       (ansible_facts.default_ipv4.address | default('') | length) > 0)
+                   else omit),
+                 (hostvars[inventory_hostname].ansible_host
+                   if (hostvars is defined and
+                       (hostvars[inventory_hostname].ansible_host | default('') | length) > 0)
+                   else omit),
                  '127.0.0.1'
                ]
                 | reject('equalto', omit) | list)
@@ -193,20 +204,25 @@
           ansible.builtin.set_fact:
             _tls_cert_needs_renewal: >-
               {{ not _tls_cert_stat.stat.exists or
-                 ((_tls_cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ')).timestamp() | int) < (ansible_date_time.epoch | int) + (30 * 24 * 60 * 60) or
+                 ((_tls_cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ')).timestamp() | int) <
+                 (ansible_date_time.epoch | int) + (30 * 24 * 60 * 60) or
                  (_tls_cert_info.subject_alt_name_items | default([]) | sort) !=
-                 ((_tls_san_dns | map('regex_replace', '^', 'DNS:') | list + _tls_san_ips | map('regex_replace', '^', 'IP Address:') | list) | unique | sort) }}
+                 ((_tls_san_dns | map('regex_replace', '^', 'DNS:') | list
+                 + _tls_san_ips | map('regex_replace', '^', 'IP Address:') | list) | unique | sort) }}
           when: _tls_cert_stat.stat.exists
           # If cert does not exist, _tls_cert_needs_renewal remains undefined, implicitly meaning true for subsequent steps
 
     - name: Generate server CSR and sign with Vault (if renewal/regeneration needed)
+      when: _tls_cert_needs_renewal | default(true) # Run this block if renewal/regeneration is needed or if cert didn't exist
       block:
         - name: Generate server CSR
           community.crypto.openssl_csr:
             path: "{{ tls_dir }}/api.csr"
             privatekey_path: "{{ tls_dir }}/api.key"
             common_name: "{{ inventory_hostname }}"
-            subject_alt_name: "{{ ( _tls_san_dns | map('regex_replace', '^', 'DNS:') | list + _tls_san_ips | map('regex_replace', '^', 'IP:') | list ) | unique | sort }}"
+            subject_alt_name: >-
+              {{ (_tls_san_dns | map('regex_replace', '^', 'DNS:') | list
+              + _tls_san_ips | map('regex_replace', '^', 'IP:') | list) | unique | sort }}
           become: true
           register: _tls_csr_result
 
@@ -218,7 +234,9 @@
 
         - name: Sign CSR with Vault
           ansible.builtin.uri:
-            url: "https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/pki_int/sign/{{ vault_pki_int_role_name }}"
+            url: >-
+              https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{
+              vault_api_port }}/v1/pki_int/sign/{{ vault_pki_int_role_name }}
             method: POST
             body_format: json
             body:
@@ -236,14 +254,15 @@
 
         - name: Install signed certificate
           ansible.builtin.copy:
-            content: "{{ ([_vault_signed_cert_raw.json.data.certificate] + _vault_signed_cert_raw.json.data.ca_chain) | join('\n') }}"
+            content: >-
+              {{ ([_vault_signed_cert_raw.json.data.certificate]
+              + _vault_signed_cert_raw.json.data.ca_chain) | join('\n') }}
             dest: "{{ tls_dir }}/api.crt"
             owner: root
             group: root
             mode: '0644'
           become: true
           register: _tls_cert_install_result
-      when: _tls_cert_needs_renewal | default(true) # Run this block if renewal/regeneration is needed or if cert didn't exist
 
     - name: Ensure permissions on TLS assets (certs only)
       ansible.builtin.file:
@@ -288,7 +307,8 @@
     group: "{{ item.group }}"
     mode: "{{ item.mode }}"
   loop:
-    - {path: "{{ tls_dir }}/intermediate-ca.pem", group: 'root', mode: '0644'}
+    - {path: "{{ tls_dir }}/intermediate-ca.pem",
+       group: 'root', mode: '0644'}
     - {path: "{{ tls_dir }}/middle-ca.pem", group: 'root', mode: '0644'}
     - {path: "{{ tls_dir }}/ca-bundle.pem", group: 'root', mode: '0644'}
   become: true

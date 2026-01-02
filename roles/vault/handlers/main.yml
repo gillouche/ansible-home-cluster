@@ -10,6 +10,7 @@
   become: true
 
 - name: Refresh system trust store
-  ansible.builtin.shell: update-ca-trust extract
+  ansible.builtin.command: update-ca-trust extract
+  changed_when: true
   become: true
   listen: "Refresh system trust store"

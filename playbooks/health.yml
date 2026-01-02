@@ -3,5 +3,6 @@
 # Homelab Cluster Health Check Orchestrator
 # ==============================================================================
 
-- import_playbook: includes/health/health.yml
+- name: Run health checks
+  import_playbook: includes/health/health.yml
   tags: [health]

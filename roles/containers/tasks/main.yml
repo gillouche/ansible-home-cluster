@@ -34,6 +34,9 @@
     line: "{{ target_user }}:100000:65536"
     create: true
     state: present
+    mode: '0644'
+    owner: root
+    group: root
   become: true
 
 - name: Ensure target_user subgid range exists
@@ -42,6 +45,9 @@
     line: "{{ target_user }}:100000:65536"
     create: true
     state: present
+    mode: '0644'
+    owner: root
+    group: root
   become: true
 
 - name: Ensure newuidmap/newgidmap exist (rootless prerequisite)

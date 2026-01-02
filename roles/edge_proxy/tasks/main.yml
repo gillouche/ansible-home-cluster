@@ -1,6 +1,7 @@
 ---
 
 - name: Ensure reverse_proxy system user exists with home
+  become: true
   block:
     - name: Probe available nologin paths
       ansible.builtin.stat:
@@ -13,11 +14,11 @@
 
     - name: Pick first available nologin
       ansible.builtin.set_fact:
-        reverse_proxy_nologin: "{{ (_nologin_stats.results |
-         selectattr('stat.exists','defined') |
-          selectattr('stat.exists') |
-           map(attribute='invocation.module_args.path') |
-            list | first) | default('/usr/sbin/nologin') }}"
+        reverse_proxy_nologin: >-
+          {{ (_nologin_stats.results | selectattr('stat.exists', 'defined')
+             | selectattr('stat.exists')
+             | map(attribute='invocation.module_args.path')
+             | list | first) | default('/usr/sbin/nologin') }}
 
     - name: Create reverse_proxy system user with home
       ansible.builtin.user:
@@ -27,7 +28,6 @@
         create_home: true
         shell: "{{ reverse_proxy_nologin }}"
         system: true
-  become: true
 
 - name: Gather minimal facts (role safeguard when running with tags)
   ansible.builtin.setup:
@@ -97,7 +97,9 @@
       when: reverse_proxy_resolvconf_stat.stat.islnk | default(false)
 
     - name: Check if /etc/resolv.conf already has the desired nameservers (reverse proxy)
-      ansible.builtin.shell: grep -q "nameserver {{ reverse_proxy_resolver_ip }}" /etc/resolv.conf && grep -q "nameserver {{ reverse_proxy_public_resolver }}" /etc/resolv.conf
+      ansible.builtin.shell: >
+        grep -q "nameserver {{ reverse_proxy_resolver_ip }}" /etc/resolv.conf &&
+        grep -q "nameserver {{ reverse_proxy_public_resolver }}" /etc/resolv.conf
       register: _edge_proxy_resolv_conf_check
       failed_when: false
       changed_when: false
@@ -182,7 +184,11 @@
     recreate: false
     user: 0
     network_mode: host
-    env: "{{ {'VAULT_TOKEN': caddy_vault_token} if (caddy_vault_token is defined and (caddy_vault_token | length > 0)) else {} }}"
+    env: >-
+      {{ {'VAULT_TOKEN': caddy_vault_token}
+         if (caddy_vault_token is defined and (caddy_vault_token | length > 0))
+         else {}
+      }}
     volumes:
       - "{{ reverse_proxy_config_dir }}/Caddyfile:/etc/caddy/Caddyfile"
       - "{{ reverse_proxy_data_dir }}:/data"
@@ -221,11 +227,15 @@
         mode: '0755'
         content: |
           #!/bin/bash
-          REPLICAS="{% for host in groups['edge_proxy_cluster'] | difference(groups['edge_proxy_primary']) %}{{ hostvars[host].ansible_host | default(host) }} {% endfor %}"
+          REPLICAS="{% for host in groups['edge_proxy_cluster']
+            | difference(groups['edge_proxy_primary']) %}{{ hostvars[host].ansible_host
+            | default(host) }} {% endfor %}"
           DATA_DIR="{{ reverse_proxy_data_dir }}/"
           for replica in $REPLICAS; do
-            rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519" --rsync-path="sudo rsync" $DATA_DIR alarm@$replica:$DATA_DIR
-            ssh -o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519 alarm@$replica "sudo podman kill -s USR1 {{ reverse_proxy_container_name }}"
+            rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519" \
+              --rsync-path=\"sudo rsync\" $DATA_DIR alarm@$replica:$DATA_DIR
+            ssh -o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519 alarm@$replica \
+              "sudo podman kill -s USR1 {{ reverse_proxy_container_name }}"
           done
 
     - name: Create systemd service for Caddy push
@@ -239,6 +249,7 @@
           Type=oneshot
           ExecStart=/usr/local/bin/caddy-push-certs.sh
           User=root
+        mode: '0644'
 
     - name: Create systemd path unit to watch for certificate changes
       ansible.builtin.copy:
@@ -251,6 +262,7 @@
           Unit=caddy-push-certs.service
           [Install]
           WantedBy=multi-user.target
+        mode: '0644'
 
     - name: Enable and start caddy-watch-certs path
       ansible.builtin.systemd:
@@ -318,6 +330,7 @@
           Type=oneshot
           ExecStart=/usr/local/bin/caddy-renew-certs.sh
           User=root
+        mode: '0644'
 
     - name: Create systemd timer for renewal (weekly)
       ansible.builtin.copy:
@@ -331,6 +344,7 @@
           Persistent=true
           [Install]
           WantedBy=timers.target
+        mode: '0644'
 
     - name: Enable and start renewal timer
       ansible.builtin.systemd:

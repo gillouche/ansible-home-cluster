@@ -31,7 +31,7 @@
   become: true
 
 - name: Setup SSH environment for pihole user
-  include_role:
+  ansible.builtin.include_role:
     name: devices_ssh
   vars:
     devices_ssh_user: "{{ pihole_user }}"
@@ -75,8 +75,8 @@
         state: stopped
       failed_when: false
 
-    - name: Migrate data from old to new home (rsync)
-      ansible.builtin.shell: |
+    - name: Migrate data from old to new home (rsync) # noqa: command-instead-of-module
+      ansible.builtin.command: >
         rsync -avz --ignore-existing "{{ pihole_old_root_dir }}/" "{{ pihole_root_dir }}/"
       changed_when: true
 
@@ -212,15 +212,11 @@
     mode: '0644'
   vars:
     vip_address: "{{ pihole_virtual_ip }}"
-    vrrp_interface: "{{
-      pihole_vrrp_interface | default(
-        ansible_facts['default_ipv4']['interface'] | default(
-          ansible_facts['default_ipv6']['interface'] | default(
-            (ansible_facts['interfaces'] | select('match','^(e|en|eth)') | list | first) | default('end0')
-          )
-        )
-      )
-    }}"
+    vrrp_interface: >-
+      {{ pihole_vrrp_interface | default(ansible_facts['default_ipv4']['interface']
+         | default(ansible_facts['default_ipv6']['interface']
+         | default((ansible_facts['interfaces'] | select('match', '^(e|en|eth)')
+         | list | first) | default('end0')))) }}
     vrrp_state: "{{ 'MASTER' if pihole_is_primary | bool else 'BACKUP' }}"
     vrrp_priority: "{{ 150 if pihole_is_primary | bool else 100 }}"
     vrrp_auth_pass: "{{ pihole_vrrp_auth_pass | default('p1h0l3') }}"

@@ -4,9 +4,11 @@
 # ==============================================================================
 
 # 1. Bootstrap controller host (SSH, Network)
-- import_playbook: includes/bootstrap/bootstrap_controller.yml
+- name: Bootstrap controller host
+  import_playbook: includes/bootstrap/bootstrap_controller.yml
   tags: [bootstrap_controller]
 
 # 2. Bootstrap devices (Initial SSH access, Network)
-- import_playbook: includes/bootstrap/bootstrap_devices.yml
+- name: Bootstrap devices
+  import_playbook: includes/bootstrap/bootstrap_devices.yml
   tags: [bootstrap_devices]

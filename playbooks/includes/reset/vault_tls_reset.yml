@@ -15,14 +15,14 @@
 
   tasks:
     # Controller cleanup (localhost)
-    - name: Nuclear reset on controller — remove ~/.local/share/ansible-home-cluster (DANGEROUS)
+    - name: Nuclear reset on controller — remove ~/.local/share/ansible-home-cluster (DANGEROUS) # noqa: run-once
       ansible.builtin.file:
         path: "~/.local/share/ansible-home-cluster"
         state: absent
       delegate_to: localhost
       run_once: true
 
-    - name: Recreate controller base directory after nuclear reset
+    - name: Recreate controller base directory after nuclear reset # noqa: run-once
       ansible.builtin.file:
         path: "~/.local/share/ansible-home-cluster"
         state: directory

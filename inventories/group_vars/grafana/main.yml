@@ -1,1 +1,2 @@
+---
 grafana_image: docker.io/grafana/grafana-oss:12.3.1

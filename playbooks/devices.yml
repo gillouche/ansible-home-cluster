@@ -4,16 +4,21 @@
 # ==============================================================================
 
 # 1. System: Facts, NTP, OS, Utils, AUR, Firewall, Containers
-- import_playbook: includes/setup/system.yml
+- name: System Setup
+  import_playbook: includes/setup/system.yml
 
 # 2. Trust: Root CA Generation, Distribution, Browser Trust
-- import_playbook: includes/setup/trust.yml
+- name: Trust Setup
+  import_playbook: includes/setup/trust.yml
 
 # 3. Vault: Init, Transit, Leader, Followers
-- import_playbook: includes/setup/vault.yml
+- name: Vault Setup
+  import_playbook: includes/setup/vault.yml
 
 # 4. Infrastructure: TLS Provisioning, DNS, Load Balancer, Edge Proxy
-- import_playbook: includes/setup/infrastructure.yml
+- name: Infrastructure Setup
+  import_playbook: includes/setup/infrastructure.yml
 
 # 5. Monitoring: prometheus, loki, exporters, grafana
-- import_playbook: includes/setup/monitoring.yml
+- name: Monitoring Setup
+  import_playbook: includes/setup/monitoring.yml

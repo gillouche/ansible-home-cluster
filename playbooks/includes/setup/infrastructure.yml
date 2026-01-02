@@ -5,7 +5,7 @@
   become: false
   tags: [infra, tls, trust] # Part of trust chain
   pre_tasks:
-    - name: Load cluster init JSON
+    - name: Load cluster init JSON # noqa: run-once
       ansible.builtin.slurp:
         src: "{{ vault_init_export_path | expanduser }}"
       register: _cluster_init_content

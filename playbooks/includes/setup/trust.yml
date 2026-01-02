@@ -51,6 +51,7 @@
           keyUsage = critical, keyCertSign, cRLSign
           subjectKeyIdentifier = hash
           authorityKeyIdentifier = keyid:always,issuer
+        mode: '0644'
       when: not _homelab_root_ca_certificate_stat.stat.exists
 
     - name: Generate Homelab Root CA certificate if missing
@@ -61,6 +62,7 @@
         -days 3650
         -sha256
         -config "{{ vault_cluster_ca_dir_controller | expanduser }}/root_ca.ext"
+      changed_when: true
       when: not _homelab_root_ca_certificate_stat.stat.exists
 
     - name: Set fact for Homelab Root CA path
@@ -80,6 +82,7 @@
           ansible.builtin.command: >-
             security add-trusted-cert -d -r trustRoot -k /Users/{{ ansible_user_id }}/Library/Keychains/login.keychain-db
             "{{ homelab_root_ca_cert_path }}"
+          changed_when: true
           when: _macos_cert_check.rc != 0
 
         - name: Firefox Enterprise Roots (macOS)

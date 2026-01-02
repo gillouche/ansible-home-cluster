@@ -72,12 +72,16 @@
         ( [ 'DNS:' ~ inventory_hostname ] if inventory_hostname is defined else [] ) +
         ( [ 'DNS:' ~ inventory_hostname ~ '.' ~ base_domain ] if base_domain is defined else [] ) +
         [ 'DNS:localhost' ] +
-        ( vault_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if vault_additional_san_dns is defined and vault_additional_san_dns | length > 0 else [] ) +
-        ( tls_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if tls_additional_san_dns is defined and tls_additional_san_dns | length > 0 else [] ) +
+        ( vault_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list
+          if vault_additional_san_dns is defined and vault_additional_san_dns | length > 0 else [] ) +
+        ( tls_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list
+          if tls_additional_san_dns is defined and tls_additional_san_dns | length > 0 else [] ) +
         ( [ 'IP:' ~ ansible_facts.default_ipv4.address ] if ansible_facts.default_ipv4.address is defined else [] ) +
         [ 'IP:127.0.0.1' ] +
-        ( vault_additional_san_ips | map('regex_replace', '^(.*)$', 'IP:\\1') | list if vault_additional_san_ips is defined and vault_additional_san_ips | length > 0 else [] ) +
-        ( [ 'IP:' ~ load_balancer_virtual_ip ] if load_balancer_virtual_ip is defined and load_balancer_virtual_ip | length > 0 else [] )
+        ( vault_additional_san_ips | map('regex_replace', '^(.*)$', 'IP:\\1') | list
+          if vault_additional_san_ips is defined and vault_additional_san_ips | length > 0 else [] ) +
+        ( [ 'IP:' ~ load_balancer_virtual_ip ]
+          if load_balancer_virtual_ip is defined and load_balancer_virtual_ip | length > 0 else [] )
       ) | unique | sort | list
     }}"
 
@@ -114,6 +118,7 @@
       keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
       extendedKeyUsage = serverAuth
       subjectAltName = {{ _vault_server_sansa | join(',') }}
+    mode: '0644'
   delegate_to: localhost
   register: _vault_leader_ext_config
 
@@ -127,13 +132,14 @@
   ansible.builtin.command: >
     openssl x509 -req
     -in "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.csr"
-    -CA "{{ homelab_root_ca_cert_path | default(vault_cluster_ca_cert_controller) }}"
-    -CAkey "{{ homelab_root_ca_key_path | default(vault_cluster_ca_key_controller) }}"
+    -CA "{{ vault_cluster_ca_cert_controller }}"
+    -CAkey "{{ vault_cluster_ca_key_controller }}"
     -CAcreateserial
     -out "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.crt"
     -days 1825
     -sha256
     -extfile "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}.ext"
+  changed_when: true
   delegate_to: localhost
   when: >
     _vault_leader_csr_fetch.changed
@@ -242,6 +248,7 @@
     src: "{{ vault_init_export_path | expanduser }}"
     dest: "{{ vault_init_export_path | expanduser }}.bak.{{ ansible_date_time.iso8601 }}"
     remote_src: true
+    mode: '0600'
   delegate_to: localhost
   when:
     - vault_needs_init
@@ -331,8 +338,6 @@
   become: true
   when:
     - (vault_root_token | default('') | length) > 0
-
-
 
 # Auto-initialize the Raft leader when using Transit seal (only when not initialized)
 - name: Pause 5s before leader auto-initialize (transit)

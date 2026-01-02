@@ -4,17 +4,21 @@
 # ==============================================================================
 
 # 1. Reset controller DNS (macOS)
-- import_playbook: includes/reset/reset_controller_dns.yml
+- name: Reset Controller DNS
+  import_playbook: includes/reset/reset_controller_dns.yml
   tags: [reset_dns]
 
 # 2. Nuclear reset for Vault (Controller artifacts + host directories)
-- import_playbook: includes/reset/vault_tls_reset.yml
+- name: Reset Vault
+  import_playbook: includes/reset/vault_tls_reset.yml
   tags: [vault_reset]
 
 # 3. Maintenance - Clean devices (SSH config, known_hosts, /etc/hosts)
-- import_playbook: includes/reset/clean_devices.yml
+- name: Clean Devices
+  import_playbook: includes/reset/clean_devices.yml
   tags: [clean_devices]
 
 # 4. Flush firewall rules
-- import_playbook: includes/reset/flush_firewall.yml
+- name: Flush Firewall
+  import_playbook: includes/reset/flush_firewall.yml
   tags: [reset_firewall]

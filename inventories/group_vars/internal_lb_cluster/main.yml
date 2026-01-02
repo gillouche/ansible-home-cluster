@@ -55,7 +55,9 @@ load_balancer_haproxy_frontends:
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
-      - "http-request redirect location /admin code 301 if is_pihole_cluster !{ path_beg /admin } !{ path_beg /api } !{ path_beg /remote.php }"
+      - >-
+        http-request redirect location /admin code 301 if is_pihole_cluster
+        !{ path_beg /admin } !{ path_beg /api } !{ path_beg /remote.php }
 
       # Loki Root Redirect (Loki has no UI, redirect / to /loki/ready)
       - "http-request redirect location /loki/ready code 301 if is_loki { path / }"

@@ -35,8 +35,10 @@
 - name: Print network information
   ansible.builtin.debug:
     msg:
-      - "Default IPv4 Address: {{ (ansible_facts.default_ipv4.address | default('N/A')) if (ansible_facts.default_ipv4 is defined) else 'N/A' }}"
-      - "Default Network Interface: {{ (ansible_facts.default_ipv4.interface | default('N/A')) if (ansible_facts.default_ipv4 is defined) else 'N/A' }}"
+      - "Default IPv4 Address: {{ (ansible_facts.default_ipv4.address | default('N/A'))
+          if (ansible_facts.default_ipv4 is defined) else 'N/A' }}"
+      - "Default Network Interface: {{ (ansible_facts.default_ipv4.interface | default('N/A'))
+          if (ansible_facts.default_ipv4 is defined) else 'N/A' }}"
       - "All IPv4 Addresses: {{ ansible_facts.all_ipv4_addresses | default([]) }}"
     verbosity: 4
   become: false

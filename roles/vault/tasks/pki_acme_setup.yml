@@ -1,11 +1,6 @@
 ---
 # tasks for setting up pki and acme
 
-- name: Define Homelab Root CA variables if undefined (pki_acme_setup)
-  ansible.builtin.set_fact:
-    homelab_root_ca_cert_path: "{{ homelab_root_ca_cert_path | default(vault_cluster_ca_cert_controller) }}"
-    homelab_root_ca_key_path: "{{ homelab_root_ca_key_path | default(vault_cluster_ca_key_controller) }}"
-
 - name: Set Vault leader address fact
   ansible.builtin.set_fact:
     _vault_leader_addr: "https://{{ ansible_facts.default_ipv4.address }}:{{ vault_api_port }}"
@@ -40,6 +35,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
   when: "'pki/' not in (_vault_secrets_list.stdout | from_json)"
 
 - name: Generate PKI Intermediate CA CSR
@@ -51,10 +47,11 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
   register: _generated_pki_csr_cmd
   when: _pki_ca_status.rc != 0 # Only generate if CA does not exist
 
-- name: Fetch PKI Intermediate CA CSR to controller
+- name: Fetch PKI Intermediate CA CSR to controller # noqa: no-handler
   ansible.builtin.copy:
     content: "{{ (_generated_pki_csr_cmd.stdout | from_json).data.csr }}"
     dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/vault-pki-intermediate.csr"
@@ -130,23 +127,26 @@
 
       if __name__ == "__main__":
           sign_csr(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+    mode: '0755'
   delegate_to: localhost
-  when: _generated_pki_csr_cmd.changed
 
-- name: Sign Vault PKI Intermediate CA CSR with Homelab Root CA (python)
+- name: Sign Vault PKI Intermediate CA CSR with Homelab Root CA (python) # noqa: no-handler
   ansible.builtin.command: >
     python3 "{{ vault_cluster_ca_dir_controller | expanduser }}/sign_intermediate.py"
     "{{ vault_cluster_ca_dir_controller | expanduser }}/vault-pki-intermediate.csr"
-    "{{ homelab_root_ca_cert_path }}"
-    "{{ homelab_root_ca_key_path }}"
+    "{{ vault_cluster_ca_cert_controller }}"
+    "{{ vault_cluster_ca_key_controller }}"
     "{{ vault_cluster_ca_dir_controller | expanduser }}/vault-pki-intermediate.crt"
+  changed_when: true
   delegate_to: localhost
   register: _signed_pki_cert
   when: _generated_pki_csr_cmd.changed # Only sign if CSR was just generated
 
-- name: Copy signed PKI Intermediate CA certificate back to Vault leader
+- name: Copy signed PKI Intermediate CA certificate back to Vault leader # noqa: no-handler
   ansible.builtin.copy:
-    content: "{{ lookup('file', vault_cluster_ca_dir_controller | expanduser ~ '/vault-pki-intermediate.crt') ~ '\n' ~ lookup('file', homelab_root_ca_cert_path) }}"
+    content: >-
+      {{ lookup('file', vault_cluster_ca_dir_controller | expanduser ~ '/vault-pki-intermediate.crt')
+      ~ '\n' ~ lookup('file', homelab_ca_bundle_path) }}
     dest: "{{ vault_host_tls_dir }}/vault-pki-intermediate.crt"
     owner: "{{ vault_runtime_user | default('vault') }}"
     group: "{{ vault_runtime_group_name | default('vault') }}"
@@ -154,7 +154,7 @@
   become: true
   when: _signed_pki_cert.changed
 
-- name: Set signed PKI Intermediate CA certificate in Vault
+- name: Set signed PKI Intermediate CA certificate in Vault # noqa: no-handler
   ansible.builtin.command: >
     /usr/local/bin/vault write pki/intermediate/set-signed
     certificate=@{{ vault_host_tls_dir }}/vault-pki-intermediate.crt
@@ -162,6 +162,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
   become: true
   when: _signed_pki_cert.changed # Only set if a new cert was just signed
 
@@ -174,6 +175,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
 
 - name: Set effective Vault public address for PKI
   ansible.builtin.set_fact:
@@ -193,6 +195,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
 
 # Check if PKI mount 'pki_int' is already configured
 - name: Read pki_int CA certificate to check existence
@@ -215,6 +218,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
   when: "'pki_int/' not in (_vault_secrets_list.stdout | from_json)"
 
 - name: Generate PKI_INT Intermediate CA CSR
@@ -226,10 +230,11 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
   register: _generated_pki_int_csr_cmd
   when: _pki_int_ca_status.rc != 0 # Only generate if CA does not exist
 
-- name: Fetch PKI_INT Intermediate CA CSR to controller
+- name: Fetch PKI_INT Intermediate CA CSR to controller # noqa: no-handler
   ansible.builtin.copy:
     content: "{{ (_generated_pki_int_csr_cmd.stdout | from_json).data.csr }}"
     dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/vault-pki-int-sub-intermediate.csr"
@@ -237,14 +242,14 @@
   delegate_to: localhost
   when: _generated_pki_int_csr_cmd.changed
 
-- name: Copy PKI_INT Intermediate CA CSR to Vault leader
+- name: Copy PKI_INT Intermediate CA CSR to Vault leader # noqa: no-handler
   ansible.builtin.copy:
     src: "{{ vault_cluster_ca_dir_controller | expanduser }}/vault-pki-int-sub-intermediate.csr"
     dest: /tmp/vault-pki-int-sub-intermediate.csr
     mode: '0644'
   when: _generated_pki_int_csr_cmd.changed
 
-- name: Sign PKI_INT Intermediate CA CSR with Vault PKI
+- name: Sign PKI_INT Intermediate CA CSR with Vault PKI # noqa: no-handler
   ansible.builtin.command: >
     /usr/local/bin/vault write -format=json pki/root/sign-intermediate
     mount_point=pki
@@ -254,10 +259,11 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
   register: _signed_pki_int_csr
   when: _generated_pki_int_csr_cmd.changed # Only sign if CSR was just generated
 
-- name: Copy signed PKI_INT Intermediate CA certificate back to Vault leader
+- name: Copy signed PKI_INT Intermediate CA certificate back to Vault leader # noqa: no-handler
   ansible.builtin.copy:
     content: "{{ (_signed_pki_int_csr.stdout | from_json).data.certificate }}"
     dest: "{{ vault_host_tls_dir }}/vault-pki-int-sub-intermediate.crt"
@@ -267,7 +273,7 @@
   become: true
   when: _signed_pki_int_csr.changed
 
-- name: Set signed PKI_INT Intermediate CA certificate in Vault
+- name: Set signed PKI_INT Intermediate CA certificate in Vault # noqa: no-handler
   ansible.builtin.command: >
     /usr/local/bin/vault write pki_int/intermediate/set-signed
     certificate=@{{ vault_host_tls_dir }}/vault-pki-int-sub-intermediate.crt
@@ -275,6 +281,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
   become: true
   when: _signed_pki_int_csr.changed # Only set if a new cert was just signed
 
@@ -287,6 +294,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
 
 - name: Get default issuer ID for pki_int
   ansible.builtin.command: /usr/local/bin/vault read -field=default pki_int/config/issuers
@@ -295,6 +303,7 @@
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
   register: _default_pki_int_issuer
+  changed_when: false
 
 - name: Create intermediate PKI role (pki_int)
   ansible.builtin.command: >
@@ -307,6 +316,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
 
 - name: Create edge-proxy-policy
   ansible.builtin.shell: |
@@ -355,6 +365,7 @@
   ansible.builtin.copy:
     content: "{{ (_edge_proxy_token_output.stdout | from_json).auth.client_token }}"
     dest: "{{ vault_edge_proxy_token_path }}"
+    mode: '0600'
   delegate_to: localhost
   become: false
 
@@ -369,6 +380,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
 
 - name: Enable ACME on intermediate PKI (pki_int)
   ansible.builtin.command: >
@@ -377,3 +389,4 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true

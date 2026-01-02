@@ -107,12 +107,16 @@
         ( [ 'DNS:' ~ inventory_hostname ] if inventory_hostname is defined else [] ) +
         ( [ 'DNS:' ~ inventory_hostname ~ '.' ~ base_domain ] if base_domain is defined else [] ) +
         [ 'DNS:localhost' ] +
-        ( vault_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if vault_additional_san_dns is defined and vault_additional_san_dns | length > 0 else [] ) +
-        ( tls_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list if tls_additional_san_dns is defined and tls_additional_san_dns | length > 0 else [] ) +
+        ( vault_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list
+          if vault_additional_san_dns is defined and vault_additional_san_dns | length > 0 else [] ) +
+        ( tls_additional_san_dns | map('regex_replace', '^(.*)$', 'DNS:\\1') | list
+          if tls_additional_san_dns is defined and tls_additional_san_dns | length > 0 else [] ) +
         ( [ 'IP:' ~ ansible_facts.default_ipv4.address ] if ansible_facts.default_ipv4.address is defined else [] ) +
         [ 'IP:127.0.0.1' ] +
-        ( vault_additional_san_ips | map('regex_replace', '^(.*)$', 'IP:\\1') | list if vault_additional_san_ips is defined and vault_additional_san_ips | length > 0 else [] ) +
-        ( [ 'IP:' ~ load_balancer_virtual_ip ] if load_balancer_virtual_ip is defined and load_balancer_virtual_ip | length > 0 else [] )
+        ( vault_additional_san_ips | map('regex_replace', '^(.*)$', 'IP:\\1') | list
+          if vault_additional_san_ips is defined and vault_additional_san_ips | length > 0 else [] ) +
+        ( [ 'IP:' ~ load_balancer_virtual_ip ]
+          if load_balancer_virtual_ip is defined and load_balancer_virtual_ip | length > 0 else [] )
       ) | unique | sort | list
     }}"
 
@@ -148,19 +152,21 @@
       keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
       extendedKeyUsage = serverAuth
       subjectAltName = {{ _vault_server_sansa | join(',') }}
+    mode: '0644'
   delegate_to: localhost
 
 - name: Sign Vault follower certificate with Homelab Root CA (on controller)
   ansible.builtin.command: >
     openssl x509 -req
     -in "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.csr"
-    -CA "{{ homelab_root_ca_cert_path | default(vault_cluster_ca_cert_controller) }}"
-    -CAkey "{{ homelab_root_ca_key_path | default(vault_cluster_ca_key_controller) }}"
+    -CA "{{ vault_cluster_ca_cert_controller }}"
+    -CAkey "{{ vault_cluster_ca_key_controller }}"
     -CAcreateserial
     -out "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}-api.crt"
     -days 1825
     -sha256
     -extfile "{{ vault_cluster_ca_dir_controller | expanduser }}/{{ inventory_hostname }}.ext"
+  changed_when: true
   delegate_to: localhost
 
 - name: Copy signed Vault follower certificate to host
@@ -261,10 +267,10 @@
   delay: "{{ vault_wait_delay | default(2) }}"
   until: >-
     (_follower_status_after_init.rc | default(1)) == 0 and
-    ((_follower_status_after_init.stdout | from_json).sealed | default(true)) == false
+    not ((_follower_status_after_init.stdout | from_json).sealed | default(true))
   become: true
   when:
     - vault_enable_transit_seal | default(false)
     - inventory_hostname in (groups['vault_followers'] | default([]))
     - (_follower_status_preinit.stdout | default('{}')) | length > 0
-    - (((_follower_status_preinit.stdout | from_json).initialized | default(false)) == true)
+    - (not ((_follower_status_preinit.stdout | from_json).initialized | default(false)) | bool)
