@@ -1,0 +1,28 @@
+#!/bin/bash
+set -e
+
+REMOTE_USER="{{ ansible_user }}"
+REMOTE_HOST="{{ ansible_host }}"
+REMOTE_DB_PATH="{{ firefly_data_dir }}/database.sqlite"
+LOCAL_BACKUP_DIR="{{ firefly_db_backup_path }}"
+DATE=$(date +%Y-%m-%dT%H%M%S)
+BACKUP_NAME="${DATE}_database.sqlite"
+
+echo "Starting Firefly III backup from $REMOTE_HOST..."
+
+# Create local directory if it doesn't exist
+mkdir -p "$LOCAL_BACKUP_DIR"
+
+# Create a unique temp file on remote
+TEMP_REMOTE_PATH=$(ssh "$REMOTE_USER@$REMOTE_HOST" mktemp)
+
+# Copy DB to temp on remote to avoid locking
+ssh "$REMOTE_USER@$REMOTE_HOST" "cp '$REMOTE_DB_PATH' '$TEMP_REMOTE_PATH'"
+
+# Copy from remote temp to local
+scp "$REMOTE_USER@$REMOTE_HOST:$TEMP_REMOTE_PATH" "$LOCAL_BACKUP_DIR/$BACKUP_NAME"
+
+# Clean up remote temp
+ssh "$REMOTE_USER@$REMOTE_HOST" "rm '$TEMP_REMOTE_PATH'"
+
+echo "Backup saved to $LOCAL_BACKUP_DIR/$BACKUP_NAME"

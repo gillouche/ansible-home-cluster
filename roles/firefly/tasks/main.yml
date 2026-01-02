@@ -1,0 +1,105 @@
+---
+- name: Ensure firefly group exists
+  ansible.builtin.group:
+    name: "{{ firefly_group }}"
+    gid: "{{ firefly_gid }}"
+    state: present
+    system: true
+  become: true
+
+- name: Ensure firefly user exists
+  ansible.builtin.user:
+    name: "{{ firefly_user }}"
+    uid: "{{ firefly_uid }}"
+    group: "{{ firefly_group }}"
+    home: "{{ firefly_home }}"
+    create_home: yes
+    state: present
+    system: true
+    shell: /bin/bash
+  become: true
+
+- name: Ensure firefly home directory is accessible
+  ansible.builtin.file:
+    path: "{{ firefly_home }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ firefly_user }}"
+    group: "{{ firefly_group }}"
+  become: true
+
+- name: Ensure directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ firefly_db_uid }}"
+    group: "{{ firefly_db_gid }}"
+    mode: '0755'
+  loop:
+    - "{{ firefly_data_dir }}"
+    - "{{ firefly_upload_dir }}"
+  become: true
+
+- name: Create database file
+  ansible.builtin.file:
+    path: "{{ firefly_data_dir }}/database.sqlite"
+    state: touch
+    owner: "{{ firefly_db_uid }}"
+    group: "{{ firefly_db_gid }}"
+    mode: '0664'
+  become: true
+  changed_when: false
+
+- name: Run Firefly III container
+  containers.podman.podman_container:
+    name: "{{ firefly_container_name }}"
+    image: "{{ firefly_image }}"
+    state: started
+    restart_policy: always
+    ports:
+      - "{{ firefly_port }}:8080"
+    env:
+      APP_ENV: production
+      TZ: "{{ firefly_timezone }}"
+      DB_CONNECTION: sqlite
+      DB_DATABASE: /var/www/html/storage/database/database.sqlite
+      APP_KEY: "{{ firefly_app_key }}"
+      APP_URL: "{{ firefly_app_url }}"
+      TRUSTED_PROXIES: "**"
+      SITE_OWNER: "{{ firefly_site_owner }}"
+    volumes:
+      - "{{ firefly_data_dir }}:/var/www/html/storage/database:rw"
+      - "{{ firefly_upload_dir }}:/var/www/html/storage/upload:rw"
+  become: true
+
+- name: Ensure ansible_user is in firefly group for backup access
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: "{{ firefly_db_gid }}"
+    append: yes
+  become: true
+
+- name: Verify backup path exists on controller
+  ansible.builtin.stat:
+    path: "{{ firefly_db_backup_path }}"
+  delegate_to: localhost
+  register: backup_dir_stat
+  failed_when: not backup_dir_stat.stat.exists or not backup_dir_stat.stat.isdir
+  become: false
+
+- name: Install local backup script on controller
+  ansible.builtin.template:
+    src: firefly-local-backup.sh.j2
+    dest: "{{ lookup('env', 'HOME') }}/.local/bin/firefly-backup-pull.sh"
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+
+- name: Schedule weekly backup on controller
+  ansible.builtin.cron:
+    name: "Firefly Weekly Backup"
+    special_time: weekly
+    job: "{{ lookup('env', 'HOME') }}/.local/bin/firefly-backup-pull.sh"
+    state: present
+  delegate_to: localhost
+  become: false

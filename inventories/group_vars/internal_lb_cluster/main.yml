@@ -35,6 +35,9 @@ load_balancer_haproxy_frontends:
       # ACLs for Grafana
       - "acl is_grafana hdr(host) -i grafana.{{ base_domain }}"
 
+      # ACLs for Firefly
+      - "acl is_firefly hdr(host) -i firefly.{{ base_domain }}"
+
       # Routing Logic
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
@@ -52,6 +55,9 @@ load_balancer_haproxy_frontends:
 
       # Routing Logic for Grafana
       - "use_backend grafana_backend if is_grafana"
+
+      # Routing Logic for Firefly
+      - "use_backend firefly_backend if is_firefly"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
@@ -163,4 +169,13 @@ load_balancer_haproxy_backends:
       - name: grafana
         addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
         port: 3000
+        opts: "check"
+
+  # Firefly Backend
+  - name: firefly_backend
+    mode: http
+    servers:
+      - name: firefly
+        addr: "{{ hostvars['rpi5b8g1'].ansible_host }}"
+        port: 8082
         opts: "check"

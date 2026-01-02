@@ -1,0 +1,24 @@
+---
+firefly_user: firefly
+firefly_group: firefly
+firefly_uid: 10005
+firefly_gid: 10005
+firefly_db_uid: 33
+firefly_db_gid: 33
+firefly_home: /home/firefly
+firefly_data_dir: "{{ firefly_home }}/data"
+firefly_upload_dir: "{{ firefly_home }}/upload"
+firefly_container_name: firefly
+firefly_image: "fireflyiii/core:latest"
+firefly_port: 8082
+firefly_timezone: "Europe/Zurich"
+firefly_app_url: "https://firefly.gillouche.homelab"
+firefly_site_owner: "firefly@gillouche.homelab"
+# head /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 32 && echo
+firefly_app_key: "ChangeMeChangeMeChangeMeChangeMe"
+
+# Backup Configuration
+firefly_db_backup_path: "/tmp/firefly/"
+firefly_backup_schedule: "weekly"
+firefly_backup_target_user: "alarm"
+firefly_backup_target_host: "localhost"
