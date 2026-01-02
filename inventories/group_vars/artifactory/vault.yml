@@ -1,0 +1,4 @@
+---
+# Encrypt this file with ansible-vault
+artifactory_nexus_admin_password: "Claim6-Wobbly9-Ashamed0-Password9-Amicably3"
+artifactory_nexus_publish_user_password: "Publish1-Password9-Enthusiastic2-Password9-Enthusiastic2"

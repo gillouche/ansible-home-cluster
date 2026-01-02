@@ -98,9 +98,12 @@
 
     - name: Create CA bundle on controller
       ansible.builtin.shell: |
-        cat "{{ tls_cluster_ca_dir_controller | expanduser }}/intermediate-ca.pem" \
-            "{{ tls_cluster_ca_dir_controller | expanduser }}/middle-ca.pem" \
-            "{{ tls_cluster_ca_cert_controller | expanduser }}" > "{{ tls_cluster_ca_dir_controller | expanduser }}/ca-bundle.pem"
+        for f in "{{ tls_cluster_ca_dir_controller | expanduser }}/intermediate-ca.pem" \
+                 "{{ tls_cluster_ca_dir_controller | expanduser }}/middle-ca.pem" \
+                 "{{ tls_cluster_ca_cert_controller | expanduser }}"; do
+          cat "$f"
+          echo ""
+        done > "{{ tls_cluster_ca_dir_controller | expanduser }}/ca-bundle.pem"
       delegate_to: localhost
       run_once: true
       changed_when: false

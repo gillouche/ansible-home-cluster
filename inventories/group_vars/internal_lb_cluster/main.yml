@@ -22,11 +22,17 @@ load_balancer_haproxy_frontends:
       - "acl is_pihole_replica2 hdr(host) -i replica2.pihole.{{ base_domain }}"
       - "acl is_pihole_cluster hdr_end(host) -i pihole.{{ base_domain }}"
 
+      # ACLs for Nexus
+      - "acl is_nexus hdr(host) -i nexus.{{ base_domain }}"
+
       # Routing Logic
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
       - "use_backend pihole_replica2 if is_pihole_replica2"
       - "use_backend pihole_backend if is_pihole_cluster"
+
+      # Routing Logic for Nexus
+      - "use_backend nexus_backend if is_nexus"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
@@ -97,4 +103,13 @@ load_balancer_haproxy_backends:
       - name: pihole3
         addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
         port: 8080
+        opts: "check"
+
+  # Nexus Backend
+  - name: nexus_backend
+    mode: http
+    servers:
+      - name: nexus
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 8081
         opts: "check"

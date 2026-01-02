@@ -181,6 +181,44 @@
           - "Backend (HAProxy VIP) reachable: {{ 'YES' if _proxy_backend_check.status is defined else 'NO' }}"
           - "-----------------------------------------------------------"
 
+- name: "Nexus Artifactory Health Check"
+  hosts: artifactory
+  gather_facts: true
+  become: false
+  tags: [health, health_nexus]
+  vars_files:
+    - ../../../inventories/group_vars/artifactory/vault.yml
+  tasks:
+    - name: Query Nexus Status
+      ansible.builtin.uri:
+        url: "http://localhost:8081/service/rest/v1/status"
+        method: GET
+        status_code: 200
+      register: _nexus_status
+      failed_when: false
+
+    - name: Query Nexus Metrics
+      ansible.builtin.uri:
+        url: "http://localhost:8081/service/rest/metrics/data"
+        method: GET
+        user: admin
+        password: "{{ artifactory_nexus_admin_password }}"
+        force_basic_auth: true
+        status_code: [200, 403]
+      register: _nexus_metrics
+      failed_when: false
+
+    - name: Debug Nexus Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Nexus Health Check: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Status: {{ 'HEALTHY' if _nexus_status.status == 200 else 'DOWN/ERROR (' ~ (_nexus_status.status | default('N/A')) ~ ')' }}"
+          - "Heap Used: {{ (_nexus_metrics.json.gauges['jvm.memory.heap.used'].value / 1024 / 1024) | round(2) if (_nexus_metrics.status == 200 and 'jvm.memory.heap.used' in _nexus_metrics.json.gauges) else 'N/A' }} MB"
+          - "Total Requests: {{ _nexus_metrics.json.timers['org.sonatype.nexus.internal.web.HeaderPatternFilter.request'].count if (_nexus_metrics.status == 200 and 'org.sonatype.nexus.internal.web.HeaderPatternFilter.request' in _nexus_metrics.json.timers) else 'N/A' }}"
+          - "-----------------------------------------------------------"
+
 - name: "Cluster Summary"
   hosts: localhost
   gather_facts: false
@@ -195,6 +233,7 @@
           - "Vault API (VIP):      https://{{ load_balancer_virtual_ip }}:{{ vault_api_port }}"
           - "Pi-hole DNS (VIP):    {{ pihole_virtual_ip }}"
           - "Pi-hole Web (Proxy):  https://pihole.{{ base_domain }}"
+          - "Nexus UI (Proxy):     https://nexus.{{ base_domain }}"
           - "Edge Proxy VIP:       {{ reverse_proxy_virtual_ip }}"
           - "Vault Leader:         https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}"
           - "==========================================================="

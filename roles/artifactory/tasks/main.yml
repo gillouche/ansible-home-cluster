@@ -1,0 +1,74 @@
+---
+- name: Ensure nexus group exists
+  ansible.builtin.group:
+    name: "{{ artifactory_nexus_group }}"
+    gid: "{{ artifactory_nexus_gid }}"
+    system: true
+  become: true
+
+- name: Ensure nexus user exists
+  ansible.builtin.user:
+    name: "{{ artifactory_nexus_user }}"
+    uid: "{{ artifactory_nexus_uid }}"
+    group: "{{ artifactory_nexus_group }}"
+    home: "{{ artifactory_nexus_home }}"
+    create_home: true
+    shell: /sbin/nologin
+    system: true
+  become: true
+
+- name: Ensure nexus data and config directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ artifactory_nexus_user }}"
+    group: "{{ artifactory_nexus_group }}"
+    mode: '0755'
+  loop:
+    - "{{ artifactory_nexus_data_dir }}"
+    - "{{ artifactory_nexus_data_dir }}/etc"
+    - "{{ artifactory_nexus_data_dir }}/javaprefs"
+    - "{{ artifactory_nexus_home }}"
+  become: true
+
+- name: Ensure nexus.properties exists in /home/nexus
+  ansible.builtin.template:
+    src: nexus.properties.j2
+    dest: "{{ artifactory_nexus_home }}/nexus.properties"
+    owner: "{{ artifactory_nexus_user }}"
+    group: "{{ artifactory_nexus_group }}"
+    mode: '0644'
+  become: true
+
+- name: Ensure nexus container is running
+  containers.podman.podman_container:
+    name: "{{ artifactory_nexus_container_name }}"
+    image: "{{ artifactory_nexus_image }}"
+    state: started
+    restart_policy: unless-stopped
+    user: "{{ artifactory_nexus_uid }}:{{ artifactory_nexus_gid }}"
+    env:
+      INSTALL4J_ADD_VM_PARAMS: "-Dnexus.wizard.enabled=false -Djava.util.prefs.userRoot=/nexus-data/javaprefs"
+    volumes:
+      - "{{ artifactory_nexus_data_dir }}:/nexus-data:Z"
+      - "{{ artifactory_nexus_home }}/nexus.properties:/nexus-data/etc/nexus.properties:Z"
+    ports:
+      - "{{ artifactory_nexus_port }}:8081"
+      - "5000:5000"
+  become: true
+
+- name: Wait for Nexus to be ready
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/status"
+    status_code: 200
+    validate_certs: false
+  register: _nexus_status
+  until: _nexus_status.status == 200
+  retries: 60
+  delay: 10
+  become: false
+  tags: [nexus_config]
+
+- name: Configure Nexus repositories
+  ansible.builtin.include_tasks: configure.yml
+  tags: [nexus_config]

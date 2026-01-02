@@ -1,0 +1,13 @@
+---
+artifactory_nexus_version: "3.87.1-alpine"
+artifactory_nexus_image: "sonatype/nexus3:{{ artifactory_nexus_version }}"
+artifactory_nexus_user: "nexus"
+artifactory_nexus_group: "nexus"
+artifactory_nexus_uid: 200
+artifactory_nexus_gid: 200
+artifactory_nexus_home: "/home/nexus"
+artifactory_nexus_data_dir: "/mnt/data/nexus"
+artifactory_nexus_port: 8081
+artifactory_nexus_container_name: "nexus"
+artifactory_nexus_publish_user_password: "password"
+artifactory_nexus_admin_password: "password"

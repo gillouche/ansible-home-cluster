@@ -42,3 +42,11 @@
   tags: [infra, proxy, trust] # Part of trust chain (TLS terminator)
   roles:
     - role: edge_proxy
+
+- name: "Setup Artifactory"
+  hosts: artifactory
+  gather_facts: true
+  become: false
+  tags: [infra, artifactory]
+  roles:
+    - role: artifactory

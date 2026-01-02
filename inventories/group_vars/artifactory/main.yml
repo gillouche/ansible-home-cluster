@@ -1,0 +1,4 @@
+---
+# Nexus Artifactory specific group variables
+artifactory_nexus_port: 8081
+artifactory_nexus_data_dir: "/mnt/data/nexus"

@@ -127,6 +127,22 @@
     - {path: "{{ reverse_proxy_certs_dir }}", mode: '0755'}
   become: true
 
+- name: Allow alarm user to run rsync and podman for certificate sync
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/reverse-proxy-sync
+    content: "alarm ALL=(root) NOPASSWD: /usr/bin/rsync, /usr/bin/podman kill *"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+  become: true
+
+- name: Remove legacy alarm-rsync sudoers file
+  ansible.builtin.file:
+    path: /etc/sudoers.d/alarm-rsync
+    state: absent
+  become: true
+
 - name: Ensure Caddy certificates directory exists
   ansible.builtin.file:
     path: "{{ reverse_proxy_data_dir }}/caddy/certificates"
@@ -322,3 +338,10 @@
         state: started
         enabled: true
         daemon_reload: true
+
+- name: Force certificate sync from Primary to Replicas
+  ansible.builtin.systemd:
+    name: caddy-push-certs.service
+    state: started
+  when: reverse_proxy_is_primary | bool
+  become: true

@@ -1,0 +1,311 @@
+---
+- name: Check if admin.password file exists
+  ansible.builtin.stat:
+    path: "{{ artifactory_nexus_data_dir }}/admin.password"
+  register: _nexus_admin_password_file
+  become: true
+
+- name: Set initial password fact
+  block:
+    - name: Read initial admin password
+      ansible.builtin.slurp:
+        src: "{{ artifactory_nexus_data_dir }}/admin.password"
+      register: _nexus_initial_password_b64
+      become: true
+
+    - name: Set nexus_admin_password to initial one
+      ansible.builtin.set_fact:
+        nexus_admin_password: "{{ _nexus_initial_password_b64.content | b64decode | trim }}"
+
+    - name: Change admin password to vault value
+      ansible.builtin.uri:
+        url: "http://localhost:8081/service/rest/v1/security/users/admin/change-password"
+        method: PUT
+        user: admin
+        password: "{{ nexus_admin_password }}"
+        force_basic_auth: true
+        body: "{{ artifactory_nexus_admin_password }}"
+        headers:
+          Content-Type: "text/plain"
+        status_code: 204
+      register: _password_change
+      become: false
+
+    - name: Update nexus_admin_password fact to vault value
+      ansible.builtin.set_fact:
+        nexus_admin_password: "{{ artifactory_nexus_admin_password }}"
+      when: _password_change.status == 204
+
+    - name: Remove initial admin.password file
+      ansible.builtin.file:
+        path: "{{ artifactory_nexus_data_dir }}/admin.password"
+        state: absent
+      become: true
+  when: _nexus_admin_password_file.stat.exists
+
+- name: Use vault password if initial password file doesn't exist
+  ansible.builtin.set_fact:
+    nexus_admin_password: "{{ artifactory_nexus_admin_password }}"
+  when: not _nexus_admin_password_file.stat.exists
+
+- name: Enable Anonymous Access
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/security/anonymous"
+    method: PUT
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      enabled: true
+      userId: "anonymous"
+      realmName: "NexusAuthorizingRealm"
+    status_code: [200, 204]
+  become: false
+
+- name: Get current EULA status
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/system/eula"
+    method: GET
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: _nexus_eula_status
+  become: false
+
+- name: Accept End User License Agreement (EULA)
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/system/eula"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      accepted: true
+    status_code: [200, 204]
+  when: not _nexus_eula_status.json.accepted | bool
+  failed_when: false # Ignore 500 errors related to file locks if UI says it is accepted
+  become: false
+
+- name: Get list of existing repositories
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/repositories"
+    method: GET
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    status_code: 200
+  register: _nexus_repos
+  become: false
+
+- name: Create Docker Hub Proxy repository
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/repositories/docker/proxy"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "docker-hub"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      proxy:
+        remoteUrl: "https://registry-1.docker.io"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+        connection:
+          retries: 2
+          timeout: 60
+      docker:
+        v1Enabled: true
+        forceBasicAuth: false
+      dockerProxy:
+        indexType: "HUB"
+    status_code: 201
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'docker-hub') | list | length == 0
+  become: false
+
+- name: Create Quay Proxy repository
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/repositories/docker/proxy"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "quay-proxy"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      proxy:
+        remoteUrl: "https://quay.io"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+        connection:
+          retries: 2
+          timeout: 60
+      docker:
+        v1Enabled: true
+        forceBasicAuth: false
+      dockerProxy:
+        indexType: "REGISTRY"
+    status_code: 201
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'quay-proxy') | list | length == 0
+  become: false
+
+- name: Create Docker Group repository
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/repositories/docker/group"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "docker-all"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      group:
+        memberNames:
+          - docker-hub
+          - quay-proxy
+      docker:
+        v1Enabled: true
+        forceBasicAuth: false
+        httpPort: 5000
+    status_code: 201
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'docker-all') | list | length == 0
+  become: false
+
+- name: Create PyPI Proxy repository
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/repositories/pypi/proxy"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "pypi-proxy"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      proxy:
+        remoteUrl: "https://pypi.org"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+    status_code: 201
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'pypi-proxy') | list | length == 0
+  become: false
+
+- name: Create Helm Proxy repository
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/repositories/helm/proxy"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "helm-proxy"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      proxy:
+        remoteUrl: "https://charts.helm.sh/stable"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+    status_code: 201
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'helm-proxy') | list | length == 0
+  become: false
+
+- name: Create Go Proxy repository
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/repositories/go/proxy"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "go-proxy"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      proxy:
+        remoteUrl: "https://proxy.golang.org"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+    status_code: 201
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'go-proxy') | list | length == 0
+  become: false
+
+- name: Create Cargo Proxy repository
+  ansible.builtin.uri:
+    url: "http://localhost:8081/service/rest/v1/repositories/cargo/proxy"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "cargo-proxy"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      proxy:
+        remoteUrl: "https://crates.io"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+    status_code: 201
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'cargo-proxy') | list | length == 0
+  become: false

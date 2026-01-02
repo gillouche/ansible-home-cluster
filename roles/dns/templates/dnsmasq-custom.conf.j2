@@ -3,3 +3,9 @@
 {% for rec in (pihole_custom_dns_records | default([])) %}
     address=/{{ rec.host }}/{{ rec.ip }}
 {% endfor %}
+
+{% if pihole_dns_wildcard_enabled | default(false) %}
+{%   for domain in (pihole_dns_wildcard_domains | default([])) %}
+address=/{{ domain }}/{{ reverse_proxy_virtual_ip }}
+{%   endfor %}
+{% endif %}
