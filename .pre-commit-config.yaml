@@ -21,6 +21,13 @@ repos:
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.9.17
     hooks:
-      - id: uv-export
-        language_version: python3.14
-        args: ["--frozen", "--no-hashes", "--output-file=requirements.txt"]
+      - id: uv-lock
+
+  - repo: local
+    hooks:
+      - id: check-ansible-vault
+        name: Check for unencrypted Ansible vault files
+        entry: bash -c 'for f in "$@"; do if ! grep -q "\$ANSIBLE_VAULT" "$f"; then echo "$f is not encrypted"; exit 1; fi; done' _
+        language: system
+        files: 'group_vars/.*vault\.yml$|host_vars/.*vault\.yml$|^vault\.yml$'
+        description: Prevents unencrypted vault files from being committed.

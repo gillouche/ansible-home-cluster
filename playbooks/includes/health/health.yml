@@ -348,6 +348,58 @@
           - "Revision:   {{ _loki_build_info.json.revision if (_loki_build_info.json is defined and 'revision' in _loki_build_info.json) else 'N/A' }}"
           - "-----------------------------------------------------------"
 
+- name: "Grafana Health Check"
+  hosts: grafana
+  gather_facts: true
+  become: false
+  tags: [health, health_grafana]
+  vars_files:
+    - ../../../roles/grafana/defaults/main.yml
+    - ../../../inventories/group_vars/grafana/vault.yml
+  tasks:
+    - name: Query Grafana Health (Basic)
+      ansible.builtin.uri:
+        url: "http://localhost:{{ grafana_port }}/api/health"
+        method: GET
+        status_code: 200
+      register: _grafana_health
+      failed_when: false
+
+    - name: Query Grafana Datasources
+      ansible.builtin.uri:
+        url: "http://localhost:{{ grafana_port }}/api/datasources"
+        method: GET
+        user: "{{ grafana_admin_user }}"
+        password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+        status_code: 200
+      register: _grafana_datasources
+      failed_when: false
+
+    - name: Query Grafana Alert Rules
+      ansible.builtin.uri:
+        url: "http://localhost:{{ grafana_port }}/api/prometheus/grafana/api/v1/rules"
+        method: GET
+        user: "{{ grafana_admin_user }}"
+        password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+        status_code: 200
+      register: _grafana_alerts
+      failed_when: false
+
+    - name: Debug Grafana Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Grafana Health Check: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Status (DB): {{ _grafana_health.json.database if (_grafana_health.json is defined and 'database' in _grafana_health.json) else 'DOWN/ERROR' }}"
+          - "Version:     {{ _grafana_health.json.version if (_grafana_health.json is defined and 'version' in _grafana_health.json) else 'N/A' }}"
+          - "Datasources: {{ _grafana_datasources.json | map(attribute='name') | list | join(', ') if _grafana_datasources.status == 200 else 'N/A' }}"
+          - "Alert Rules: {{ _grafana_alerts.json.data.groups | length if (_grafana_alerts.status == 200 and 'data' in _grafana_alerts.json) else 'N/A' }} groups provisioned"
+          - "Firing Alerts: {{ _grafana_alerts.json.data.groups | map(attribute='rules') | flatten | selectattr('state', 'equalto', 'firing') | list | length if (_grafana_alerts.status == 200 and 'data' in _grafana_alerts.json) else 'N/A' }}"
+          - "-----------------------------------------------------------"
+
 - name: "External Services Health Check (via Proxy)"
   hosts: localhost
   gather_facts: false
@@ -368,6 +420,13 @@
       changed_when: false
       failed_when: false
 
+    - name: Verify Grafana via External Proxy (HTTPS)
+      ansible.builtin.command:
+        cmd: "curl --fail --silent --cacert {{ homelab_root_ca_cert_path | expanduser }} https://grafana.{{ base_domain }}/api/health"
+      register: _external_grafana_ready
+      changed_when: false
+      failed_when: false
+
     - name: Debug External Services Health
       ansible.builtin.debug:
         msg:
@@ -376,6 +435,7 @@
           - "-----------------------------------------------------------"
           - "Prometheus (HTTPS): {{ 'UP' if _external_prometheus_ready.rc == 0 else 'DOWN (' ~ _external_prometheus_ready.rc ~ ')' }}"
           - "Loki (HTTPS):       {{ 'UP' if _external_loki_ready.rc == 0 else 'DOWN (' ~ _external_loki_ready.rc ~ ')' }}"
+          - "Grafana (HTTPS):    {{ 'UP' if _external_grafana_ready.rc == 0 else 'DOWN (' ~ _external_grafana_ready.rc ~ ')' }}"
           - "-----------------------------------------------------------"
 
 - name: "Cluster Summary"
@@ -395,6 +455,7 @@
           - "Nexus UI (Proxy):     https://nexus.{{ base_domain }}"
           - "Prometheus UI (Proxy): https://prometheus.{{ base_domain }}"
           - "Loki API (Proxy):     https://loki.{{ base_domain }}"
+          - "Grafana UI (Proxy):   https://grafana.{{ base_domain }}"
           - "Edge Proxy VIP:       {{ reverse_proxy_virtual_ip }}"
           - "Vault Leader:         https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}"
           - "==========================================================="

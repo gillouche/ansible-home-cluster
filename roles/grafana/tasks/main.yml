@@ -1,0 +1,113 @@
+---
+- name: Ensure grafana group exists
+  ansible.builtin.group:
+    name: "{{ grafana_group }}"
+    gid: "{{ grafana_gid }}"
+    state: present
+    system: true
+  become: true
+
+- name: Ensure grafana user exists
+  ansible.builtin.user:
+    name: "{{ grafana_user }}"
+    uid: "{{ grafana_uid }}"
+    group: "{{ grafana_group }}"
+    home: "{{ grafana_home }}"
+    create_home: yes
+    state: present
+    system: true
+    shell: /usr/sbin/nologin
+  become: true
+
+- name: Ensure directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: '0755'
+  loop:
+    - "{{ grafana_config_dir }}"
+    - "{{ grafana_data_dir }}"
+    - "{{ grafana_dashboards_dir }}"
+    - "{{ grafana_config_dir }}/provisioning"
+    - "{{ grafana_config_dir }}/provisioning/datasources"
+    - "{{ grafana_config_dir }}/provisioning/dashboards"
+    - "{{ grafana_config_dir }}/provisioning/alerting"
+    - "{{ grafana_config_dir }}/provisioning/plugins"
+  become: true
+
+- name: Deploy grafana configuration
+  ansible.builtin.template:
+    src: grafana.ini.j2
+    dest: "{{ grafana_config_dir }}/grafana.ini"
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: '0640'
+  become: true
+  notify: Restart grafana
+
+- name: Deploy provisioning configurations
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: '0640'
+  loop:
+    - { src: 'datasources.yml.j2', dest: '{{ grafana_config_dir }}/provisioning/datasources/all.yml' }
+    - { src: 'dashboards.yml.j2', dest: '{{ grafana_config_dir }}/provisioning/dashboards/all.yml' }
+    - { src: 'provisioning/alerting/contact_points.yml.j2', dest: '{{ grafana_config_dir }}/provisioning/alerting/contact_points.yml' }
+    - { src: 'provisioning/alerting/policies.yml.j2', dest: '{{ grafana_config_dir }}/provisioning/alerting/policies.yml' }
+    - { src: 'provisioning/alerting/rules.yml.j2', dest: '{{ grafana_config_dir }}/provisioning/alerting/rules.yml' }
+  become: true
+  notify: Restart grafana
+
+- name: Remove old alerting configuration
+  ansible.builtin.file:
+    path: "{{ grafana_config_dir }}/provisioning/alerting/all.yml"
+    state: absent
+  become: true
+  notify: Restart grafana
+
+- name: Deploy dashboards
+  ansible.builtin.copy:
+    src: dashboards/
+    dest: "{{ grafana_dashboards_dir }}/"
+    owner: "{{ grafana_user }}"
+    group: "{{ grafana_group }}"
+    mode: '0644'
+  become: true
+  notify: Restart grafana
+
+- name: Run grafana container
+  containers.podman.podman_container:
+    name: "{{ grafana_container_name }}"
+    image: "{{ grafana_image }}"
+    state: started
+    user: "{{ grafana_uid }}:{{ grafana_gid }}"
+    restart_policy: always
+    dns:
+      - "{{ pihole_virtual_ip }}"
+    publish:
+      - "{{ grafana_port }}:3000"
+    env:
+      GF_SECURITY_ADMIN_USER: "{{ grafana_admin_user }}"
+      GF_SECURITY_ADMIN_PASSWORD: "{{ grafana_admin_password }}"
+      GF_AUTH_LDAP_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+    volumes:
+      - "{{ grafana_config_dir }}/grafana.ini:/etc/grafana/grafana.ini:Z"
+      - "{{ grafana_config_dir }}/provisioning:/etc/grafana/provisioning:Z"
+      - "{{ grafana_data_dir }}:/var/lib/grafana:Z"
+      - "{{ grafana_dashboards_dir }}:/var/lib/grafana/dashboards:Z"
+  become: true
+
+- name: Wipe alerting state if requested (use only if provisioning is stuck)
+  ansible.builtin.file:
+    path: "{{ grafana_data_dir }}/alerting"
+    state: absent
+  become: true
+  when: grafana_wipe_alerting_state | default(false) | bool
+  notify: Restart grafana

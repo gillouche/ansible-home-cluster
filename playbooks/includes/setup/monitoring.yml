@@ -22,3 +22,11 @@
   tags: [infra, loki, monitoring]
   roles:
     - role: loki
+
+- name: "Setup Grafana"
+  hosts: grafana
+  gather_facts: true
+  become: false
+  tags: [infra, grafana, monitoring]
+  roles:
+    - role: grafana

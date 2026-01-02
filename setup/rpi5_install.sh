@@ -8,10 +8,10 @@
 export SDDEV=/dev/sdd
 export SDPARTBOOT=/dev/sdd1
 export SDPARTROOT=/dev/sdd2
-export SDPARTBOOT_RPI=/dev/mmcblk0p1 
+export SDPARTBOOT_RPI=/dev/mmcblk0p1
 export SDPARTROOT_RPI=/dev/mmcblk0p2
 
-export SDMOUNT=/mnt/pi 
+export SDMOUNT=/mnt/pi
 export DOWNLOADDIR=/tmp/pi
 export DISTURL="http://os.archlinuxarm.org/os/ArchLinuxARM-rpi-aarch64-latest.tar.gz"
 
@@ -84,5 +84,5 @@ sync && umount -R $SDMOUNT
 # 8) pacman -Syu --overwrite "/boot/*" linux-rpi-16k sudo python3
 # 9) update /etc/sudoers to add alarm in user privilege specification like root then exit root session and execute sudo su to get rid of the first warning
 # 10) from other laptop -> copy ssh key with ssh-copy-id
-# 
+#
 # The rest of the configuration should be done via the ansible playbooks

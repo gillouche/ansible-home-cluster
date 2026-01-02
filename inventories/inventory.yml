@@ -109,6 +109,9 @@ all:
     loki:
       hosts:
         rpi5b16g3ssd:
+    grafana:
+      hosts:
+        rpi5b16g1ssd:
 #    k3s_cluster:
 #      children:
 #        k3s_server:
