@@ -244,8 +244,8 @@
               "${DATA_DIR}" "alarm@${replica}:${DATA_DIR}"
 
             ssh ${SSH_OPTS} "alarm@${replica}" \
-              "sudo podman inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' {{ reverse_proxy_container_name }} 2>/dev/null | grep -q true && \
-               sudo podman kill -s USR1 {{ reverse_proxy_container_name }} || true"
+              "sudo podman inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' {{ reverse_proxy_container_name }} 2>/dev/null \
+               | grep -q true && sudo podman kill -s USR1 {{ reverse_proxy_container_name }} || true"
           done
 
     - name: Create systemd service for Caddy push

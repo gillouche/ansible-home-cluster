@@ -28,5 +28,5 @@
   import_playbook: includes/setup/apps.yml
 
 # 7. k3s: k3s cluster
-- name: k3s install
+- name: K3s install
   import_playbook: includes/setup/k3s.yml

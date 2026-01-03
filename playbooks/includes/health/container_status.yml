@@ -6,13 +6,15 @@
   tags: [health, container_status]
   tasks:
     - name: Get User Podman Containers
-      ansible.builtin.command: podman ps -a --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.Image{{ '}}' }}"
+      ansible.builtin.command: >
+        podman ps -a --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.Image{{ '}}' }}"
       register: _user_podman_ps
       changed_when: false
       failed_when: false
 
     - name: Get Root Podman Containers
-      ansible.builtin.command: podman ps -a --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.Image{{ '}}' }}"
+      ansible.builtin.command: >
+        podman ps -a --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.Image{{ '}}' }}"
       register: _root_podman_ps
       changed_when: false
       failed_when: false

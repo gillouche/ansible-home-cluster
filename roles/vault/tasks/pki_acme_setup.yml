@@ -369,7 +369,7 @@
   run_once: true
   become: false
 
-- name: Store edge-proxy token on controller
+- name: Store edge-proxy token on controller # noqa: no-handler
   ansible.builtin.copy:
     content: "{{ (_edge_proxy_token_output.stdout | from_json).auth.client_token }}"
     dest: "{{ vault_edge_proxy_token_path }}"

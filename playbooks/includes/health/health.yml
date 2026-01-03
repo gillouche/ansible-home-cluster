@@ -481,9 +481,9 @@
   vars_files:
     - ../../../inventories/group_vars/all/main.yml
   tasks:
-    - name: Render health report
+    - name: Render health report # noqa: run-once
       ansible.builtin.template:
-        src: ../../templates/health_summary.j2
+        src: "{{ playbook_dir }}/templates/health_summary.j2"
         dest: /tmp/cluster-health-report.txt
         mode: '0644'
       run_once: true
@@ -491,7 +491,7 @@
       vars:
         ansible_connection: local
 
-    - name: Show health report
+    - name: Show health report # noqa: run-once
       ansible.builtin.pause:
         prompt: "{{ lookup('file', '/tmp/cluster-health-report.txt') }}"
       run_once: true
