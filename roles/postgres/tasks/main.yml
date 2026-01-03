@@ -1,0 +1,58 @@
+---
+- name: Ensure postgres group exists
+  ansible.builtin.group:
+    name: "{{ postgres_group }}"
+    gid: "{{ postgres_gid }}"
+    state: present
+    system: true
+  become: true
+
+- name: Ensure postgres user exists
+  ansible.builtin.user:
+    name: "{{ postgres_user }}"
+    uid: "{{ postgres_uid }}"
+    group: "{{ postgres_group }}"
+    home: "{{ postgres_home }}"
+    create_home: yes
+    state: present
+    system: true
+    shell: /bin/bash
+  become: true
+
+- name: Ensure postgres data directory exists
+  ansible.builtin.file:
+    path: "{{ postgres_data_dir }}"
+    state: directory
+    owner: "{{ postgres_uid }}"
+    group: "{{ postgres_gid }}"
+    mode: '0700'
+  become: true
+
+- name: Ensure postgres config directory exists
+  ansible.builtin.file:
+    path: "{{ postgres_config_dir }}"
+    state: directory
+    owner: "{{ postgres_uid }}"
+    group: "{{ postgres_gid }}"
+    mode: '0755'
+  become: true
+
+- name: Run Postgres container
+  containers.podman.podman_container:
+    name: "{{ postgres_container_name }}"
+    image: "{{ postgres_image }}"
+    state: started
+    restart_policy: always
+    ports:
+      - "{{ postgres_port }}:5432"
+    env:
+      POSTGRES_USER: "{{ postgres_db_user }}"
+      POSTGRES_PASSWORD: "{{ postgres_db_password }}"
+      POSTGRES_DB: "{{ postgres_db_name }}"
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: "{{ postgres_timezone }}"
+    volumes:
+      - "{{ postgres_data_dir }}:/var/lib/postgresql/data:Z"
+      - "{{ postgres_config_dir }}:/home/postgres/config:Z"
+  become: true
+  notify: Restart Postgres

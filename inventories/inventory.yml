@@ -115,6 +115,9 @@ all:
     firefly:
       hosts:
         rpi5b8g1:
+    postgres:
+      hosts:
+        rpi5b16g3ssd:
     k3s_cluster:
       children:
         k3s_server:

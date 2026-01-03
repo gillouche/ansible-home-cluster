@@ -1,0 +1,21 @@
+---
+postgres_container_name: postgres
+postgres_image: postgres:16-alpine
+postgres_port: 5432
+
+# System User
+postgres_user: postgres
+postgres_group: postgres
+postgres_uid: 70
+postgres_gid: 70
+postgres_home: /home/postgres
+
+# Data paths
+postgres_data_dir: /mnt/data/postgres
+postgres_config_dir: "{{ postgres_home }}/config"
+
+# Database Configuration (Override these in vault)
+postgres_db_user: k3s
+postgres_db_password: changeme
+postgres_db_name: k3s
+postgres_timezone: "Europe/Brussels"

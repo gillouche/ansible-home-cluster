@@ -1,0 +1,7 @@
+---
+- name: Restart Postgres
+  containers.podman.podman_container:
+    name: "{{ postgres_container_name }}"
+    state: started
+    restart: true
+  become: true

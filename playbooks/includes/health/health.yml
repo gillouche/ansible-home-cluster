@@ -425,6 +425,64 @@
              and 'data' in _grafana_alerts.json) else 'N/A' }}"
           - "-----------------------------------------------------------"
 
+- name: "Firefly Health Check"
+  hosts: firefly
+  gather_facts: true
+  become: false
+  tags: [health, health_firefly]
+  vars_files:
+    - ../../../roles/firefly/defaults/main.yml
+  tasks:
+    - name: Query Firefly Health
+      ansible.builtin.uri:
+        url: "http://localhost:{{ firefly_port }}/login"
+        method: GET
+        status_code: 200
+      register: _firefly_health
+      failed_when: false
+
+    - name: Debug Firefly Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Firefly Health Check: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Status: {{ 'UP' if _firefly_health.status == 200 else 'DOWN (' ~ (_firefly_health.status | default('N/A')) ~ ')' }}"
+          - "-----------------------------------------------------------"
+
+- name: "Postgres Health Check"
+  hosts: postgres
+  gather_facts: true
+  become: false
+  tags: [health, health_postgres]
+  vars_files:
+    - ../../../roles/postgres/defaults/main.yml
+  tasks:
+    - name: Check Postgres Port
+      ansible.builtin.wait_for:
+        port: "{{ postgres_port }}"
+        timeout: 5
+      register: _postgres_port_check
+      failed_when: false
+
+    - name: Check Postgres Ready (Command)
+      ansible.builtin.command: "podman exec {{ postgres_container_name }} pg_isready -U {{ postgres_db_user }}"
+      register: _postgres_cmd_check
+      become: true
+      failed_when: false
+      changed_when: false
+
+    - name: Debug Postgres Health
+      ansible.builtin.debug:
+        msg:
+          - "-----------------------------------------------------------"
+          - "Postgres Health Check: {{ inventory_hostname }}"
+          - "-----------------------------------------------------------"
+          - "Port {{ postgres_port }}: {{ 'OPEN' if _postgres_port_check.state is defined and _postgres_port_check.state == 'started' else 'CLOSED' }}"
+          - "Status: {{ 'READY' if _postgres_cmd_check.rc == 0 else 'NOT READY' }}"
+          - "Output: {{ _postgres_cmd_check.stdout | default(_postgres_cmd_check.stderr) }}"
+          - "-----------------------------------------------------------"
+
 - name: "External Services Health Check (via Proxy)"
   hosts: localhost
   gather_facts: false

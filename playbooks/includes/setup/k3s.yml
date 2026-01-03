@@ -1,0 +1,8 @@
+---
+- name: "Setup Postgres for HA k3s"
+  hosts: postgres
+  gather_facts: true
+  become: false
+  tags: [k3s, postgres]
+  roles:
+    - role: postgres
