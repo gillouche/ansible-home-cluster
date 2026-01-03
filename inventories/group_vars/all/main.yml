@@ -1,7 +1,6 @@
 ---
 # Common SSH defaults (kept here if you want variables instead of ansible.cfg)
 ansible_ssh_private_key_file: ~/.ssh/id_ed25519_local
-ansible_connection: ssh
 
 ansible_user: alarm
 ansible_ssh_pass: "{{ ansible_password }}"
@@ -15,6 +14,13 @@ target_user: alarm
 tls_dir: "/etc/tls"
 lan_subnet: "192.168.0.0/24"
 podman_subnet: "10.88.0.0/16"
+k3s_cluster_cidr: "10.42.0.0/16"
+k3s_service_cidr: "10.43.0.0/16"
+
+# Software Versions (Shared Agents)
+# ----------------------------------------
+loki_promtail_image: docker.io/grafana/promtail:3.6.3
+prometheus_node_exporter_image: prom/node-exporter:v1.10.2
 
 # Vault trust/CA distribution (controller + hosts)
 vault_install_root_ca_on_hosts: true
@@ -26,13 +32,23 @@ vault_firefox_enable_enterprise_roots: true
 
 # HAProxy VIP (included automatically in SANs by TLS role when defined)
 load_balancer_virtual_ip: 192.168.0.253
+k3s_api_vip: 192.168.0.249
+
+# Shared Database Configuration
+# -----------------------------
+# These are used by both the Postgres role (to create DB) and K3s (to connect)
+global_k3s_db_host: 192.168.0.83
+global_k3s_db_port: 5432
+global_k3s_db_name: kubernetes
+global_k3s_db_user: k3s
+# global_k3s_db_password: defined in vault
 
 # Centralized Networking Configuration
 # ------------------------------------
 
 # Vault
-vault_api_port: 18200
-vault_cluster_port: 18201
+global_vault_api_port: 18200
+global_vault_cluster_port: 18201
 
 # Pi-hole
 pihole_virtual_ip: 192.168.0.251
@@ -67,8 +83,5 @@ tls_bundle_anchor_path: "/etc/ca-certificates/trust-source/anchors/ca-bundle.pem
 
 # Monitoring
 prometheus_node_exporter_port: 9100
-prometheus_node_exporter_image: prom/node-exporter:v1.10.2
 loki_port: 3100
-loki_image: docker.io/grafana/loki:3.6.3
 loki_promtail_http_listen_port: 9080
-loki_promtail_image: docker.io/grafana/promtail:3.6.3

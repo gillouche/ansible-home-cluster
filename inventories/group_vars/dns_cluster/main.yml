@@ -13,7 +13,7 @@ pihole_container_name: pihole
 gravity_sync_enabled: true
 gravity_sync_schedule: hourly
 
-# Image pin (override if needed; defaults are pinned in role too)
+# Image pin
 pihole_image: pihole/pihole:2025.11.1
 
 pihole_dns_wildcard_domains:

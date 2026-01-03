@@ -221,21 +221,31 @@
   block:
     - name: Create certificate push script
       ansible.builtin.copy:
-        dest: "/usr/local/bin/caddy-push-certs.sh"
+        dest: /usr/local/bin/caddy-push-certs.sh
         owner: root
         group: root
         mode: '0755'
         content: |
           #!/bin/bash
-          REPLICAS="{% for host in groups['edge_proxy_cluster']
-            | difference(groups['edge_proxy_primary']) %}{{ hostvars[host].ansible_host
-            | default(host) }} {% endfor %}"
+          set -euo pipefail
+
+          REPLICAS=({% for host in groups['edge_proxy_cluster']
+            | difference(groups['edge_proxy_primary']) %}
+            {{ hostvars[host].ansible_host | default(host) }}
+          {% endfor %})
+
           DATA_DIR="{{ reverse_proxy_data_dir }}/"
-          for replica in $REPLICAS; do
-            rsync -avz --delete -e "ssh -o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519" \
-              --rsync-path=\"sudo rsync\" $DATA_DIR alarm@$replica:$DATA_DIR
-            ssh -o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519 alarm@$replica \
-              "sudo podman kill -s USR1 {{ reverse_proxy_container_name }}"
+          SSH_OPTS="-o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519"
+
+          for replica in "${REPLICAS[@]}"; do
+            rsync -avz --delete \
+              -e "ssh ${SSH_OPTS}" \
+              --rsync-path="sudo rsync" \
+              "${DATA_DIR}" "alarm@${replica}:${DATA_DIR}"
+
+            ssh ${SSH_OPTS} "alarm@${replica}" \
+              "sudo podman inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' {{ reverse_proxy_container_name }} 2>/dev/null | grep -q true && \
+               sudo podman kill -s USR1 {{ reverse_proxy_container_name }} || true"
           done
 
     - name: Create systemd service for Caddy push

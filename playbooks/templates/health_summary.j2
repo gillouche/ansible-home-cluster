@@ -1,0 +1,203 @@
+{# =========================
+   ANSI COLOR DEFINITIONS
+   ========================= #}
+{% set RESET  = '\033[0m' %}
+{% set BOLD   = '\033[1m' %}
+{% set RED    = '\033[31m' %}
+{% set GREEN  = '\033[32m' %}
+{% set YELLOW = '\033[33m' %}
+{% set CYAN   = '\033[36m' %}
+{% set GRAY   = '\033[90m' %}
+
+{% macro ok(text='OK') %}{{ GREEN }}{{ text }}{{ RESET }}{% endmacro %}
+{% macro warn(text='WARN') %}{{ YELLOW }}{{ text }}{{ RESET }}{% endmacro %}
+{% macro bad(text='DOWN') %}{{ RED }}{{ text }}{{ RESET }}{% endmacro %}
+{% macro yes() %}{{ ok('YES') }}{% endmacro %}
+{% macro no() %}{{ bad('NO') }}{% endmacro %}
+
+================================================================================
+{{ BOLD }}                            HOMELAB CLUSTER HEALTH REPORT{{ RESET }}
+================================================================================
+
+{{ BOLD }}[ PODMAN CONTAINERS ]{{ RESET }}
+{% for host in groups['all'] | sort %}
+  {{ CYAN }}> {{ host }} ({{ hostvars[host].inventory_hostname }}){{ RESET }}
+    --------------------------------------------------------
+    ROOT CONTAINERS:
+{{ hostvars[host]['_root_podman_ps'].stdout | default('N/A') | indent(6) }}
+
+    USER CONTAINERS:
+{{ hostvars[host]['_user_podman_ps'].stdout | default('N/A') | indent(6) }}
+
+{% endfor %}
+
+{{ BOLD }}[ VAULT CLUSTER ]{{ RESET }}
+{% for host in groups['vault_cluster'] | sort %}
+  {{ CYAN }}> {{ host }}{{ RESET }}
+    Status:        {% set s = hostvars[host]._vault_node_health.status | default(0) %}
+                   {% if s == 200 %}{{ ok('HEALTHY (Leader)') }}
+                   {% elif s == 429 %}{{ ok('HEALTHY (Follower)') }}
+                   {% elif s == 503 %}{{ warn('SEALED') }}
+                   {% else %}{{ bad('DOWN / ERROR') }}{% endif %}
+    Code:          {{ s | default('N/A') }}
+    Version:       {{ hostvars[host]._vault_node_health.json.version | default('N/A') }}
+{% endfor %}
+
+{{ BOLD }}[ KUBERNETES ]{{ RESET }}
+{% for host in groups['server'] | default([]) | sort %}
+  {{ CYAN }}> {{ host }}{{ RESET }}
+    Service:       {{
+      ok('ACTIVE')
+      if hostvars[host]._k3s_service_status.status.ActiveState | default('inactive') == 'active'
+      else bad('INACTIVE')
+    }}
+    Node Ready:    {{
+      ok('YES')
+      if hostvars[host].inventory_hostname in (hostvars[host]._k3s_node_status.stdout | default(''))
+         and 'Ready' in (hostvars[host]._k3s_node_status.stdout | default(''))
+      else bad('NO')
+    }}
+    VIP ({{ k3s_api_vip }}):  {{
+      ok('REACHABLE')
+      if hostvars[host]._k3s_vip_status.status | default(0) in [200, 401]
+      else bad('UNREACHABLE')
+    }}
+{% endfor %}
+
+{{ BOLD }}[ INFRASTRUCTURE ]{{ RESET }}
+  {{ CYAN }}> Pi-hole DNS ({{ groups['dns_cluster'] | join(', ') }}){{ RESET }}
+{% for host in groups['dns_cluster'] | sort %}
+    {{ host }}:
+      VIP ({{ pihole_virtual_ip }}):   {{
+        ok('SUCCESS')
+        if hostvars[host]._pihole_vip_dns_check.rc | default(-1) == 0
+           and hostvars[host]._pihole_vip_dns_check.stdout | default('') != ''
+        else bad('FAILED')
+      }}
+      Local (127.0.0.1):      {{
+        ok('SUCCESS')
+        if hostvars[host]._pihole_local_dns_check.rc | default(-1) == 0
+           and hostvars[host]._pihole_local_dns_check.stdout | default('') != ''
+        else bad('FAILED')
+      }}
+{% endfor %}
+
+  {{ CYAN }}> Load Balancer ({{ groups['internal_lb_cluster'] | join(', ') }}){{ RESET }}
+{% for host in groups['internal_lb_cluster'] | sort %}
+    {{ host }}:
+      Vault via VIP: {{
+        ok('UP')
+        if (hostvars[host]._lb_vault_health_check.status | default(0)) in [200, 429]
+        else bad('DOWN')
+      }}
+{% endfor %}
+
+  {{ CYAN }}> Edge Proxy ({{ groups['edge_proxy_cluster'] | join(', ') }}){{ RESET }}
+{% for host in groups['edge_proxy_cluster'] | sort %}
+    {{ host }}:
+      Wildcard Cert:     {{
+        ok('PRESENT')
+        if hostvars[host]._proxy_wildcard_stat.stat.exists | default(false)
+        else bad('MISSING')
+      }}
+      Backend Reachable: {{
+        ok('YES')
+        if hostvars[host]._proxy_backend_check.status is defined
+        else bad('NO')
+      }}
+{% endfor %}
+
+  {{ CYAN }}> Postgres ({{ groups['postgres'] | join(', ') }}){{ RESET }}
+{% for host in groups['postgres'] | sort %}
+    {{ host }}:
+      Port 5432:        {{
+        ok('OPEN')
+        if hostvars[host]._postgres_port_check.state | default('') == 'started'
+        else bad('CLOSED')
+      }}
+      Ready:            {{
+        ok('YES')
+        if hostvars[host]._postgres_cmd_check.rc | default(-1) == 0
+        else bad('NO')
+      }}
+{% endfor %}
+
+  {{ CYAN }}> Nexus ({{ groups['artifactory'] | join(', ') }}){{ RESET }}
+{% for host in groups['artifactory'] | sort %}
+    {{ host }}:
+      Status:           {{
+        ok('HEALTHY')
+        if hostvars[host]._nexus_status.status | default(0) == 200
+        else bad('DOWN')
+      }}
+{% endfor %}
+
+{{ BOLD }}[ MONITORING ]{{ RESET }}
+  {{ CYAN }}> Prometheus ({{ groups['prometheus'] | join(', ') }}){{ RESET }}
+{% for host in groups['prometheus'] | sort %}
+    {{ host }}:
+      Healthy:          {{
+        ok('YES')
+        if hostvars[host]._prometheus_health.status | default(0) == 200
+        else bad('NO')
+      }}
+      Ready:            {{
+        ok('YES')
+        if hostvars[host]._prometheus_ready.status | default(0) == 200
+        else bad('NO')
+      }}
+{% endfor %}
+
+  {{ CYAN }}> Loki ({{ groups['loki'] | join(', ') }}){{ RESET }}
+{% for host in groups['loki'] | sort %}
+    {{ host }}:
+      Ready:            {{
+        ok('YES')
+        if hostvars[host]._loki_ready.status | default(0) == 200
+        else bad('NO')
+      }}
+{% endfor %}
+
+  {{ CYAN }}> Grafana ({{ groups['grafana'] | join(', ') }}){{ RESET }}
+{% for host in groups['grafana'] | sort %}
+    {{ host }}:
+      Status:           {{
+        ok('UP')
+        if hostvars[host]._grafana_health.json.database | default('') == 'ok'
+        else bad('DOWN')
+      }}
+      Datasources:      {{ hostvars[host]._grafana_datasources.json | default([]) | length }}
+{% endfor %}
+
+{{ BOLD }}[ APPLICATIONS ]{{ RESET }}
+  {{ CYAN }}> Firefly III ({{ groups['firefly'] | join(', ') }}){{ RESET }}
+{% for host in groups['firefly'] | sort %}
+    {{ host }}:
+      Status:           {{
+        ok('UP')
+        if hostvars[host]._firefly_health.status | default(0) == 200
+        else bad('DOWN')
+      }}
+{% endfor %}
+
+{{ BOLD }}[ EXTERNAL ACCESS (via {{ reverse_proxy_virtual_ip }}) ]{{ RESET }}
+  Prometheus (HTTPS):   {{ ok('UP') if (_external_prometheus_ready.status | default(-1)) == 200 else bad('DOWN') }}
+  Loki (HTTPS):         {{ ok('UP') if (_external_loki_ready.status | default(-1)) == 200 else bad('DOWN') }}
+  Grafana (HTTPS):      {{ ok('UP') if (_external_grafana_ready.status | default(-1)) == 200 else bad('DOWN') }}
+  Firefly (HTTPS):      {{ ok('UP') if (_external_firefly_ready.status | default(-1)) == 200 else bad('DOWN') }}
+  Pi-hole Pri (HTTPS):  {{ ok('UP') if (_external_pihole_primary_ready.status | default(-1)) == 200 else bad('DOWN') }}
+  Pi-hole Rep1 (HTTPS): {{ ok('UP') if (_external_pihole_replica1_ready.status | default(-1)) == 200 else bad('DOWN') }}
+  Pi-hole Rep2 (HTTPS): {{ ok('UP') if (_external_pihole_replica2_ready.status | default(-1)) == 200 else bad('DOWN') }}
+  K3s API (HTTPS):      {{ ok('UP') if (_external_k3s_api_ready.status | default(-1)) in [200, 401] else bad('DOWN') }}
+
+{{ BOLD }}[ SERVICE URLS ]{{ RESET }}
+  Prometheus:      {{ CYAN }}https://prometheus.{{ base_domain }}{{ RESET }}
+  Loki:            {{ CYAN }}https://loki.{{ base_domain }}/ready{{ RESET }}
+  Grafana:         {{ CYAN }}https://grafana.{{ base_domain }}{{ RESET }}
+  Firefly:         {{ CYAN }}https://firefly.{{ base_domain }}{{ RESET }}
+  Pi-hole Pri:     {{ CYAN }}https://primary.pihole.{{ base_domain }}{{ RESET }}
+  Pi-hole Rep1:    {{ CYAN }}https://replica1.pihole.{{ base_domain }}{{ RESET }}
+  Pi-hole Rep2:    {{ CYAN }}https://replica2.pihole.{{ base_domain }}{{ RESET }}
+  K3s API:         {{ CYAN }}https://k3s.{{ base_domain }}{{ RESET }}
+
+================================================================================

@@ -175,7 +175,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
-  changed_when: true
+  changed_when: false
 
 - name: Set effective Vault public address for PKI
   ansible.builtin.set_fact:
@@ -195,7 +195,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
-  changed_when: true
+  changed_when: false
 
 # Check if PKI mount 'pki_int' is already configured
 - name: Read pki_int CA certificate to check existence
@@ -294,7 +294,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
-  changed_when: true
+  changed_when: false
 
 - name: Get default issuer ID for pki_int
   ansible.builtin.command: /usr/local/bin/vault read -field=default pki_int/config/issuers
@@ -316,7 +316,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
-  changed_when: true
+  changed_when: false
 
 - name: Create edge-proxy-policy
   ansible.builtin.shell: |
@@ -343,6 +343,13 @@
     VAULT_SKIP_VERIFY: "true"
   changed_when: false
 
+- name: Check if edge-proxy token exists on controller
+  ansible.builtin.stat:
+    path: "{{ vault_edge_proxy_token_path }}"
+  register: _edge_proxy_token_stat
+  delegate_to: localhost
+  become: false
+
 - name: Create edge-proxy token
   ansible.builtin.command: /usr/local/bin/vault token create -policy="edge-proxy-policy" -period=720h -format=json
   environment:
@@ -351,6 +358,7 @@
     VAULT_SKIP_VERIFY: "true"
   register: _edge_proxy_token_output
   changed_when: _edge_proxy_token_output.rc == 0
+  when: not _edge_proxy_token_stat.stat.exists
 
 - name: Ensure edge-proxy token directory exists on controller
   ansible.builtin.file:
@@ -368,6 +376,7 @@
     mode: '0600'
   delegate_to: localhost
   become: false
+  when: _edge_proxy_token_output.changed
 
 - name: Configure intermediate PKI URLs (pki_int)
   ansible.builtin.command: >
@@ -380,7 +389,7 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
-  changed_when: true
+  changed_when: false
 
 - name: Enable ACME on intermediate PKI (pki_int)
   ansible.builtin.command: >
@@ -389,4 +398,4 @@
     VAULT_ADDR: "{{ _vault_leader_addr }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
-  changed_when: true
+  changed_when: false

@@ -88,22 +88,19 @@
         - name: Firefox Enterprise Roots (macOS)
           when: vault_firefox_enable_enterprise_roots | default(false) | bool
           block:
-            - name: Ensure Firefox distribution directory exists
-              ansible.builtin.file:
-                path: "~/Library/Application Support/Firefox/distribution"
-                state: directory
-                mode: '0755'
+            - name: Find Firefox profiles
+              ansible.builtin.find:
+                paths: "~/Library/Application Support/Firefox/Profiles"
+                file_type: directory
+              register: _firefox_profiles
 
-            - name: Enable Firefox Enterprise Roots via policies.json
+            - name: Enable Enterprise Roots via user.js
               ansible.builtin.copy:
-                dest: "~/Library/Application Support/Firefox/distribution/policies.json"
-                content: |
-                  {
-                    "policies": {
-                      "ImportEnterpriseRoots": true
-                    }
-                  }
+                dest: "{{ item.path }}/user.js"
+                content: 'user_pref("security.enterprise_roots.enabled", true);'
                 mode: '0644'
+              loop: "{{ _firefox_profiles.files }}"
+              when: _firefox_profiles.matched > 0
 
 - name: "Distribute Homelab Root CA to All Devices"
   hosts: all

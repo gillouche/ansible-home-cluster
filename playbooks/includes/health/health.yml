@@ -8,8 +8,8 @@
     ansible_connection: local
   tasks:
     - name: Ensure facts are gathered # noqa: run-once
-      ansible.builtin.debug:
-        msg: "Facts gathered for {{ inventory_hostname }}"
+      ansible.builtin.set_fact:
+        _health_facts_gathered: true
       run_once: true
 
 - name: "Vault Cluster Health Check"
@@ -42,23 +42,6 @@
       register: _vault_node_health
       failed_when: false
 
-    - name: Debug Vault Cluster Node Information
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Vault Node Health: {{ inventory_hostname }} ({{ ansible_host }})"
-          - "-----------------------------------------------------------"
-          - "  Status: {{ 'HEALTHY (Leader)' if (_vault_node_health.status | default(0)) == 200 else
-                       'HEALTHY (Follower/Standby)' if (_vault_node_health.status | default(0)) == 429 else
-                       'UNINITIALIZED' if (_vault_node_health.status | default(0)) == 501 else
-                       'SEALED' if (_vault_node_health.status | default(0)) == 503 else
-                       'DOWN/ERROR' }}"
-          - "  Response Code: {{ _vault_node_health.status | default('N/A') }}"
-          - "  Version: {{ _vault_node_health.json.version if (_vault_node_health.json is defined and
-                       'version' in _vault_node_health.json) else 'N/A' }}"
-          - "  Is Leader: {{ 'YES' if (_vault_node_health.status | default(0)) == 200 else 'NO' }}"
-          - "-----------------------------------------------------------"
-
 - name: "TLS Health Check"
   hosts: all
   gather_facts: true
@@ -90,19 +73,6 @@
       become: true
       when: _tls_cert_stat.stat.exists
 
-    - name: Debug TLS Information
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "TLS Health Check for {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Status: {{ 'PROVISIONED' if _tls_cert_stat.stat.exists else 'MISSING' }}"
-          - "Chain: {{ (_tls_inspect_chain.stdout | default(_tls_inspect_chain.stderr, true) | trim)
-             if (_tls_inspect_chain is defined and 'stdout' in _tls_inspect_chain) else 'N/A' }}"
-          - "Issuer: {{ (_tls_inspect_details.stdout_lines | select('match', '^issuer=') | list | first)
-             if (_tls_inspect_details is defined and 'stdout_lines' in _tls_inspect_details) else 'N/A' }}"
-          - "-----------------------------------------------------------"
-
 - name: "Pi-hole Health Check"
   hosts: dns_cluster
   gather_facts: true
@@ -121,18 +91,6 @@
       failed_when: false
       changed_when: false
 
-    - name: Debug Pi-hole Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Pi-hole Health Information for {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "VIP ({{ pihole_virtual_ip }}) Resolution: {{ 'SUCCESS' if _pihole_vip_dns_check.rc == 0
-             and _pihole_vip_dns_check.stdout != '' else 'FAILED' }}"
-          - "Local (127.0.0.1) Resolution: {{ 'SUCCESS' if _pihole_local_dns_check.rc == 0
-             and _pihole_local_dns_check.stdout != '' else 'FAILED' }}"
-          - "-----------------------------------------------------------"
-
 - name: "Load Balancer Health Check"
   hosts: internal_lb_cluster
   gather_facts: true
@@ -147,17 +105,6 @@
         validate_certs: false
       register: _lb_vault_health_check
       failed_when: false
-
-    - name: Debug Load Balancer Information
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Load Balancer Health: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Vault via LB VIP ({{ load_balancer_virtual_ip }}):
-             {{ 'UP' if (_lb_vault_health_check.status | default(0)) in [200, 429] else 'DOWN' }}"
-          - "Response Code: {{ _lb_vault_health_check.status | default('N/A') }}"
-          - "-----------------------------------------------------------"
 
 - name: "Reverse Proxy Health Check"
   hosts: edge_proxy_cluster
@@ -179,16 +126,6 @@
         validate_certs: false
       register: _proxy_backend_check
       failed_when: false
-
-    - name: Debug Reverse Proxy Information
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Reverse Proxy Health: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Wildcard Cert: {{ 'PRESENT' if _proxy_wildcard_stat.stat.exists else 'MISSING' }}"
-          - "Backend (HAProxy VIP) reachable: {{ 'YES' if _proxy_backend_check.status is defined else 'NO' }}"
-          - "-----------------------------------------------------------"
 
 - name: "Nexus Artifactory Health Check"
   hosts: artifactory
@@ -217,21 +154,6 @@
       register: _nexus_metrics
       failed_when: false
 
-    - name: Debug Nexus Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Nexus Health Check: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Status: {{ 'HEALTHY' if _nexus_status.status == 200
-             else 'DOWN/ERROR (' ~ (_nexus_status.status | default('N/A')) ~ ')' }}"
-          - "Heap Used: {{ (_nexus_metrics.json.gauges['jvm.memory.heap.used'].value / 1024 / 1024) | round(2)
-             if (_nexus_metrics.status == 200 and 'jvm.memory.heap.used' in _nexus_metrics.json.gauges) else 'N/A' }} MB"
-          - "Total Requests: {{ _nexus_metrics.json.timers['org.sonatype.nexus.internal.web.HeaderPatternFilter.request'].count
-             if (_nexus_metrics.status == 200 and
-             'org.sonatype.nexus.internal.web.HeaderPatternFilter.request' in _nexus_metrics.json.timers) else 'N/A' }}"
-          - "-----------------------------------------------------------"
-
 - name: "Prometheus Health Check"
   hosts: prometheus
   gather_facts: true
@@ -256,16 +178,6 @@
       register: _prometheus_ready
       failed_when: false
 
-    - name: Debug Prometheus Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Prometheus Health Check: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Healthy: {{ 'YES' if _prometheus_health.status == 200 else 'NO (' ~ (_prometheus_health.status | default('N/A')) ~ ')' }}"
-          - "Ready: {{ 'YES' if _prometheus_ready.status == 200 else 'NO (' ~ (_prometheus_ready.status | default('N/A')) ~ ')' }}"
-          - "-----------------------------------------------------------"
-
 - name: "Node Exporter Health Check"
   hosts: all
   gather_facts: true
@@ -282,16 +194,6 @@
       register: _node_exporter_status
       failed_when: false
 
-    - name: Debug Node Exporter Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Node Exporter Health: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Status: {{ 'UP' if _node_exporter_status.status == 200
-             else 'DOWN (' ~ (_node_exporter_status.status | default('N/A')) ~ ')' }}"
-          - "-----------------------------------------------------------"
-
 - name: "Promtail Health Check"
   hosts: all
   gather_facts: true
@@ -307,16 +209,6 @@
         status_code: 200
       register: _promtail_ready
       failed_when: false
-
-    - name: Debug Promtail Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Promtail Health: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Ready: {{ 'YES' if _promtail_ready.status == 200
-             else 'NO (' ~ (_promtail_ready.status | default('N/A')) ~ ')' }}"
-          - "-----------------------------------------------------------"
 
 - name: "Loki Health Check"
   hosts: loki
@@ -349,23 +241,6 @@
         status_code: 200
       register: _loki_build_info
       failed_when: false
-
-    - name: Debug Loki Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Loki Health Check: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Ready:      {{ 'YES' if _loki_ready.status == 200 else 'NO (' ~ (_loki_ready.status | default('N/A')) ~ ')' }}"
-          - "Log Level:  {{ (_loki_log_level.json.message | default('N/A'))
-             if (_loki_log_level.json is defined and 'message' in _loki_log_level.json)
-             else (_loki_log_level.content | default('N/A') | trim)
-             if _loki_log_level.status == 200 else 'ERROR (' ~ (_loki_log_level.status | default('N/A')) ~ ')' }}"
-          - "Version:    {{ _loki_build_info.json.version if (_loki_build_info.json is defined
-             and 'version' in _loki_build_info.json) else 'N/A' }}"
-          - "Revision:   {{ _loki_build_info.json.revision if (_loki_build_info.json is defined
-             and 'revision' in _loki_build_info.json) else 'N/A' }}"
-          - "-----------------------------------------------------------"
 
 - name: "Grafana Health Check"
   hosts: grafana
@@ -406,25 +281,6 @@
       register: _grafana_alerts
       failed_when: false
 
-    - name: Debug Grafana Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Grafana Health Check: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Status (DB): {{ _grafana_health.json.database if (_grafana_health.json is defined
-             and 'database' in _grafana_health.json) else 'DOWN/ERROR' }}"
-          - "Version:     {{ _grafana_health.json.version if (_grafana_health.json is defined
-             and 'version' in _grafana_health.json) else 'N/A' }}"
-          - "Datasources: {{ _grafana_datasources.json | map(attribute='name') | list | join(', ')
-             if _grafana_datasources.status == 200 else 'N/A' }}"
-          - "Alert Rules: {{ _grafana_alerts.json.data.groups | length if (_grafana_alerts.status == 200
-             and 'data' in _grafana_alerts.json) else 'N/A' }} groups provisioned"
-          - "Firing Alerts: {{ _grafana_alerts.json.data.groups | map(attribute='rules') | flatten
-             | selectattr('state', 'equalto', 'firing') | list | length if (_grafana_alerts.status == 200
-             and 'data' in _grafana_alerts.json) else 'N/A' }}"
-          - "-----------------------------------------------------------"
-
 - name: "Firefly Health Check"
   hosts: firefly
   gather_facts: true
@@ -440,15 +296,6 @@
         status_code: 200
       register: _firefly_health
       failed_when: false
-
-    - name: Debug Firefly Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Firefly Health Check: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Status: {{ 'UP' if _firefly_health.status == 200 else 'DOWN (' ~ (_firefly_health.status | default('N/A')) ~ ')' }}"
-          - "-----------------------------------------------------------"
 
 - name: "Postgres Health Check"
   hosts: postgres
@@ -472,81 +319,182 @@
       failed_when: false
       changed_when: false
 
-    - name: Debug Postgres Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "Postgres Health Check: {{ inventory_hostname }}"
-          - "-----------------------------------------------------------"
-          - "Port {{ postgres_port }}: {{ 'OPEN' if _postgres_port_check.state is defined and _postgres_port_check.state == 'started' else 'CLOSED' }}"
-          - "Status: {{ 'READY' if _postgres_cmd_check.rc == 0 else 'NOT READY' }}"
-          - "Output: {{ _postgres_cmd_check.stdout | default(_postgres_cmd_check.stderr) }}"
-          - "-----------------------------------------------------------"
-
 - name: "External Services Health Check (via Proxy)"
   hosts: localhost
   gather_facts: false
   become: false
   tags: [health, health_external]
   tasks:
-    - name: Verify Prometheus via External Proxy (HTTPS)
-      ansible.builtin.uri:
-        ca_path: "{{ homelab_ca_bundle_path | expanduser }}"
-        status_code: 200
-      register: _external_prometheus_ready
+    - name: Verify Prometheus via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve prometheus.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://prometheus.{{ base_domain }}/-/healthy
+      register: _external_prometheus_ready_cmd
+      changed_when: false
       failed_when: false
 
-    - name: Verify Loki via External Proxy (HTTPS)
-      ansible.builtin.uri:
-        url: "https://loki.{{ base_domain }}/ready"
-        method: GET
-        ca_path: "{{ homelab_ca_bundle_path | expanduser }}"
-        status_code: 200
-      register: _external_loki_ready
+    - name: Set Prometheus status fact
+      ansible.builtin.set_fact:
+        _external_prometheus_ready:
+          status: "{{ _external_prometheus_ready_cmd.stdout | int }}"
+
+    - name: Verify Loki via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve loki.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://loki.{{ base_domain }}/ready
+      register: _external_loki_ready_cmd
+      changed_when: false
       failed_when: false
 
-    - name: Verify Grafana via External Proxy (HTTPS)
-      ansible.builtin.uri:
-        url: >-
-          https://grafana.{{ base_domain }}/api/health
-        method: GET
-        ca_path: "{{ homelab_ca_bundle_path | expanduser }}"
-        status_code: 200
-      register: _external_grafana_ready
+    - name: Set Loki status fact
+      ansible.builtin.set_fact:
+        _external_loki_ready:
+          status: "{{ _external_loki_ready_cmd.stdout | int }}"
+
+    - name: Verify Grafana via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve grafana.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://grafana.{{ base_domain }}/api/health
+      register: _external_grafana_ready_cmd
+      changed_when: false
       failed_when: false
 
-    - name: Debug External Services Health
-      ansible.builtin.debug:
-        msg:
-          - "-----------------------------------------------------------"
-          - "External Proxy Health Check"
-          - "-----------------------------------------------------------"
-          - "Prometheus (HTTPS): {{ 'UP' if _external_prometheus_ready.status == 200
-             else 'DOWN (' ~ (_external_prometheus_ready.status | default('N/A')) ~ ')' }}"
-          - "Loki (HTTPS):       {{ 'UP' if _external_loki_ready.status == 200
-             else 'DOWN (' ~ (_external_loki_ready.status | default('N/A')) ~ ')' }}"
-          - "Grafana (HTTPS):    {{ 'UP' if _external_grafana_ready.status == 200
-             else 'DOWN (' ~ (_external_grafana_ready.status | default('N/A')) ~ ')' }}"
-          - "-----------------------------------------------------------"
+    - name: Set Grafana status fact
+      ansible.builtin.set_fact:
+        _external_grafana_ready:
+          status: "{{ _external_grafana_ready_cmd.stdout | int }}"
 
-- name: "Cluster Summary"
-  hosts: localhost
+    - name: Verify Firefly via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve firefly.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://firefly.{{ base_domain }}/login
+      register: _external_firefly_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Firefly status fact
+      ansible.builtin.set_fact:
+        _external_firefly_ready:
+          status: "{{ _external_firefly_ready_cmd.stdout | int }}"
+
+    - name: Verify Pi-hole Primary via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -L --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve primary.pihole.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://primary.pihole.{{ base_domain }}/admin/
+      register: _external_pihole_primary_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Pi-hole Primary status fact
+      ansible.builtin.set_fact:
+        _external_pihole_primary_ready:
+          status: "{{ _external_pihole_primary_ready_cmd.stdout | int }}"
+
+    - name: Verify Pi-hole Replica1 via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -L --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve replica1.pihole.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://replica1.pihole.{{ base_domain }}/admin/
+      register: _external_pihole_replica1_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Pi-hole Replica1 status fact
+      ansible.builtin.set_fact:
+        _external_pihole_replica1_ready:
+          status: "{{ _external_pihole_replica1_ready_cmd.stdout | int }}"
+
+    - name: Verify Pi-hole Replica2 via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -L --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve replica2.pihole.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://replica2.pihole.{{ base_domain }}/admin/
+      register: _external_pihole_replica2_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Pi-hole Replica2 status fact
+      ansible.builtin.set_fact:
+        _external_pihole_replica2_ready:
+          status: "{{ _external_pihole_replica2_ready_cmd.stdout | int }}"
+
+    - name: Verify K3s API (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://k3s.{{ base_domain }}/healthz
+      register: _external_k3s_api_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set K3s API status fact
+      ansible.builtin.set_fact:
+        _external_k3s_api_ready:
+          status: "{{ _external_k3s_api_ready_cmd.stdout | int }}"
+
+- name: "K3s Cluster Health Check"
+  hosts: server
+  gather_facts: true
+  become: true
+  tags: [health, health_k3s]
+  vars_files:
+    - ../../../inventories/group_vars/k3s_cluster/main.yml
+    - ../../../inventories/group_vars/all/main.yml
+  tasks:
+    - name: Check K3s Service Status
+      ansible.builtin.systemd:
+        name: k3s
+      register: _k3s_service_status
+      failed_when: false
+
+    - name: Check Node Readiness (kubectl)
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      register: _k3s_node_status
+      changed_when: false
+      failed_when: false
+
+    - name: Check API VIP Reachability
+      ansible.builtin.uri:
+        url: "https://{{ k3s_api_vip }}:6443/healthz"
+        validate_certs: false
+        status_code: [200, 401]
+      register: _k3s_vip_status
+      failed_when: false
+
+- name: "Cluster Health Report"
+  hosts: 127.0.0.1
   gather_facts: false
   tags: [health, health_summary]
+  vars_files:
+    - ../../../inventories/group_vars/all/main.yml
   tasks:
-    - name: Print Critical Endpoints Summary
-      ansible.builtin.debug:
-        msg:
-          - "==========================================================="
-          - "           HOMELAB CLUSTER ENDPOINTS SUMMARY               "
-          - "==========================================================="
-          - "Vault API (VIP):      https://{{ load_balancer_virtual_ip }}:{{ vault_api_port }}"
-          - "Pi-hole DNS (VIP):    {{ pihole_virtual_ip }}"
-          - "Pi-hole Web (Proxy):  https://pihole.{{ base_domain }}"
-          - "Nexus UI (Proxy):     https://nexus.{{ base_domain }}"
-          - "Prometheus UI (Proxy): https://prometheus.{{ base_domain }}"
-          - "Loki API (Proxy):     https://loki.{{ base_domain }}"
-          - "Grafana UI (Proxy):   https://grafana.{{ base_domain }}"
-          - "Edge Proxy VIP:       {{ reverse_proxy_virtual_ip }}"
-          - "Vault Leader:         https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}"
-          - "==========================================================="
+    - name: Render health report
+      ansible.builtin.template:
+        src: ../../templates/health_summary.j2
+        dest: /tmp/cluster-health-report.txt
+        mode: '0644'
+      run_once: true
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+
+    - name: Show health report
+      ansible.builtin.pause:
+        prompt: "{{ lookup('file', '/tmp/cluster-health-report.txt') }}"
+      run_once: true
+      delegate_to: localhost
+      vars:
+        ansible_connection: local

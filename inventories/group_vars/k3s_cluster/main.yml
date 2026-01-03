@@ -1,0 +1,31 @@
+---
+k3s_version: v1.35.0+k3s1
+systemd_dir: /etc/systemd/system
+
+# Collection variables
+use_external_database: true
+api_endpoint: 192.168.0.84 # Using the first server as endpoint or use a VIP if available
+api_port: 6443
+
+# Database Configuration
+k3s_db_user: "{{ global_k3s_db_user }}"
+k3s_db_name: "{{ global_k3s_db_name }}"
+k3s_db_host: "{{ global_k3s_db_host }}"
+k3s_db_port: "{{ global_k3s_db_port }}"
+
+datastore_endpoint: "postgres://{{ k3s_db_user }}:{{ k3s_db_password }}@{{ k3s_db_host }}:{{ k3s_db_port }}/{{ k3s_db_name }}"
+
+# Keepalived Configuration for K3s API
+k3s_api_vip_prefixlen: 24
+k3s_api_virtual_router_id: 64
+k3s_api_vrrp_interface: end0
+
+# Server Arguments
+extra_server_args: >-
+  --prefer-bundled-bin
+  --disable traefik
+  --disable servicelb
+  --node-taint CriticalAddonsOnly=true:NoExecute
+  --datastore-endpoint={{ datastore_endpoint }}
+  --tls-san {{ k3s_api_vip }}
+  --tls-san {{ api_endpoint }}

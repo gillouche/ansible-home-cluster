@@ -17,3 +17,6 @@ tls_generate_server_cert: false
 
 # Group to allow non-root read access to private keys (optional)
 tls_group_name: "tls"
+
+# Vault API Port (defaults to global setting)
+vault_api_port: "{{ global_vault_api_port | default(18200) }}"

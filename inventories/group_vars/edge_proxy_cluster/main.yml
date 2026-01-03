@@ -19,4 +19,4 @@ reverse_proxy_domains:
 # This ensures:
 # 1. Primary Caddy connects to the Vault Leader securely and directly.
 # 2. Replicas use the same URL string ('127.0.0.1...'), ensuring the certificate directory path matches the one synced from Primary.
-reverse_proxy_acme_ca_url: "https://127.0.0.1:{{ vault_api_port | default(18200) }}/v1/pki_int/acme/directory"
+reverse_proxy_acme_ca_url: "https://127.0.0.1:{{ global_vault_api_port | default(18200) }}/v1/pki_int/acme/directory"

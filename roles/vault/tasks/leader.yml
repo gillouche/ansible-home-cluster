@@ -228,6 +228,97 @@
   delegate_to: localhost
   run_once: true
 
+# -------------------------------------------------------------
+# Automated Remediation (Self-Healing)
+# -------------------------------------------------------------
+- name: Check Vault Status for Remediation logic
+  ansible.builtin.command: /usr/local/bin/vault status -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _rem_status
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Parse Remediation Status
+  ansible.builtin.set_fact:
+    _rem_is_init: "{{ (_rem_status.stdout | from_json).initialized | default(false) }}"
+    _rem_is_sealed: "{{ (_rem_status.stdout | from_json).sealed | default(true) }}"
+  when: _rem_status.rc == 0
+
+- name: Extract known root token for verification
+  ansible.builtin.set_fact:
+    _known_token: >-
+      {{ ((_cluster_init_loaded.content | default('{}') | b64decode | from_json).root_token) | default('') }}
+  when: _cluster_init_loaded is defined
+
+- name: Check Root Token Validity (if initialized and unsealed)
+  ansible.builtin.command: /usr/local/bin/vault token lookup -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_SKIP_VERIFY: "true"
+    VAULT_TOKEN: "{{ _known_token }}"
+  register: _rem_token_check
+  changed_when: false
+  failed_when: false
+  become: true
+  when:
+    - (_rem_is_init | default(false))
+    - not (_rem_is_sealed | default(true))
+    - (_known_token | length) > 0
+
+- name: Determine if Remediation (Wipe) is required
+  ansible.builtin.set_fact:
+    _trigger_remediation: >-
+      {{
+        (_rem_is_init | default(false)) and
+        (
+          (_rem_is_sealed | default(true)) or
+          (
+            not (_rem_is_sealed | default(true)) and
+            (_rem_token_check.rc | default(0)) != 0
+          )
+        )
+      }}
+
+- name: Execute Remediation (Wipe and Restart)
+  when: _trigger_remediation | bool
+  become: true
+  block:
+    - name: Warn about remediation
+      ansible.builtin.debug:
+        msg: "WARNING: Vault is in an inconsistent state (Sealed or Invalid Token). performing AUTOMATED REMEDIATION (Wipe & Re-init)."
+
+    - name: Stop Vault Container (Remediation)
+      containers.podman.podman_container:
+        name: "{{ vault_container_name }}"
+        state: stopped
+
+    - name: Wipe Vault Data Directory
+      ansible.builtin.file:
+        path: "{{ vault_host_data_dir }}"
+        state: absent
+
+    - name: Re-create Vault Data Directory
+      ansible.builtin.file:
+        path: "{{ vault_host_data_dir }}"
+        state: directory
+        owner: "{{ vault_container_user | default('root') }}"
+        group: "{{ vault_container_user | default('root') }}"
+        mode: '0755'
+
+    - name: Start Vault Container (Remediation)
+      containers.podman.podman_container:
+        name: "{{ vault_container_name }}"
+        state: started
+
+    - name: Wait for Vault to be ready (Post-Remediation)
+      ansible.builtin.wait_for:
+        port: "{{ vault_api_port }}"
+        host: "{{ ansible_facts.default_ipv4.address }}"
+        timeout: 60
+
 # Detect current leader status once (pre-init check)
 - name: Read current leader Vault status (pre-init check)
   ansible.builtin.command: /usr/local/bin/vault status -format=json

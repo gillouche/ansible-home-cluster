@@ -24,8 +24,8 @@ ct state { established, related } accept
 # Allow loopback
 iif lo accept
 
-# FULL TRUST: LAN and Podman
-ip saddr { {{ lan_subnet }}, {{ podman_subnet }} } accept
+# FULL TRUST: LAN, Podman and K3s
+ip saddr { {{ lan_subnet }}, {{ podman_subnet }}, {{ k3s_cluster_cidr }}, {{ k3s_service_cidr }} } accept
 
 # Diagnostics (optional but sane)
 ip protocol icmp accept
@@ -38,9 +38,9 @@ meta l4proto ipv6-icmp accept
 chain forward {
 type filter hook forward priority filter; policy drop;
 
-# FULL TRUST: LAN and Podman
-ip saddr { {{ lan_subnet }}, {{ podman_subnet }} } accept
-ip daddr { {{ lan_subnet }}, {{ podman_subnet }} } accept
+# FULL TRUST: LAN, Podman and K3s
+ip saddr { {{ lan_subnet }}, {{ podman_subnet }}, {{ k3s_cluster_cidr }}, {{ k3s_service_cidr }} } accept
+ip daddr { {{ lan_subnet }}, {{ podman_subnet }}, {{ k3s_cluster_cidr }}, {{ k3s_service_cidr }} } accept
 
 # Allow established/related forwarded traffic (for container egress return paths)
 ct state { established, related } accept
@@ -56,9 +56,9 @@ ip saddr {{ podman_subnet }} tcp dport 53 accept
 chain output {
 type filter hook output priority filter; policy accept;
 
-# Allow DNS egress for Podman containers
-ip saddr {{ podman_subnet }} udp dport 53 accept
-ip saddr {{ podman_subnet }} tcp dport 53 accept
+# Allow DNS egress for Podman and K3s containers
+ip saddr { {{ podman_subnet }}, {{ k3s_cluster_cidr }} } udp dport 53 accept
+ip saddr { {{ podman_subnet }}, {{ k3s_cluster_cidr }} } tcp dport 53 accept
 }
 }
 

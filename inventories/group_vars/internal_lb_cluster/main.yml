@@ -9,6 +9,11 @@ load_balancer_haproxy_frontends:
     default_backend: vault_back
     mode: tcp
 
+  - name: k3s_api_front
+    bind: "{{ k3s_api_vip }}:6443"
+    default_backend: k3s_api_back
+    mode: tcp
+
   - name: http_in
     bind: "{{ load_balancer_virtual_ip }}:80"
     mode: http
@@ -38,6 +43,9 @@ load_balancer_haproxy_frontends:
       # ACLs for Firefly
       - "acl is_firefly hdr(host) -i firefly.{{ base_domain }}"
 
+      # ACLs for K3s API (HTTP/HTTPS via Ingress)
+      - "acl is_k3s_api hdr(host) -i k3s.{{ base_domain }}"
+
       # Routing Logic
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
@@ -58,6 +66,9 @@ load_balancer_haproxy_frontends:
 
       # Routing Logic for Firefly
       - "use_backend firefly_backend if is_firefly"
+
+      # Routing Logic for K3s API
+      - "use_backend k3s_api_backend_https if is_k3s_api"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
@@ -82,16 +93,53 @@ load_balancer_haproxy_backends:
     servers:
       - name: vault1
         addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
-        port: 18200
+        port: "{{ global_vault_api_port | default(18200) }}"
         opts: "check ssl verify none"
       - name: vault2
         addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
-        port: 18200
+        port: "{{ global_vault_api_port | default(18200) }}"
         opts: "check ssl verify none"
       - name: vault3
         addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
-        port: 18200
+        port: "{{ global_vault_api_port | default(18200) }}"
         opts: "check ssl verify none"
+
+  # K3s API Backend (TCP/6443)
+  - name: k3s_api_back
+    mode: tcp
+    balance: roundrobin
+    default_server: "check inter 5s fall 2 rise 1"
+    servers:
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        port: 6443
+        opts: "check check-ssl verify none"
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
+        port: 6443
+        opts: "check check-ssl verify none"
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        port: 6443
+        opts: "check check-ssl verify none"
+
+  # K3s API Backend (HTTPS via Ingress)
+  - name: k3s_api_backend_https
+    mode: http
+    balance: roundrobin
+    servers:
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        port: 6443
+        opts: "check check-ssl verify none ssl verify none"
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
+        port: 6443
+        opts: "check check-ssl verify none ssl verify none"
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        port: 6443
+        opts: "check check-ssl verify none ssl verify none"
 
   # Pi-hole Backends
   - name: pihole_primary

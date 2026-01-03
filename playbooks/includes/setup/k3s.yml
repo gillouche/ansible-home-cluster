@@ -2,7 +2,158 @@
 - name: "Setup Postgres for HA k3s"
   hosts: postgres
   gather_facts: true
-  become: false
+  become: true
   tags: [k3s, postgres]
   roles:
     - role: postgres
+
+- name: Cluster prep
+  hosts: k3s_cluster
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_prep]
+  roles:
+    - role: k3s.orchestration.prereq
+    - role: k3s.orchestration.raspberrypi
+
+- name: Setup K3S server
+  hosts: server
+  become: true
+  tags: [k3s, k3s_server]
+  tasks:
+    - name: Configure Keepalived for K3s API
+      block:
+        - name: Ensure keepalived conf.d directory exists
+          ansible.builtin.file:
+            path: /etc/keepalived/conf.d
+            state: directory
+            mode: '0755'
+
+        - name: Deploy K3s API Keepalived Config
+          ansible.builtin.copy:
+            dest: /etc/keepalived/conf.d/k3s-api.conf
+            mode: '0644'
+            content: |
+              vrrp_instance VI_K3s_API {
+                state {{ 'MASTER' if inventory_hostname == groups['server'][0] else 'BACKUP' }}
+                interface {{ k3s_api_vrrp_interface | default('end0') }}
+                virtual_router_id {{ k3s_api_virtual_router_id }}
+                priority {{ 150 if inventory_hostname == groups['server'][0] else 100 }}
+                advert_int 1
+
+                authentication {
+                  auth_type PASS
+                  auth_pass {{ k3s_vrrp_auth_pass }}
+                }
+
+                virtual_ipaddress {
+                  {{ k3s_api_vip }}/{{ k3s_api_vip_prefixlen }}
+                }
+              }
+          notify: Restart Keepalived
+
+  handlers:
+    - name: Restart Keepalived
+      ansible.builtin.service:
+        name: keepalived
+        state: restarted
+        enabled: true
+
+  roles:
+    - role: k3s.orchestration.k3s_server
+
+- name: Fetch K3s Token
+  hosts: server
+  become: true
+  gather_facts: false
+  tags: [k3s, k3s_agent]
+  tasks:
+    - name: Check for node-token
+      ansible.builtin.stat:
+        path: /var/lib/rancher/k3s/server/node-token
+      register: _node_token_stat
+
+    - name: Read node-token
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: _node_token_content
+      when: _node_token_stat.stat.exists
+
+    - name: Set token fact
+      ansible.builtin.set_fact:
+        token: "{{ _node_token_content.content | b64decode | trim }}"
+      when: _node_token_stat.stat.exists
+
+- name: Setup K3S agent
+  hosts: agent
+  become: true
+  tags: [k3s, k3s_agent]
+  roles:
+    - role: k3s.orchestration.k3s_agent
+
+- name: Fetch K3s Kubeconfig
+  hosts: server[0]
+  become: true
+  gather_facts: false
+  tags: [k3s, k3s_kubeconfig]
+  tasks:
+    - name: Slurp k3s.yaml
+      ansible.builtin.slurp:
+        src: /etc/rancher/k3s/k3s.yaml
+      register: _k3s_yaml_content
+
+- name: Configure Local Kubeconfig
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tags: [k3s, k3s_kubeconfig]
+  vars:
+    # URL for external access (Direct to API VIP to support client-cert auth)
+    k3s_external_url: "https://{{ hostvars[groups['server'][0]]['k3s_api_vip'] }}:6443"
+  tasks:
+    - name: Ensure ~/.kube directory exists
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.kube"
+        state: directory
+        mode: '0700'
+
+    - name: Check for existing config
+      ansible.builtin.stat:
+        path: "{{ ansible_env.HOME }}/.kube/k3s.yaml"
+      register: _kube_config_stat
+
+    - name: Backup existing config
+      ansible.builtin.copy:
+        src: "{{ ansible_env.HOME }}/.kube/k3s.yaml"
+        dest: "{{ ansible_env.HOME }}/.kube/k3s.yaml.bak.{{ ansible_date_time.iso8601_basic_short | default('now') }}"
+        mode: '0600'
+      when: _kube_config_stat.stat.exists
+
+    - name: Write new kubeconfig
+      ansible.builtin.copy:
+        content: "{{ hostvars[groups['server'][0]]['_k3s_yaml_content'].content | b64decode }}"
+        dest: "{{ ansible_env.HOME }}/.kube/k3s.yaml"
+        mode: '0600'
+
+    - name: Update server URL in kubeconfig
+      ansible.builtin.replace:
+        path: "{{ ansible_env.HOME }}/.kube/k3s.yaml"
+        regexp: 'server: https://127.0.0.1:6443'
+        replace: "server: {{ k3s_external_url }}"
+
+    - name: Rename context to k3s
+      ansible.builtin.shell: |
+        set -o pipefail
+        if kubectl config get-contexts default --kubeconfig={{ ansible_env.HOME }}/.kube/k3s.yaml >/dev/null 2>&1; then
+          kubectl config rename-context default k3s --kubeconfig={{ ansible_env.HOME }}/.kube/k3s.yaml
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Show success message
+      ansible.builtin.debug:
+        msg: >-
+          Kubeconfig saved to {{ ansible_env.HOME }}/.kube/k3s.yaml (context: k3s).
+          To use it, run: export KUBECONFIG={{ ansible_env.HOME }}/.kube/config:{{ ansible_env.HOME }}/.kube/k3s.yaml
+          or add that line to your shell profile.

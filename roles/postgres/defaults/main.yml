@@ -15,7 +15,7 @@ postgres_data_dir: /mnt/data/postgres
 postgres_config_dir: "{{ postgres_home }}/config"
 
 # Database Configuration (Override these in vault)
-postgres_db_user: k3s
+postgres_db_user: "{{ global_k3s_db_user | default('k3s') }}"
 postgres_db_password: changeme
-postgres_db_name: k3s
+postgres_db_name: "{{ global_k3s_db_name | default('kubernetes') }}"
 postgres_timezone: "Europe/Brussels"

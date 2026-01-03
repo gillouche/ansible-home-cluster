@@ -1,1 +1,2 @@
+---
 postgres_image: postgres:18.1-alpine
