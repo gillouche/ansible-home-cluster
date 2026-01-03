@@ -46,6 +46,9 @@ load_balancer_haproxy_frontends:
       # ACLs for K3s API (HTTP/HTTPS via Ingress)
       - "acl is_k3s_api hdr(host) -i k3s.{{ base_domain }}"
 
+      # ACLs for Longhorn UI
+      - "acl is_longhorn hdr(host) -i longhorn.{{ base_domain }}"
+
       # Routing Logic
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
@@ -69,6 +72,9 @@ load_balancer_haproxy_frontends:
 
       # Routing Logic for K3s API
       - "use_backend k3s_api_backend_https if is_k3s_api"
+
+      # Routing Logic for Longhorn
+      - "use_backend longhorn_backend if is_longhorn"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
@@ -226,4 +232,22 @@ load_balancer_haproxy_backends:
       - name: firefly
         addr: "{{ hostvars['rpi5b8g1'].ansible_host }}"
         port: 8082
+        opts: "check"
+
+  # Longhorn UI Backend
+  - name: longhorn_backend
+    mode: http
+    balance: roundrobin
+    servers:
+      - name: longhorn1
+        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        port: 30080
+        opts: "check"
+      - name: longhorn2
+        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
+        port: 30080
+        opts: "check"
+      - name: longhorn3
+        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        port: 30080
         opts: "check"

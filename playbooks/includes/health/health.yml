@@ -445,6 +445,21 @@
         _external_k3s_api_ready:
           status: "{{ _external_k3s_api_ready_cmd.stdout | int }}"
 
+    - name: Verify Longhorn UI via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve longhorn.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://longhorn.{{ base_domain }}
+      register: _external_longhorn_ui_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Longhorn UI status fact
+      ansible.builtin.set_fact:
+        _external_longhorn_ui_ready:
+          status: "{{ _external_longhorn_ui_ready_cmd.stdout | int }}"
+
 - name: "K3s Cluster Health Check"
   hosts: server
   gather_facts: true
@@ -473,6 +488,7 @@
         status_code: [200, 401]
       register: _k3s_vip_status
       failed_when: false
+
 
 - name: "Cluster Health Report"
   hosts: 127.0.0.1

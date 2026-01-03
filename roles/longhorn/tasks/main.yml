@@ -1,0 +1,64 @@
+---
+# Longhorn prerequisites and deployment
+
+- name: Install Longhorn dependencies (Arch Linux)
+  community.general.pacman:
+    name:
+      - open-iscsi
+      - nfs-utils
+      - util-linux
+      - bash
+      - curl
+      - grep
+      - gawk
+      - sed
+      - gptfdisk
+    state: present
+  become: true
+  when: ansible_facts['distribution'] | lower == 'archlinux'
+
+- name: Ensure iscsid service is enabled and started
+  ansible.builtin.systemd:
+    name: iscsid
+    enabled: true
+    state: started
+  become: true
+
+- name: Ensure longhorn group exists
+  ansible.builtin.group:
+    name: longhorn
+    state: present
+  become: true
+  when: inventory_hostname in groups['agent_storage']
+
+- name: Ensure longhorn user exists
+  ansible.builtin.user:
+    name: longhorn
+    group: longhorn
+    home: /home/longhorn
+    create_home: true
+    shell: /usr/bin/nologin
+    state: present
+  become: true
+  when: inventory_hostname in groups['agent_storage']
+
+- name: Ensure Longhorn data directory exists on storage nodes
+  ansible.builtin.file:
+    path: "{{ longhorn_default_data_path }}"
+    state: directory
+    mode: '0755'
+    owner: longhorn
+    group: longhorn
+  become: true
+  when: inventory_hostname in groups['agent_storage']
+
+
+- name: Deploy Longhorn HelmChart manifest (on first server)
+  ansible.builtin.template:
+    src: longhorn-helmchart.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/longhorn.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: inventory_hostname == groups['server'][0]

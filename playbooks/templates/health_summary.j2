@@ -63,7 +63,6 @@
       else bad('UNREACHABLE')
     }}
 {% endfor %}
-
 {{ BOLD }}[ INFRASTRUCTURE ]{{ RESET }}
   {{ CYAN }}> Pi-hole DNS ({{ groups['dns_cluster'] | join(', ') }}){{ RESET }}
 {% for host in groups['dns_cluster'] | sort %}
@@ -189,6 +188,7 @@
   Pi-hole Rep1 (HTTPS): {{ ok('UP') if (_external_pihole_replica1_ready.status | default(-1)) == 200 else bad('DOWN') }}
   Pi-hole Rep2 (HTTPS): {{ ok('UP') if (_external_pihole_replica2_ready.status | default(-1)) == 200 else bad('DOWN') }}
   K3s API (HTTPS):      {{ ok('UP') if (_external_k3s_api_ready.status | default(-1)) in [200, 401] else bad('DOWN') }}
+  Longhorn (HTTPS):     {{ ok('UP') if (_external_longhorn_ui_ready.status | default(-1)) == 200 else bad('DOWN') }}
 
 {{ BOLD }}[ SERVICE URLS ]{{ RESET }}
   Prometheus:      {{ CYAN }}https://prometheus.{{ base_domain }}{{ RESET }}
@@ -199,5 +199,6 @@
   Pi-hole Rep1:    {{ CYAN }}https://replica1.pihole.{{ base_domain }}{{ RESET }}
   Pi-hole Rep2:    {{ CYAN }}https://replica2.pihole.{{ base_domain }}{{ RESET }}
   K3s API:         {{ CYAN }}https://k3s.{{ base_domain }}{{ RESET }}
+  Longhorn:        {{ CYAN }}https://longhorn.{{ base_domain }}{{ RESET }}
 
 ================================================================================
