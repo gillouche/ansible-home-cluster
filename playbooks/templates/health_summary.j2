@@ -200,6 +200,7 @@
 {% endfor %}
 
 {{ BOLD }}[ EXTERNAL ACCESS (via {{ reverse_proxy_virtual_ip }}) ]{{ RESET }}
+  Vault (HTTPS):         {{ ok('UP') if (_external_vault_ready.status | default(-1)) in [200, 429] else bad('DOWN') }}
   Prometheus (HTTPS):   {{ ok('UP') if (_external_prometheus_ready.status | default(-1)) == 200 else bad('DOWN') }}
   Loki (HTTPS):         {{ ok('UP') if (_external_loki_ready.status | default(-1)) == 200 else bad('DOWN') }}
   Grafana (HTTPS):      {{ ok('UP') if (_external_grafana_ready.status | default(-1)) == 200 else bad('DOWN') }}
@@ -212,6 +213,7 @@
   Dashboard (HTTPS):    {{ ok('UP') if (_external_dashboard_ready.status | default(-1)) == 200 else bad('DOWN') }}
 
 {{ BOLD }}[ SERVICE URLS ]{{ RESET }}
+  Vault:           {{ CYAN }}https://vault.{{ base_domain }}{{ RESET }}
   Prometheus:      {{ CYAN }}https://prometheus.{{ base_domain }}{{ RESET }}
   Loki:            {{ CYAN }}https://loki.{{ base_domain }}/ready{{ RESET }}
   Grafana:         {{ CYAN }}https://grafana.{{ base_domain }}{{ RESET }}

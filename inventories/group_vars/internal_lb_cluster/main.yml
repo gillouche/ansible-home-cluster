@@ -111,15 +111,15 @@ load_balancer_haproxy_backends:
       - name: vault1
         addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
-        opts: "check ssl verify none"
+        opts: "check check-ssl verify none"
       - name: vault2
         addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
-        opts: "check ssl verify none"
+        opts: "check check-ssl verify none"
       - name: vault3
         addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
-        opts: "check ssl verify none"
+        opts: "check check-ssl verify none"
 
   # K3s API Backend (TCP/6443)
   - name: k3s_api_back

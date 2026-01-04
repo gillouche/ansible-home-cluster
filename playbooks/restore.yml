@@ -150,6 +150,77 @@
       changed_when: _start_nexus.rc == 0
       failed_when: false
 
+- name: "Restore K3s Cluster"
+  hosts: server
+  gather_facts: false
+  become: true
+  tags: [infra, k3s]
+  tasks:
+    - name: Start K3s Service
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+        enabled: true
+
+    - name: Wait for K3s Service to be Active
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+      register: _k3s_service
+      until: _k3s_service.status.ActiveState == "active"
+      retries: 30
+      delay: 5
+
+    - name: Wait for All Nodes to be Ready
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      register: _k3s_nodes
+      # Check that all nodes (lines) contain "Ready"
+      until: >-
+        _k3s_nodes.rc == 0 and
+        (_k3s_nodes.stdout_lines | length > 0) and
+        (_k3s_nodes.stdout_lines | select('search', 'Ready') | list | length == _k3s_nodes.stdout_lines | length)
+      retries: 60
+      delay: 5
+      # Run only on the first node to avoid thundering herd on API
+      when: inventory_hostname == groups['server'][0]
+      changed_when: false
+
+- name: "Restore K3s Agents"
+  hosts: agent
+  gather_facts: false
+  become: true
+  tags: [infra, k3s_agent]
+  tasks:
+    - name: Start K3s Agent Service
+      ansible.builtin.systemd:
+        name: k3s-agent
+        state: started
+        enabled: true
+
+    - name: Wait for K3s Agent Service to be Active
+      ansible.builtin.systemd:
+        name: k3s-agent
+        state: started
+      register: _k3s_agent_service
+      until: _k3s_agent_service.status.ActiveState == "active"
+      retries: 30
+      delay: 5
+
+    - name: Wait for Agent Nodes to be Ready
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      delegate_to: "{{ groups['server'][0] }}"
+      register: _k3s_agent_nodes
+      # Check that all nodes (lines) contain "Ready"
+      until: >-
+        _k3s_agent_nodes.rc == 0 and
+        (_k3s_agent_nodes.stdout_lines | length > 0) and
+        (_k3s_agent_nodes.stdout_lines | select('search', 'Ready') | list | length == _k3s_agent_nodes.stdout_lines | length)
+      retries: 60
+      delay: 5
+      # Run verification once (e.g. from first agent, delegating to server)
+      run_once: true
+      changed_when: false
+
 # 5. Monitoring Stack
 - name: "Restore Monitoring Stack"
   hosts: prometheus:loki:grafana
