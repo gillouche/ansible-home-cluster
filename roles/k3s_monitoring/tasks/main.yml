@@ -1,0 +1,10 @@
+---
+- name: Deploy kube-state-metrics HelmChart manifest
+  ansible.builtin.template:
+    src: kube-state-metrics-helmchart.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/kube-state-metrics.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: inventory_hostname == groups['server'][0]

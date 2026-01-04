@@ -85,3 +85,4 @@ tls_bundle_anchor_path: "/etc/ca-certificates/trust-source/anchors/ca-bundle.pem
 prometheus_node_exporter_port: 9100
 loki_port: 3100
 loki_promtail_http_listen_port: 9080
+kube_state_metrics_node_port: 30081

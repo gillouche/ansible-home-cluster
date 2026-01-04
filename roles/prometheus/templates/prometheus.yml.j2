@@ -42,3 +42,15 @@ scrape_configs:
       - source_labels: [__address_ip__]
         target_label: __address__
         replacement: "${1}:{{ loki_promtail_http_listen_port | default(9080) }}"
+
+  - job_name: 'kube-state-metrics'
+    static_configs:
+{% for host in groups['server'] %}
+      - targets: ['{{ host }}:{{ kube_state_metrics_node_port | default(30081) }}']
+        labels:
+          __address_ip__: "{{ hostvars[host].ansible_host }}"
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address_ip__]
+        target_label: __address__
+        replacement: "${1}:{{ kube_state_metrics_node_port | default(30081) }}"

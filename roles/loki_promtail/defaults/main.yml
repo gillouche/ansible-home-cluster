@@ -1,5 +1,5 @@
 ---
-loki_promtail_image: "{{ loki_promtail_image | default('docker.io/grafana/promtail:latest') }}"
+loki_promtail_image: docker.io/grafana/promtail:latest
 loki_promtail_container_name: promtail
 loki_promtail_config_dir: /etc/promtail
 loki_promtail_http_listen_port: 9080

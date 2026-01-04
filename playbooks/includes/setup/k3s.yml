@@ -98,6 +98,14 @@
   roles:
     - role: k3s_labels
 
+- name: Deploy K3s Monitoring (metrics-server, kube-state-metrics)
+  hosts: server
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_monitoring]
+  roles:
+    - role: k3s_monitoring
+
 - name: Deploy Longhorn
   hosts: k3s_cluster
   gather_facts: true
