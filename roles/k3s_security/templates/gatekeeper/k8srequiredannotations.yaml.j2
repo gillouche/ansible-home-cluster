@@ -1,0 +1,51 @@
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredannotations
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredAnnotations
+      validation:
+        openAPIV3Schema:
+          properties:
+            annotations:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredannotations
+
+        violation[{"msg": msg}] {
+          required := input.parameters.annotations
+          provided := input.review.object.metadata.annotations
+          missing := required[_]
+          not provided[missing]
+          msg := sprintf("Missing required annotation: %s", [missing])
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredAnnotations
+metadata:
+  name: require-owner-annotation
+spec:
+  enforcementAction: dryrun
+  parameters:
+    annotations:
+      - owner
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment"]
+    namespaceSelector:
+      matchExpressions:
+        - key: policy-tier
+          operator: In
+          values: ["playground"]
+    excludedNamespaces:
+{% for ns in gatekeeper_excluded_namespaces %}
+      - {{ ns }}
+{% endfor %}

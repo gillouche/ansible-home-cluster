@@ -97,6 +97,7 @@
     volumes:
       - "{{ prometheus_config_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:Z"
       - "{{ prometheus_config_dir }}/k3s_token:/etc/prometheus/k3s_token:Z"
+      - "{{ tls_dir }}/ca-bundle.pem:/etc/prometheus/ca-bundle.pem:ro,Z"
       - "{{ prometheus_data_dir }}:/prometheus:Z"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"

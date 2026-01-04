@@ -45,8 +45,11 @@ scrape_configs:
         replacement: "${1}:{{ loki_promtail_http_listen_port | default(9080) }}"
 
   - job_name: 'kube-state-metrics'
+    scheme: https
+    tls_config:
+      ca_file: /etc/prometheus/ca-bundle.pem
     static_configs:
-      - targets: ['{{ load_balancer_virtual_ip }}:{{ kube_state_metrics_node_port | default(30081) }}']
+      - targets: ['ksm.k3s.{{ base_domain }}:443']
         labels:
           cluster: "k3s"
 

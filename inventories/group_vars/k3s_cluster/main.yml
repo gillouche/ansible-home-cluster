@@ -35,6 +35,9 @@ extra_server_args: >-
   --tls-san {{ k3s_api_vip }}
   --tls-san {{ api_endpoint }}
   --tls-san api.k3s.{{ base_domain }}
+  --bind-address {{ ansible_host }}
+  --advertise-address {{ ansible_host }}
+  --node-ip {{ ansible_host }}
 
 # Agent Arguments
 extra_agent_args: ""

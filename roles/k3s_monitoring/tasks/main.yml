@@ -19,6 +19,27 @@
   become: true
   when: inventory_hostname == groups['server'][0]
 
+- name: Deploy kube-state-metrics Ingress manifest
+  ansible.builtin.template:
+    src: kube-state-metrics-ingress.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/kube-state-metrics-ingress.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: inventory_hostname == groups['server'][0]
+
+- name: Wait for kube-state-metrics deployment to be successful
+  ansible.builtin.shell: |
+    kubectl wait --for=condition=complete --timeout=300s job/helm-install-kube-state-metrics -n kube-system
+  register: _ksm_wait
+  until: _ksm_wait is success
+  retries: 10
+  delay: 5
+  become: true
+  when: inventory_hostname == groups['server'][0]
+  changed_when: false
+
 - name: Deploy Kubernetes Dashboard HelmChart manifest
   ansible.builtin.template:
     src: kubernetes-dashboard-helmchart.yaml.j2
@@ -29,10 +50,41 @@
   become: true
   when: inventory_hostname == groups['server'][0]
 
+- name: Wait for Kubernetes Dashboard deployment to be successful
+  ansible.builtin.shell: |
+    kubectl wait --for=condition=complete --timeout=300s job/helm-install-kubernetes-dashboard -n kube-system
+  register: _dashboard_wait
+  until: _dashboard_wait is success
+  retries: 10
+  delay: 5
+  become: true
+  when: inventory_hostname == groups['server'][0]
+  changed_when: false
+
+- name: Deploy Kubernetes Dashboard ServersTransport manifest
+  ansible.builtin.template:
+    src: dashboard-serverstransport.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/kubernetes-dashboard-serverstransport.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: inventory_hostname == groups['server'][0]
+
 - name: Deploy Kubernetes Dashboard admin user manifest
   ansible.builtin.template:
     src: dashboard-admin-user.yaml.j2
     dest: /var/lib/rancher/k3s/server/manifests/kubernetes-dashboard-admin-user.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: inventory_hostname == groups['server'][0]
+
+- name: Deploy Kubernetes Dashboard Ingress manifest
+  ansible.builtin.template:
+    src: kubernetes-dashboard-ingress.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/kubernetes-dashboard-ingress.yaml
     owner: root
     group: root
     mode: '0644'

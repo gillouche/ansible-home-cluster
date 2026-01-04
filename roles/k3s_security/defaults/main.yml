@@ -1,0 +1,14 @@
+---
+gatekeeper_namespace: gatekeeper-system
+gatekeeper_chart_version: 3.21.0
+
+k3s_security_playground_namespaces:
+  - playground
+  - demo
+
+gatekeeper_excluded_namespaces:
+  - kube-system
+  - gatekeeper-system
+  - kube-public
+  - longhorn-system
+  - kubernetes-dashboard

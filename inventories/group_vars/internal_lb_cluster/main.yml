@@ -14,16 +14,6 @@ load_balancer_haproxy_frontends:
     default_backend: k3s_api_back
     mode: tcp
 
-  - name: kube_state_metrics_front
-    bind: "{{ load_balancer_virtual_ip }}:30081"
-    default_backend: kube_state_metrics_back
-    mode: tcp
-
-  - name: k3s_traefik_front
-    bind: "{{ load_balancer_virtual_ip }}:9000"
-    default_backend: k3s_traefik_back
-    mode: http
-
   - name: http_in
     bind: "{{ load_balancer_virtual_ip }}:80"
     mode: http
@@ -62,6 +52,9 @@ load_balancer_haproxy_frontends:
       # ACLs for Kubernetes Dashboard
       - "acl is_dashboard hdr(host) -i dashboard.k3s.{{ base_domain }}"
 
+      # ACLs for Kube State Metrics
+      - "acl is_ksm hdr(host) -i ksm.k3s.{{ base_domain }}"
+
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
       - "use_backend pihole_replica2 if is_pihole_replica2"
@@ -90,6 +83,9 @@ load_balancer_haproxy_frontends:
 
       # Routing Logic for Kubernetes Dashboard
       - "use_backend dashboard_backend if is_dashboard"
+
+      # Routing Logic for Kube State Metrics
+      - "use_backend kube_state_metrics_back if is_ksm"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
@@ -256,18 +252,18 @@ load_balancer_haproxy_backends:
     servers:
       - name: k3s_lb
         addr: "{{ k3s_lb_vip }}"
-        port: 30080
-        opts: "check"
+        port: 9443
+        opts: "check ssl verify none"
 
   # Kube State Metrics Backend
   - name: kube_state_metrics_back
-    mode: tcp
+    mode: http
     balance: roundrobin
     default_server: "check inter 5s fall 2 rise 1"
     servers:
       - name: k3s_lb
         addr: "{{ k3s_lb_vip }}"
-        port: 30081
+        port: 9000
 
   - name: k3s_traefik_back
     mode: http
@@ -285,5 +281,5 @@ load_balancer_haproxy_backends:
     servers:
       - name: k3s_lb
         addr: "{{ k3s_lb_vip }}"
-        port: 30443
+        port: 9443
         opts: "check ssl verify none"

@@ -1,0 +1,34 @@
+{# =========================
+   ANSI COLOR DEFINITIONS
+   ========================= #}
+{% set RESET  = '\033[0m' %}
+{% set BOLD   = '\033[1m' %}
+{% set RED    = '\033[31m' %}
+{% set GREEN  = '\033[32m' %}
+{% set YELLOW = '\033[33m' %}
+{% set CYAN   = '\033[36m' %}
+{% set GRAY   = '\033[90m' %}
+
+{% macro ok(text='OK') %}{{ GREEN }}{{ text }}{{ RESET }}{% endmacro %}
+{% macro warn(text='WARN') %}{{ YELLOW }}{{ text }}{{ RESET }}{% endmacro %}
+{% macro bad(text='VIOLATIONS') %}{{ RED }}{{ text }}{{ RESET }}{% endmacro %}
+
+================================================================================
+{{ BOLD }}                        GATEKEEPER DRYRUN VIOLATIONS REPORT{{ RESET }}
+================================================================================
+
+{% set constraints = violations_data | map('from_json') | list %}
+{% for item in constraints %}
+{{ BOLD }}Constraint: {{ CYAN }}{{ item.name }}{{ RESET }}
+Status:      {% if item.violations | length > 0 %}{{ bad(item.violations | length ~ ' violations found') }}{% else %}{{ ok('No violations') }}{% endif %}
+Audited:     {{ item.audited | default('N/A') }}
+
+{% if item.violations | length > 0 %}
+  {{ BOLD }}Details:{{ RESET }}
+{% for violation in item.violations %}
+    - {{ GRAY }}[{{ violation.kind }}]{{ RESET }} {{ violation.namespace }}/{{ violation.name }}
+      {{ YELLOW }}Message:{{ RESET }} {{ violation.message }}
+{% endfor %}
+{% endif %}
+--------------------------------------------------------------------------------
+{% endfor %}

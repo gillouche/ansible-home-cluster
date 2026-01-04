@@ -14,5 +14,4 @@ spec:
       monitor:
         enabled: false
     service:
-      type: NodePort
-      nodePort: {{ kube_state_metrics_node_port }}
+      type: ClusterIP

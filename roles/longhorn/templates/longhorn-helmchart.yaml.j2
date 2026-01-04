@@ -31,5 +31,4 @@ spec:
       defaultClassReplicaCount: {{ longhorn_replica_count }}
     service:
       ui:
-        type: NodePort
-        nodePort: 30080
+        type: ClusterIP

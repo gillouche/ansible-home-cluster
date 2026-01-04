@@ -117,8 +117,10 @@
 
     - name: Verify kube-state-metrics via LB VIP (HAProxy)
       ansible.builtin.uri:
-        url: "http://{{ load_balancer_virtual_ip }}:30081/metrics"
+        url: "http://{{ load_balancer_virtual_ip }}/metrics"
         method: GET
+        headers:
+          Host: "ksm.k3s.{{ base_domain }}"
         status_code: [200]
       register: _lb_ksm_health_check
       failed_when: false
@@ -487,7 +489,7 @@
 
     - name: Verify Kubernetes Dashboard via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
-        curl --silent --output /dev/null --write-out "%{http_code}"
+        curl -L --silent --output /dev/null --write-out "%{http_code}"
         --cacert {{ homelab_ca_bundle_path | expanduser }}
         --resolve dashboard.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
         https://dashboard.k3s.{{ base_domain }}
