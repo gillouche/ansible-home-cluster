@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: vault-test-cert
+  namespace: default
+spec:
+  secretName: vault-test-cert-tls
+  commonName: test.k3s.gillouche.homelab
+  dnsNames:
+  - test.k3s.gillouche.homelab
+  issuerRef:
+    name: vault-issuer
+    kind: ClusterIssuer

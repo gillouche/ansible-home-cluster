@@ -105,6 +105,12 @@ load_balancer_haproxy_backends:
     stick_table: "type ip size 200k expire 30m"
     stick_on: "src"
 
+    # Use HTTP check (over SSL because servers have check-ssl)
+    # This prevents "TLS handshake error ... connection reset by peer" logs in Vault
+    # caused by HAProxy doing just TCP connect+SSL handshake and closing.
+    extra:
+      - "option httpchk GET /v1/sys/health"
+
     default_server: "check inter 5s fall 2 rise 1"
 
     servers:

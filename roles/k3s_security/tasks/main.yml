@@ -46,13 +46,14 @@
   loop: "{{ k3s_security_playground_namespaces }}"
   become: true
   when: inventory_hostname == groups['server'][0]
-  changed_when: false # We use --overwrite so it might always "change" but we don't want to clutter. Actually kubectl label is idempotent enough but let's be safe.
-  failed_when: false # In case namespace doesn't exist yet
+  changed_when: false
+  failed_when: false
 
 - name: Deploy Gatekeeper templates and constraints
   ansible.builtin.template:
     src: "{{ item }}"
-    dest: "/var/lib/rancher/k3s/server/manifests/gatekeeper/{{ item | basename | regex_replace('\\.j2$', '') }}"
+    dest: >-
+      /var/lib/rancher/k3s/server/manifests/gatekeeper/{{ item | basename | regex_replace('\.j2$', '') }}
     owner: root
     group: root
     mode: '0644'
@@ -74,7 +75,10 @@
 
 - name: Get Gatekeeper dryrun violations
   ansible.builtin.shell: |
-    kubectl get constraints -o json | jq -c '.items[] | select(.spec.enforcementAction == "dryrun") | {name: .metadata.name, violations: (.status.violations // []), audited: .status.auditTimestamp}'
+    set -o pipefail
+    kubectl get constraints -o json | \
+    jq -c '.items[] | select(.spec.enforcementAction == "dryrun") | \
+    {name: .metadata.name, violations: (.status.violations // []), audited: .status.auditTimestamp}'
   register: _dryrun_violations
   become: true
   when: inventory_hostname == groups['server'][0]
@@ -82,7 +86,9 @@
   # Wait until all constraints have been audited (auditTimestamp exists)
   until:
     - _dryrun_violations.stdout_lines | length > 0
-    - _dryrun_violations.stdout_lines | map('from_json') | map(attribute='audited') | select('defined') | list | length == _dryrun_violations.stdout_lines | length
+    - >-
+      _dryrun_violations.stdout_lines | map('from_json') | map(attribute='audited') |
+      select('defined') | list | length == _dryrun_violations.stdout_lines | length
   retries: 20
   delay: 30
 

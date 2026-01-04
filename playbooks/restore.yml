@@ -206,7 +206,7 @@
       retries: 30
       delay: 5
 
-    - name: Wait for Agent Nodes to be Ready
+    - name: Wait for Agent Nodes to be Ready # noqa: run-once
       ansible.builtin.command: k3s kubectl get nodes --no-headers
       delegate_to: "{{ groups['server'][0] }}"
       register: _k3s_agent_nodes
