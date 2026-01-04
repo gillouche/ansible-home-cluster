@@ -1,0 +1,16 @@
+vrrp_instance VI_K3s_LB {
+  state {{ 'MASTER' if inventory_hostname == groups['server'][0] else 'BACKUP' }}
+  interface {{ k3s_lb_vrrp_interface | default('end0') }}
+  virtual_router_id {{ k3s_lb_virtual_router_id }}
+  priority {{ 150 if inventory_hostname == groups['server'][0] else 100 }}
+  advert_int 1
+
+  authentication {
+    auth_type PASS
+    auth_pass {{ k3s_vrrp_auth_pass }}
+  }
+
+  virtual_ipaddress {
+    {{ k3s_lb_vip }}/{{ k3s_lb_vip_prefixlen }}
+  }
+}
