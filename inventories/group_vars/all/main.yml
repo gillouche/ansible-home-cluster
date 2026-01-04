@@ -24,7 +24,7 @@ prometheus_node_exporter_image: prom/node-exporter:v1.10.2
 
 # Vault trust/CA distribution (controller + hosts)
 vault_install_root_ca_on_hosts: true
-vault_trust_ca_on_controller: false
+vault_trust_ca_on_controller: true
 vault_controller_install_keychain: login
 
 # Controller (macOS) browser trust switch
@@ -33,6 +33,7 @@ vault_firefox_enable_enterprise_roots: true
 # HAProxy VIP (included automatically in SANs by TLS role when defined)
 load_balancer_virtual_ip: 192.168.0.253
 k3s_api_vip: 192.168.0.249
+k3s_lb_vip: 192.168.0.248
 
 # Shared Database Configuration
 # -----------------------------

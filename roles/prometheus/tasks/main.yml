@@ -31,6 +31,47 @@
     - "{{ prometheus_data_dir }}"
   become: true
 
+- name: Fetch Prometheus ServiceAccount token from K3s
+  ansible.builtin.shell: |
+    kubectl get secret prometheus-token -n kube-system -o jsonpath='{.data.token}' | base64 --decode
+  register: _prometheus_token_cmd
+  delegate_to: "{{ groups['server'][0] }}"
+  become: true
+  run_once: true
+  when: groups['server'] is defined and groups['server'] | length > 0
+  changed_when: false
+  failed_when: false
+
+- name: Deploy K3s token for Prometheus
+  ansible.builtin.copy:
+    content: "{{ _prometheus_token_cmd.stdout | trim }}"
+    dest: "{{ prometheus_config_dir }}/k3s_token"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_group }}"
+    mode: '0600'
+  become: true
+  when:
+    - _prometheus_token_cmd.rc is defined
+    - _prometheus_token_cmd.rc == 0
+    - _prometheus_token_cmd.stdout | length > 0
+  notify: Restart prometheus
+
+- name: Remove K3s token if not available on cluster
+  ansible.builtin.file:
+    path: "{{ prometheus_config_dir }}/k3s_token"
+    state: absent
+  become: true
+  when:
+    - groups['server'] is defined and groups['server'] | length > 0
+    - (_prometheus_token_cmd.rc is not defined) or (_prometheus_token_cmd.rc != 0) or (_prometheus_token_cmd.stdout | length == 0)
+  notify: Restart prometheus
+
+- name: Check for K3s token on Prometheus host
+  ansible.builtin.stat:
+    path: "{{ prometheus_config_dir }}/k3s_token"
+  register: _prometheus_k3s_token_local
+  become: true
+
 - name: Deploy prometheus configuration
   ansible.builtin.template:
     src: prometheus.yml.j2
@@ -54,10 +95,12 @@
       - "{{ prometheus_port }}:9090"
     volumes:
       - "{{ prometheus_config_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:Z"
+      - "{{ prometheus_config_dir }}/k3s_token:/etc/prometheus/k3s_token:Z"
       - "{{ prometheus_data_dir }}:/prometheus:Z"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time={{ prometheus_retention_time }}"
       - "--web.console.libraries=/usr/share/prometheus/console_libraries"
       - "--web.console.templates=/usr/share/prometheus/consoles"
   become: true

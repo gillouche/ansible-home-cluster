@@ -20,11 +20,14 @@ k3s_api_vip_prefixlen: 24
 k3s_api_virtual_router_id: 64
 k3s_api_vrrp_interface: end0
 
+# Keepalived Configuration for K3s Service LB
+k3s_lb_vip_prefixlen: 24
+k3s_lb_virtual_router_id: 65
+k3s_lb_vrrp_interface: end0
+
 # Server Arguments
 extra_server_args: >-
   --prefer-bundled-bin
-  --disable traefik
-  --disable servicelb
   --kubelet-arg=system-reserved=cpu=500m,memory=1Gi
   --kubelet-arg=kube-reserved=cpu=500m,memory=1Gi
   --kubelet-arg=max-pods=50

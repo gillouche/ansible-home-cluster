@@ -9,3 +9,4 @@ prometheus_data_dir: /mnt/data/prometheus
 prometheus_image: quay.io/prometheus/prometheus:latest
 prometheus_container_name: prometheus
 prometheus_port: 9090
+prometheus_retention_time: 7d

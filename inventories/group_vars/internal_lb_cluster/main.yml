@@ -14,6 +14,16 @@ load_balancer_haproxy_frontends:
     default_backend: k3s_api_back
     mode: tcp
 
+  - name: kube_state_metrics_front
+    bind: "{{ load_balancer_virtual_ip }}:30081"
+    default_backend: kube_state_metrics_back
+    mode: tcp
+
+  - name: k3s_traefik_front
+    bind: "{{ load_balancer_virtual_ip }}:9000"
+    default_backend: k3s_traefik_back
+    mode: http
+
   - name: http_in
     bind: "{{ load_balancer_virtual_ip }}:80"
     mode: http
@@ -239,15 +249,26 @@ load_balancer_haproxy_backends:
     mode: http
     balance: roundrobin
     servers:
-      - name: longhorn1
-        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+      - name: k3s_lb
+        addr: "{{ k3s_lb_vip }}"
         port: 30080
         opts: "check"
-      - name: longhorn2
-        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
-        port: 30080
-        opts: "check"
-      - name: longhorn3
-        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
-        port: 30080
+
+  # Kube State Metrics Backend
+  - name: kube_state_metrics_back
+    mode: tcp
+    balance: roundrobin
+    default_server: "check inter 5s fall 2 rise 1"
+    servers:
+      - name: k3s_lb
+        addr: "{{ k3s_lb_vip }}"
+        port: 30081
+
+  - name: k3s_traefik_back
+    mode: http
+    balance: roundrobin
+    servers:
+      - name: k3s_lb
+        addr: "{{ k3s_lb_vip }}"
+        port: 9000
         opts: "check"

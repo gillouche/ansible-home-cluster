@@ -13,6 +13,7 @@ scrape_configs:
       - targets: ['{{ host }}:{{ prometheus_node_exporter_port }}']
         labels:
           __address_ip__: "{{ hostvars[host].ansible_host }}"
+          cluster: "k3s"
 {% endfor %}
     relabel_configs:
       - source_labels: [__address_ip__]
@@ -45,12 +46,58 @@ scrape_configs:
 
   - job_name: 'kube-state-metrics'
     static_configs:
-{% for host in groups['server'] %}
-      - targets: ['{{ host }}:{{ kube_state_metrics_node_port | default(30081) }}']
+      - targets: ['{{ load_balancer_virtual_ip }}:{{ kube_state_metrics_node_port | default(30081) }}']
         labels:
-          __address_ip__: "{{ hostvars[host].ansible_host }}"
-{% endfor %}
+          cluster: "k3s"
+
+{% if _prometheus_k3s_token_local is defined and _prometheus_k3s_token_local.stat.exists %}
+  - job_name: 'kubernetes-nodes'
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true
+    bearer_token_file: /etc/prometheus/k3s_token
+    kubernetes_sd_configs:
+      - role: node
+        api_server: https://{{ k3s_api_vip }}:6443
+        tls_config:
+          insecure_skip_verify: true
+        bearer_token_file: /etc/prometheus/k3s_token
     relabel_configs:
-      - source_labels: [__address_ip__]
-        target_label: __address__
-        replacement: "${1}:{{ kube_state_metrics_node_port | default(30081) }}"
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: cluster
+        replacement: k3s
+      - source_labels: [__meta_kubernetes_node_name]
+        target_label: node
+      - target_label: __address__
+        replacement: {{ k3s_api_vip }}:6443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics
+
+  - job_name: 'kubernetes-nodes-cadvisor'
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true
+    bearer_token_file: /etc/prometheus/k3s_token
+    kubernetes_sd_configs:
+      - role: node
+        api_server: https://{{ k3s_api_vip }}:6443
+        tls_config:
+          insecure_skip_verify: true
+        bearer_token_file: /etc/prometheus/k3s_token
+    relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: cluster
+        replacement: k3s
+      - source_labels: [__meta_kubernetes_node_name]
+        target_label: node
+      - target_label: __address__
+        replacement: {{ k3s_api_vip }}:6443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+{% endif %}

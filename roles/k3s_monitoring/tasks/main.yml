@@ -1,4 +1,14 @@
 ---
+- name: Deploy prometheus RBAC manifest
+  ansible.builtin.template:
+    src: prometheus-rbac.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/prometheus-rbac.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: inventory_hostname == groups['server'][0]
+
 - name: Deploy kube-state-metrics HelmChart manifest
   ansible.builtin.template:
     src: kube-state-metrics-helmchart.yaml.j2

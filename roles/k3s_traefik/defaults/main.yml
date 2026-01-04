@@ -1,0 +1,3 @@
+---
+k3s_traefik_http_port: 9000
+k3s_traefik_https_port: 9443

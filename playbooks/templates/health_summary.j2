@@ -57,9 +57,14 @@
          and 'Ready' in (hostvars[host]._k3s_node_status.stdout | default(''))
       else bad('NO')
     }}
-    VIP ({{ k3s_api_vip }}):  {{
+    API VIP ({{ k3s_api_vip }}): {{
       ok('REACHABLE')
       if hostvars[host]._k3s_vip_status.status | default(0) in [200, 401]
+      else bad('UNREACHABLE')
+    }}
+    LB VIP ({{ k3s_lb_vip }}):  {{
+      ok('REACHABLE')
+      if hostvars[host]._k3s_lb_vip_status.status | default(0) in [200, 404]
       else bad('UNREACHABLE')
     }}
 {% endfor %}
@@ -87,6 +92,21 @@
       Vault via VIP: {{
         ok('UP')
         if (hostvars[host]._lb_vault_health_check.status | default(0)) in [200, 429]
+        else bad('DOWN')
+      }}
+      K3s API:       {{
+        ok('UP')
+        if (hostvars[host]._lb_k3s_api_health_check.status | default(0)) in [200, 401]
+        else bad('DOWN')
+      }}
+      KubeStateMetrics: {{
+        ok('UP')
+        if (hostvars[host]._lb_ksm_health_check.status | default(0)) == 200
+        else bad('DOWN')
+      }}
+      K3s Traefik:    {{
+        ok('UP')
+        if (hostvars[host]._lb_traefik_health_check.status | default(0)) in [200, 404]
         else bad('DOWN')
       }}
 {% endfor %}

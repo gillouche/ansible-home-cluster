@@ -111,7 +111,7 @@
       changed_when: false
 
     - name: Trust Root CA in macOS keychain (controller)
-      ansible.builtin.command: >
+      ansible.builtin.shell: >
         security add-trusted-cert -d
         -r trustRoot
         -k {{ (ansible_env.HOME ~ '/Library/Keychains/' ~
@@ -121,6 +121,7 @@
         "{{ tls_cluster_ca_cert_controller | expanduser }}"
       delegate_to: localhost
       run_once: true
+      become: false
       when:
         - ansible_os_family == 'Darwin'
         - tls_trust_ca_on_controller | default(false) | bool
