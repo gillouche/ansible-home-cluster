@@ -54,12 +54,14 @@ load_balancer_haproxy_frontends:
       - "acl is_firefly hdr(host) -i firefly.{{ base_domain }}"
 
       # ACLs for K3s API (HTTP/HTTPS via Ingress)
-      - "acl is_k3s_api hdr(host) -i k3s.{{ base_domain }}"
+      - "acl is_k3s_api hdr(host) -i api.k3s.{{ base_domain }}"
 
       # ACLs for Longhorn UI
-      - "acl is_longhorn hdr(host) -i longhorn.{{ base_domain }}"
+      - "acl is_longhorn hdr(host) -i longhorn.k3s.{{ base_domain }}"
 
-      # Routing Logic
+      # ACLs for Kubernetes Dashboard
+      - "acl is_dashboard hdr(host) -i dashboard.k3s.{{ base_domain }}"
+
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
       - "use_backend pihole_replica2 if is_pihole_replica2"
@@ -85,6 +87,9 @@ load_balancer_haproxy_frontends:
 
       # Routing Logic for Longhorn
       - "use_backend longhorn_backend if is_longhorn"
+
+      # Routing Logic for Kubernetes Dashboard
+      - "use_backend dashboard_backend if is_dashboard"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
@@ -272,3 +277,13 @@ load_balancer_haproxy_backends:
         addr: "{{ k3s_lb_vip }}"
         port: 9000
         opts: "check"
+
+  # Kubernetes Dashboard Backend
+  - name: dashboard_backend
+    mode: http
+    balance: roundrobin
+    servers:
+      - name: k3s_lb
+        addr: "{{ k3s_lb_vip }}"
+        port: 30443
+        opts: "check ssl verify none"

@@ -1,0 +1,17 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: kubernetes-dashboard
+  namespace: kube-system
+spec:
+  chart: kubernetes-dashboard
+  repo: https://kubernetes.github.io/dashboard/
+  version: {{ k3s_dashboard_chart_version }}
+  targetNamespace: {{ k3s_dashboard_namespace }}
+  createNamespace: true
+  valuesContent: |
+    kong:
+      proxy:
+        type: NodePort
+        tls:
+          nodePort: {{ k3s_dashboard_node_port }}

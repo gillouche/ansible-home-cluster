@@ -1,0 +1,83 @@
+#!/bin/bash
+set -euo pipefail
+
+# Configuration
+VAULT_ADDR="https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ global_vault_api_port | default(18200) }}"
+VAULT_TOKEN="{{ caddy_vault_token }}"
+CERT_DIR="{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard"
+DATA_DIR="{{ reverse_proxy_data_dir }}/"
+CONTAINER_NAME="{{ reverse_proxy_container_name }}"
+SSH_OPTS="-o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519"
+
+REPLICAS=({% for host in groups['edge_proxy_cluster'] | difference(groups['edge_proxy_primary']) %}"{{ hostvars[host].ansible_host | default(host) }}" {% endfor %})
+
+usage() {
+    echo "Usage: $0 [--renew] [--sync-only]"
+    exit 1
+}
+
+RENEW=false
+SYNC_ONLY=false
+
+if [[ $# -eq 0 ]]; then
+    SYNC_ONLY=true
+fi
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --renew)
+            RENEW=true
+            shift
+            ;;
+        --sync-only)
+            SYNC_ONLY=true
+            shift
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+if [[ "$RENEW" == "true" ]]; then
+    echo "Requesting new certificate from Vault..."
+    mkdir -p "$CERT_DIR"
+    export VAULT_ADDR
+    export VAULT_TOKEN
+    export VAULT_SKIP_VERIFY=true
+
+    DATA=$(/usr/local/bin/vault write -format=json pki_int/issue/{{ vault_pki_int_role_name | default('homelab-server') }} \
+        common_name="{{ reverse_proxy_domains[0] }}" \
+        alt_names="{{ reverse_proxy_domains[1:] | join(',') }}" \
+        ttl=720h)
+
+    echo "$DATA" | jq -r .data.private_key > "$CERT_DIR/wildcard.key"
+    echo "$DATA" | jq -r '.data.certificate + "\n" + (.data.ca_chain | join("\n"))' > "$CERT_DIR/wildcard.crt"
+
+    chown -R reverse_proxy:reverse_proxy "$CERT_DIR"
+    chmod 600 "$CERT_DIR/wildcard.key"
+fi
+
+if [[ "$RENEW" == "true" || "$SYNC_ONLY" == "true" ]]; then
+    echo "Syncing data to replicas..."
+    for replica in "${REPLICAS[@]}"; do
+        echo "Pushing to $replica..."
+        rsync -avz --delete \
+          -e "ssh ${SSH_OPTS}" \
+          --rsync-path="sudo rsync" \
+          "${DATA_DIR}" "alarm@${replica}:${DATA_DIR}"
+
+        echo "Restarting $CONTAINER_NAME on $replica..."
+        ssh ${SSH_OPTS} "alarm@${replica}" \
+          "sudo podman inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' $CONTAINER_NAME 2>/dev/null \
+           | grep -q true && sudo podman restart $CONTAINER_NAME || true"
+    done
+
+    # Restart locally if we renewed or if we want to ensure local is fresh (though local is source)
+    if [[ "$RENEW" == "true" ]]; then
+        echo "Restarting local $CONTAINER_NAME..."
+        podman restart "$CONTAINER_NAME"
+    fi
+fi
+
+echo "Operation completed successfully."

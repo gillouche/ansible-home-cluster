@@ -10,6 +10,11 @@ ansible_become_password: "{{ vault_device_become_password }}"
 
 # Global variables for all hosts
 base_domain: gillouche.homelab
+wildcard_domains:
+  - "*.{{ base_domain }}"
+  - "*.pihole.{{ base_domain }}"
+  - "*.k3s.{{ base_domain }}"
+  - "{{ base_domain }}"
 target_user: alarm
 tls_dir: "/etc/tls"
 lan_subnet: "192.168.0.0/24"

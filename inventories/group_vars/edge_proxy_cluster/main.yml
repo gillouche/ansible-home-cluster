@@ -10,9 +10,7 @@ reverse_proxy_resolver_ip: 192.168.0.251
 
 # Domains Caddy should request certificates for.
 # Using wildcards allows scaling without reconfiguring Caddy for every sub-service.
-reverse_proxy_domains:
-  - "*.{{ base_domain }}"
-  - "*.pihole.{{ base_domain }}"
+reverse_proxy_domains: "{{ wildcard_domains }}"
 
 # Use localhost to contact Vault for ACME.
 # This works because Caddy runs with network_mode: host, so 127.0.0.1 refers to the host loopback where Vault is listening.

@@ -459,8 +459,8 @@
       ansible.builtin.command: >-
         curl --silent --output /dev/null --write-out "%{http_code}"
         --cacert {{ homelab_ca_bundle_path | expanduser }}
-        --resolve k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
-        https://k3s.{{ base_domain }}/healthz
+        --resolve api.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://api.k3s.{{ base_domain }}/healthz
       register: _external_k3s_api_ready_cmd
       changed_when: false
       failed_when: false
@@ -474,8 +474,8 @@
       ansible.builtin.command: >-
         curl --silent --output /dev/null --write-out "%{http_code}"
         --cacert {{ homelab_ca_bundle_path | expanduser }}
-        --resolve longhorn.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
-        https://longhorn.{{ base_domain }}
+        --resolve longhorn.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://longhorn.k3s.{{ base_domain }}
       register: _external_longhorn_ui_ready_cmd
       changed_when: false
       failed_when: false
@@ -484,6 +484,21 @@
       ansible.builtin.set_fact:
         _external_longhorn_ui_ready:
           status: "{{ _external_longhorn_ui_ready_cmd.stdout | int }}"
+
+    - name: Verify Kubernetes Dashboard via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve dashboard.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://dashboard.k3s.{{ base_domain }}
+      register: _external_dashboard_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Kubernetes Dashboard status fact
+      ansible.builtin.set_fact:
+        _external_dashboard_ready:
+          status: "{{ _external_dashboard_ready_cmd.stdout | int }}"
 
 - name: "K3s Cluster Health Check"
   hosts: server

@@ -18,3 +18,43 @@
     mode: '0644'
   become: true
   when: inventory_hostname == groups['server'][0]
+
+- name: Deploy Kubernetes Dashboard HelmChart manifest
+  ansible.builtin.template:
+    src: kubernetes-dashboard-helmchart.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/kubernetes-dashboard.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: inventory_hostname == groups['server'][0]
+
+- name: Deploy Kubernetes Dashboard admin user manifest
+  ansible.builtin.template:
+    src: dashboard-admin-user.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/kubernetes-dashboard-admin-user.yaml
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: inventory_hostname == groups['server'][0]
+
+- name: Wait for dashboard admin user token to be created
+  ansible.builtin.shell: |
+    /usr/local/bin/kubectl get secret admin-user-token -n {{ k3s_dashboard_namespace }} -o jsonpath='{.data.token}'
+  register: k3s_dashboard_token_raw
+  until: k3s_dashboard_token_raw.stdout != ""
+  retries: 20
+  delay: 10
+  become: true
+  when: inventory_hostname == groups['server'][0]
+  changed_when: false
+
+- name: Save dashboard token locally
+  ansible.builtin.copy:
+    content: "{{ {'token': k3s_dashboard_token_raw.stdout | b64decode} | to_nice_json }}"
+    dest: "{{ k3s_dashboard_token_path }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  when: inventory_hostname == groups['server'][0]

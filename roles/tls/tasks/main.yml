@@ -153,6 +153,7 @@
                  (inventory_hostname ~ '.' ~ base_domain),
                  'localhost']
                | reject('equalto', omit) | list)
+               + (wildcard_domains | default([]) | list)
                + (_tls_extra_dns | default([]) | list)
              ) | unique | sort }}
         _tls_candidate_ips: >-

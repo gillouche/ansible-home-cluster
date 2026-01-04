@@ -209,6 +209,7 @@
   Pi-hole Rep2 (HTTPS): {{ ok('UP') if (_external_pihole_replica2_ready.status | default(-1)) == 200 else bad('DOWN') }}
   K3s API (HTTPS):      {{ ok('UP') if (_external_k3s_api_ready.status | default(-1)) in [200, 401] else bad('DOWN') }}
   Longhorn (HTTPS):     {{ ok('UP') if (_external_longhorn_ui_ready.status | default(-1)) == 200 else bad('DOWN') }}
+  Dashboard (HTTPS):    {{ ok('UP') if (_external_dashboard_ready.status | default(-1)) == 200 else bad('DOWN') }}
 
 {{ BOLD }}[ SERVICE URLS ]{{ RESET }}
   Prometheus:      {{ CYAN }}https://prometheus.{{ base_domain }}{{ RESET }}
@@ -218,7 +219,8 @@
   Pi-hole Pri:     {{ CYAN }}https://primary.pihole.{{ base_domain }}{{ RESET }}
   Pi-hole Rep1:    {{ CYAN }}https://replica1.pihole.{{ base_domain }}{{ RESET }}
   Pi-hole Rep2:    {{ CYAN }}https://replica2.pihole.{{ base_domain }}{{ RESET }}
-  K3s API:         {{ CYAN }}https://k3s.{{ base_domain }}{{ RESET }}
-  Longhorn:        {{ CYAN }}https://longhorn.{{ base_domain }}{{ RESET }}
+  K3s API:         {{ CYAN }}https://api.k3s.{{ base_domain }}{{ RESET }}
+  Longhorn:        {{ CYAN }}https://longhorn.k3s.{{ base_domain }}{{ RESET }}
+  Dashboard:       {{ CYAN }}https://dashboard.k3s.{{ base_domain }}{{ RESET }}
 
 ================================================================================

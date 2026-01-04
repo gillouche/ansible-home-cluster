@@ -34,6 +34,7 @@ extra_server_args: >-
   --datastore-endpoint={{ datastore_endpoint }}
   --tls-san {{ k3s_api_vip }}
   --tls-san {{ api_endpoint }}
+  --tls-san api.k3s.{{ base_domain }}
 
 # Agent Arguments
 extra_agent_args: ""
