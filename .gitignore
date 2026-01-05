@@ -1,5 +1,41 @@
-venv/
-.vscode/
+# Ansible
+*.retry
+*.log
 .ansible/
-.direnv
+.ansible-lint
+.molecule/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# Environment
+.direnv/
 .envrc
+.env
+
+# Terraform / Vagrant (if any)
+.terraform/
+*.tfstate
+*.tfstate.backup
+
+# Local Secrets (Safety net)
+*.pem
+*.key
+id_rsa
+id_ed25519
+vault_pass
+.vault_pass
+secret.yml
+secrets.yml
+argocd.json
+admin_password
+kubeconfig
+config

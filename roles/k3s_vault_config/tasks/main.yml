@@ -1,44 +1,14 @@
 ---
-- name: Deploy Cert-Manager HelmChart
-  ansible.builtin.template:
-    src: cert-manager.yaml.j2
-    dest: /var/lib/rancher/k3s/server/manifests/cert-manager.yaml
-    owner: root
-    group: root
-    mode: '0644'
+- name: Read K3s Server CA
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/tls/server-ca.crt
+  register: _k3s_ca_slurp
   become: true
   when: inventory_hostname == groups['server'][0]
 
-- name: Wait for Cert-Manager deployment
-  ansible.builtin.shell: |
-    kubectl -n {{ cert_manager_namespace }} rollout status deploy/cert-manager --timeout=300s
-  register: _cert_manager_wait
-  until: _cert_manager_wait is success
-  retries: 20
-  delay: 10
-  become: true
-  when: inventory_hostname == groups['server'][0]
-  changed_when: false
-
-- name: Deploy Vault Auth RBAC (Token Reviewer Binding)
-  ansible.builtin.template:
-    src: vault-auth-rbac.yaml.j2
-    dest: /var/lib/rancher/k3s/server/manifests/vault-auth-rbac.yaml
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
-  when: inventory_hostname == groups['server'][0]
-
-- name: Vault Configuration for K3s Integration
+- name: Vault API Configuration
   when: inventory_hostname == groups['server'][0]
   block:
-    - name: Read K3s Server CA
-      ansible.builtin.slurp:
-        src: /var/lib/rancher/k3s/server/tls/server-ca.crt
-      register: _k3s_ca_slurp
-      become: true
-
     - name: Check enabled auth methods in Vault
       ansible.builtin.uri:
         url: "https://{{ load_balancer_virtual_ip }}:8200/v1/sys/auth"
@@ -111,7 +81,7 @@
         body_format: json
         body:
           bound_service_account_names: ["cert-manager"]
-          bound_service_account_namespaces: ["{{ cert_manager_namespace }}"]
+          bound_service_account_namespaces: ["cert-manager"]
           policies: ["cert-manager"]
           ttl: "24h"
         validate_certs: false
@@ -119,38 +89,3 @@
       delegate_to: localhost
       become: false
       changed_when: true
-
-- name: Read CA Bundle for Vault Issuer
-  ansible.builtin.slurp:
-    src: "{{ tls_dir }}/ca-bundle.pem"
-  register: _ca_bundle_slurp
-  become: true
-  when: inventory_hostname == groups['server'][0]
-
-- name: Render Vault ClusterIssuer
-  ansible.builtin.template:
-    src: vault-issuer.yaml.j2
-    dest: /var/lib/rancher/k3s/server/manifests/vault-issuer.yaml
-    owner: root
-    group: root
-    mode: '0644'
-  vars:
-    ca_bundle_b64: "{{ _ca_bundle_slurp.content | default('') }}"
-  become: true
-  when: inventory_hostname == groups['server'][0]
-
-- name: Wait for Vault ClusterIssuer to be Ready
-  ansible.builtin.shell: |
-    kubectl get clusterissuer vault-issuer -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
-  register: _issuer_status
-  until: _issuer_status.stdout == "True"
-  retries: 30
-  delay: 10
-  become: true
-  when: inventory_hostname == groups['server'][0]
-  changed_when: false
-
-- name: Finalize process - output
-  ansible.builtin.debug:
-    msg: "cert-manager and vault integration is ready -> annotations to generate certs:
-     cert-manager.io/cluster-issuer: vault-issuer"

@@ -53,7 +53,7 @@ scrape_configs:
         labels:
           cluster: "k3s"
 
-{% if _prometheus_k3s_token_local is defined and _prometheus_k3s_token_local.stat.exists %}
+{% if enable_k3s_scraping | default(false) %}
   - job_name: 'kubernetes-nodes'
     scheme: https
     tls_config:

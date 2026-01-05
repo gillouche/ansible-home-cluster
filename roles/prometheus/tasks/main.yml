@@ -43,6 +43,10 @@
   changed_when: false
   failed_when: false
 
+- name: Set k3s scraping fact
+  ansible.builtin.set_fact:
+    enable_k3s_scraping: "{{ _prometheus_token_cmd.rc is defined and _prometheus_token_cmd.rc == 0 and _prometheus_token_cmd.stdout | length > 0 }}"
+
 - name: Deploy K3s token for Prometheus
   ansible.builtin.copy:
     content: "{{ _prometheus_token_cmd.stdout | trim }}"
@@ -51,27 +55,19 @@
     group: "{{ prometheus_group }}"
     mode: '0600'
   become: true
-  when:
-    - _prometheus_token_cmd.rc is defined
-    - _prometheus_token_cmd.rc == 0
-    - _prometheus_token_cmd.stdout | length > 0
+  when: enable_k3s_scraping
   notify: Restart prometheus
 
-- name: Remove K3s token if not available on cluster
+- name: Ensure K3s token file exists (empty) if scraping disabled
   ansible.builtin.file:
     path: "{{ prometheus_config_dir }}/k3s_token"
-    state: absent
+    state: touch
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_group }}"
+    mode: '0600'
   become: true
-  when:
-    - groups['server'] is defined and groups['server'] | length > 0
-    - (_prometheus_token_cmd.rc is not defined) or (_prometheus_token_cmd.rc != 0) or (_prometheus_token_cmd.stdout | length == 0)
+  when: not enable_k3s_scraping
   notify: Restart prometheus
-
-- name: Check for K3s token on Prometheus host
-  ansible.builtin.stat:
-    path: "{{ prometheus_config_dir }}/k3s_token"
-  register: _prometheus_k3s_token_local
-  become: true
 
 - name: Deploy prometheus configuration
   ansible.builtin.template:

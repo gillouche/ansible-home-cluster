@@ -32,6 +32,7 @@
       - rsync
       - less
       - unzip
+      - uboot-tools
       - iproute2        # provides ss, ip
       - iputils         # provides ping, arping
       - openssl         # tls debugging (s_client, x509)

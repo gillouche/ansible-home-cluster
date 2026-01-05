@@ -1,0 +1,47 @@
+---
+- name: Create ArgoCD namespace
+  ansible.builtin.command: kubectl create namespace {{ argocd_namespace }}
+  become: true
+  register: _argocd_ns
+  failed_when: _argocd_ns.rc != 0 and 'already exists' not in _argocd_ns.stderr
+  changed_when: _argocd_ns.rc == 0
+
+- name: Install ArgoCD HA ({{ argocd_version }})
+  ansible.builtin.command: >-
+    kubectl apply -n {{ argocd_namespace }}
+    -f https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/ha/install.yaml
+  become: true
+  register: _argocd_install
+  changed_when: "'created' in _argocd_install.stdout or 'configured' in _argocd_install.stdout"
+
+- name: Wait for ArgoCD server to be ready
+  ansible.builtin.shell: kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{ argocd_namespace }}
+  become: true
+  changed_when: false
+
+- name: Get ArgoCD Admin Password
+  ansible.builtin.shell: |
+    kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+  become: true
+  register: _argocd_password
+  changed_when: false
+
+- name: Ensure local storage directory exists
+  ansible.builtin.file:
+    path: "{{ argocd_credentials_file | dirname }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+
+- name: Save ArgoCD Password to JSON
+  ansible.builtin.copy:
+    content: "{{ {'admin_password': _argocd_password.stdout} | to_nice_json }}"
+    dest: "{{ argocd_credentials_file }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+
+- name: Print ArgoCD Password location
+  ansible.builtin.debug:
+    msg: "ArgoCD Admin Password saved to {{ argocd_credentials_file }}"

@@ -51,35 +51,3 @@
     group: longhorn
   become: true
   when: inventory_hostname in groups['agent_storage']
-
-
-- name: Deploy Longhorn HelmChart manifest (on first server)
-  ansible.builtin.template:
-    src: longhorn-helmchart.yaml.j2
-    dest: /var/lib/rancher/k3s/server/manifests/longhorn.yaml
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
-  when: inventory_hostname == groups['server'][0]
-
-- name: Deploy Longhorn Ingress manifest
-  ansible.builtin.template:
-    src: longhorn-ingress.yaml.j2
-    dest: /var/lib/rancher/k3s/server/manifests/longhorn-ingress.yaml
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
-  when: inventory_hostname == groups['server'][0]
-
-- name: Wait for Longhorn deployment to be successful
-  ansible.builtin.shell: |
-    kubectl wait --for=condition=complete --timeout=600s job/helm-install-longhorn -n kube-system
-  register: _longhorn_wait
-  until: _longhorn_wait is success
-  retries: 10
-  delay: 5
-  become: true
-  when: inventory_hostname == groups['server'][0]
-  changed_when: false

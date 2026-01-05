@@ -60,26 +60,11 @@
   roles:
     - role: k3s_labels
 
-- name: Configure K3s Traefik
-  hosts: server
-  become: true
-  tags: [k3s, k3s_server, traefik]
-  roles:
-    - role: k3s_traefik
-
-- name: Deploy K3s Monitoring (metrics-server, kube-state-metrics)
-  hosts: server
+- name: Configure Vault Integration (Kubernetes Auth)
+  hosts: server[0]
   gather_facts: true
   become: true
-  tags: [k3s, k3s_monitoring]
-  roles:
-    - role: k3s_monitoring
-
-- name: Deploy K3s Certs (Cert-Manager, Vault Issuer)
-  hosts: server
-  gather_facts: true
-  become: true
-  tags: [k3s, k3s_certs]
+  tags: [k3s, k3s_vault_config]
   pre_tasks:
     - name: Load cluster init JSON # noqa: run-once
       ansible.builtin.slurp:
@@ -94,29 +79,21 @@
         vault_root_token: "{{ (_cluster_init_content.content | b64decode | from_json).root_token }}"
       when: _cluster_init_content.content is defined
   roles:
-    - role: k3s_certs
+    - role: k3s_vault_config
 
-- name: Deploy K3s Security (Namespace restriction, Gatekeeper)
-  hosts: server
-  gather_facts: true
-  become: true
-  tags: [k3s, k3s_security]
-  roles:
-    - role: k3s_security
-
-- name: Deploy Longhorn
+- name: Setup Longhorn OS Dependencies
   hosts: k3s_cluster
   gather_facts: true
   become: true
-  tags: [k3s, longhorn]
+  tags: [k3s, k3s_longhorn]
   roles:
-    - role: longhorn
+    - role: k3s_longhorn
 
 - name: Update Prometheus configuration with K3s token
   hosts: prometheus
   gather_facts: true
   become: false
-  tags: [k3s, k3s_monitoring, prometheus]
+  tags: [k3s, k3s_monitoring, k3s_prometheus]
   roles:
     - role: prometheus
 
@@ -186,3 +163,10 @@
           Kubeconfig saved to {{ ansible_env.HOME }}/.kube/k3s.yaml (context: k3s).
           To use it, run: export KUBECONFIG={{ ansible_env.HOME }}/.kube/config:{{ ansible_env.HOME }}/.kube/k3s.yaml
           or add that line to your shell profile.
+
+- name: Deploy ArgoCD (GitOps Bootstrap)
+  hosts: server[0]
+  become: true
+  tags: [k3s, k3s_argocd]
+  roles:
+    - role: k3s_argocd
