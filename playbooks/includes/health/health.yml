@@ -133,6 +133,16 @@
       register: _lb_traefik_health_check
       failed_when: false
 
+    - name: Verify ArgoCD via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/"
+        method: GET
+        headers:
+          Host: "argocd.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_argocd_health_check
+      failed_when: false
+
 - name: "Reverse Proxy Health Check"
   hosts: edge_proxy_cluster
   gather_facts: true
@@ -516,6 +526,21 @@
       ansible.builtin.set_fact:
         _external_dashboard_ready:
           status: "{{ _external_dashboard_ready_cmd.stdout | int }}"
+
+    - name: Verify ArgoCD via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -L --silent --output /dev/null --write-out "%{http_code}"
+        --cacert {{ homelab_ca_bundle_path | expanduser }}
+        --resolve argocd.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://argocd.k3s.{{ base_domain }}
+      register: _external_argocd_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set ArgoCD status fact
+      ansible.builtin.set_fact:
+        _external_argocd_ready:
+          status: "{{ _external_argocd_ready_cmd.stdout | int }}"
 
 - name: "K3s Cluster Health Check"
   hosts: server
