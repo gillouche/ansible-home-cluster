@@ -19,6 +19,7 @@ pihole_image: pihole/pihole:2025.11.1
 pihole_dns_wildcard_domains:
   - "{{ base_domain }}"
   - "pihole.{{ base_domain }}"
+  - "k3s.{{ base_domain }}"
 
 # Optional: custom DNS A records
 pihole_custom_dns_records: []
