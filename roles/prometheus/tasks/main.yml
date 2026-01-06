@@ -45,7 +45,12 @@
 
 - name: Set k3s scraping fact
   ansible.builtin.set_fact:
-    enable_k3s_scraping: "{{ _prometheus_token_cmd.rc is defined and _prometheus_token_cmd.rc == 0 and _prometheus_token_cmd.stdout | length > 0 }}"
+    enable_k3s_scraping: >-
+      {{
+      _prometheus_token_cmd.rc is defined and
+      _prometheus_token_cmd.rc == 0 and
+      _prometheus_token_cmd.stdout | length > 0
+      }}
 
 - name: Deploy K3s token for Prometheus
   ansible.builtin.copy:

@@ -15,12 +15,13 @@
   changed_when: "'created' in _argocd_install.stdout or 'configured' in _argocd_install.stdout"
 
 - name: Wait for ArgoCD server to be ready
-  ansible.builtin.shell: kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{ argocd_namespace }}
+  ansible.builtin.command: kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{ argocd_namespace }}
   become: true
   changed_when: false
 
 - name: Get ArgoCD Admin Password
   ansible.builtin.shell: |
+    set -o pipefail
     kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
   become: true
   register: _argocd_password
