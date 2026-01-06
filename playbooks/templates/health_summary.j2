@@ -114,6 +114,16 @@
         if (hostvars[host]._lb_argocd_health_check.status | default(0)) == 200
         else bad('DOWN')
       }}
+      Goldilocks:     {{
+        ok('UP')
+        if (hostvars[host]._lb_goldilocks_health_check.status | default(0)) == 200
+        else bad('DOWN')
+      }}
+      Homepage:       {{
+        ok('UP')
+        if (hostvars[host]._lb_homepage_health_check.status | default(0)) == 200
+        else bad('DOWN')
+      }}
 {% endfor %}
 
   {{ CYAN }}> Edge Proxy ({{ groups['edge_proxy_cluster'] | join(', ') }}){{ RESET }}
@@ -231,5 +241,7 @@
   Longhorn:        {{ CYAN }}https://longhorn.k3s.{{ base_domain }}{{ RESET }}
   Dashboard:       {{ CYAN }}https://dashboard.k3s.{{ base_domain }}{{ RESET }}
   ArgoCD:          {{ CYAN }}https://argocd.k3s.{{ base_domain }}{{ RESET }}
+  Goldilocks:      {{ CYAN }}https://goldilocks.k3s.{{ base_domain }}{{ RESET }}
+  Homepage:        {{ CYAN }}https://homepage.k3s.{{ base_domain }}{{ RESET }}
 
 ================================================================================

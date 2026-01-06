@@ -58,6 +58,12 @@ load_balancer_haproxy_frontends:
       # ACLs for Kube State Metrics
       - "acl is_ksm hdr(host) -i ksm.k3s.{{ base_domain }}"
 
+      # ACLs for Goldilocks
+      - "acl is_goldilocks hdr(host) -i goldilocks.k3s.{{ base_domain }}"
+
+      # ACLs for Homepage
+      - "acl is_homepage hdr(host) -i homepage.k3s.{{ base_domain }}"
+
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
       - "use_backend pihole_replica2 if is_pihole_replica2"
@@ -92,6 +98,12 @@ load_balancer_haproxy_frontends:
 
       # Routing Logic for Kube State Metrics
       - "use_backend kube_state_metrics_back if is_ksm"
+
+      # Routing Logic for Goldilocks
+      - "use_backend goldilocks_backend if is_goldilocks"
+
+      # Routing Logic for Homepage
+      - "use_backend homepage_backend if is_homepage"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
@@ -296,6 +308,24 @@ load_balancer_haproxy_backends:
 
   # ArgoCD Backend
   - name: argocd_backend
+    mode: http
+    balance: roundrobin
+    servers:
+      - name: k3s_lb
+        addr: "{{ k3s_lb_vip }}"
+        port: 9000
+
+  # Goldilocks Backend
+  - name: goldilocks_backend
+    mode: http
+    balance: roundrobin
+    servers:
+      - name: k3s_lb
+        addr: "{{ k3s_lb_vip }}"
+        port: 9000
+
+  # Homepage Backend
+  - name: homepage_backend
     mode: http
     balance: roundrobin
     servers:

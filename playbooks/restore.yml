@@ -155,6 +155,7 @@
   gather_facts: false
   become: true
   tags: [infra, k3s]
+  serial: 1
   tasks:
     - name: Start K3s Service
       ansible.builtin.systemd:
