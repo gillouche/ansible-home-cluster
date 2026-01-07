@@ -102,15 +102,6 @@ all:
     artifactory:
       hosts:
         rpi5b16g1ssd:
-    prometheus:
-      hosts:
-        rpi5b16g2ssd:
-    loki:
-      hosts:
-        rpi5b16g3ssd:
-    grafana:
-      hosts:
-        rpi5b16g1ssd:
     firefly:
       hosts:
         rpi5b8g1:

@@ -138,6 +138,23 @@
       changed_when: _start_postgres.rc == 0
       failed_when: false
 
+    - name: Wait for Postgres to be ready
+      ansible.builtin.command: podman exec postgres pg_isready
+      register: _pg_isready
+      until: _pg_isready.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: Fix Kine sequence
+      ansible.builtin.command: >-
+        podman exec -e PGPASSWORD="{{ global_k3s_db_password }}" postgres
+        psql -U {{ global_k3s_db_user | default('k3s') }}
+        -d {{ global_k3s_db_name | default('kubernetes') }}
+        -c "SELECT setval('kine_id_seq', (SELECT MAX(id) FROM kine));"
+      changed_when: true
+      no_log: true
+
 - name: "Restore Nexus"
   hosts: artifactory
   gather_facts: false
@@ -222,35 +239,7 @@
       run_once: true
       changed_when: false
 
-# 5. Monitoring Stack
-- name: "Restore Monitoring Stack"
-  hosts: prometheus:loki:grafana
-  gather_facts: false
-  become: true
-  tags: [monitoring]
-  tasks:
-    - name: Start Prometheus
-      ansible.builtin.command: podman start prometheus
-      when: inventory_hostname in groups['prometheus']
-      register: _start_prom
-      changed_when: _start_prom.rc == 0
-      failed_when: false
-
-    - name: Start Loki
-      ansible.builtin.command: podman start loki
-      when: inventory_hostname in groups['loki']
-      register: _start_loki
-      changed_when: _start_loki.rc == 0
-      failed_when: false
-
-    - name: Start Grafana
-      ansible.builtin.command: podman start grafana
-      when: inventory_hostname in groups['grafana']
-      register: _start_grafana
-      changed_when: _start_grafana.rc == 0
-      failed_when: false
-
-# 6. Applications
+# 5. Applications
 - name: "Restore Applications"
   hosts: firefly
   gather_facts: false
@@ -263,26 +252,7 @@
       changed_when: _start_firefly.rc == 0
       failed_when: false
 
-# 7. Agents (Run last to ensure they can push to restored stack)
-- name: "Restore Node Agents"
-  hosts: all
-  gather_facts: false
-  become: true
-  tags: [agents]
-  tasks:
-    - name: Start Node Exporter
-      ansible.builtin.command: podman start node-exporter
-      register: _start_ne
-      changed_when: _start_ne.rc == 0
-      failed_when: false
-
-    - name: Start Promtail
-      ansible.builtin.command: podman start promtail
-      register: _start_pt
-      changed_when: _start_pt.rc == 0
-      failed_when: false
-
-# 8. Wait for Services to Settle
+# 6. Wait for Services to Settle
 - name: "Wait for Services to Settle"
   hosts: localhost
   gather_facts: false

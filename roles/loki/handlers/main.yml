@@ -1,8 +1,0 @@
----
-- name: Restart loki
-  containers.podman.podman_container:
-    name: "{{ loki_container_name }}"
-    image: "{{ loki_image }}"
-    state: started
-    restart: yes
-  become: true

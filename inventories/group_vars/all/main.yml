@@ -24,8 +24,6 @@ k3s_service_cidr: "10.43.0.0/16"
 
 # Software Versions (Shared Agents)
 # ----------------------------------------
-loki_promtail_image: docker.io/grafana/promtail:3.6.3
-prometheus_node_exporter_image: prom/node-exporter:v1.10.2
 
 # Vault trust/CA distribution (controller + hosts)
 vault_install_root_ca_on_hosts: true
@@ -86,9 +84,3 @@ vault_edge_proxy_token_path: "{{ vault_init_export_path | dirname }}/edge_proxy_
 tls_root_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-root-ca.pem"
 tls_intermediate_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-intermediate-ca.pem"
 tls_bundle_anchor_path: "/etc/ca-certificates/trust-source/anchors/ca-bundle.pem"
-
-# Monitoring
-prometheus_node_exporter_port: 9100
-loki_port: 3100
-loki_promtail_http_listen_port: 9080
-kube_state_metrics_node_port: 30081

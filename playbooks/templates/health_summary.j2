@@ -94,6 +94,16 @@
         if (hostvars[host]._lb_vault_health_check.status | default(0)) in [200, 429]
         else bad('DOWN')
       }}
+      Prometheus:    {{
+        ok('UP')
+        if (hostvars[host]._lb_prometheus_health_check.status | default(0)) == 200
+        else bad('DOWN')
+      }}
+      Alertmanager:  {{
+        ok('UP')
+        if (hostvars[host]._lb_alertmanager_health_check.status | default(0)) == 200
+        else bad('DOWN')
+      }}
       K3s API:       {{
         ok('UP')
         if (hostvars[host]._lb_k3s_api_health_check.status | default(0)) in [200, 401]
@@ -114,6 +124,16 @@
         if (hostvars[host]._lb_argocd_health_check.status | default(0)) == 200
         else bad('DOWN')
       }}
+      Grafana:        {{
+        ok('UP')
+        if (hostvars[host]._lb_grafana_health_check.status | default(0)) == 200
+        else bad('DOWN')
+      }}
+      Loki:           {{
+        ok('UP')
+        if (hostvars[host]._lb_loki_health_check.status | default(0)) == 200
+        else bad('DOWN')
+      }}
       Goldilocks:     {{
         ok('UP')
         if (hostvars[host]._lb_goldilocks_health_check.status | default(0)) == 200
@@ -121,7 +141,17 @@
       }}
       Homepage:       {{
         ok('UP')
-        if (hostvars[host]._lb_homepage_health_check.status | default(0)) == 200
+        if (hostvars[host]._lb_homepage_health_check.status | default(0)) in [200]
+        else bad('DOWN')
+      }}
+      Seaweed Filer:  {{
+        ok('UP')
+        if (hostvars[host]._lb_seaweedfs_filer_health_check.status | default(0)) == 200
+        else bad('DOWN')
+      }}
+      Seaweed S3:     {{
+        ok('UP')
+        if (hostvars[host]._lb_seaweedfs_s3_health_check.status | default(0)) in [200, 403]
         else bad('DOWN')
       }}
 {% endfor %}
@@ -167,41 +197,8 @@
 {% endfor %}
 
 {{ BOLD }}[ MONITORING ]{{ RESET }}
-  {{ CYAN }}> Prometheus ({{ groups['prometheus'] | join(', ') }}){{ RESET }}
-{% for host in groups['prometheus'] | sort %}
-    {{ host }}:
-      Healthy:          {{
-        ok('YES')
-        if hostvars[host]._prometheus_health.status | default(0) == 200
-        else bad('NO')
-      }}
-      Ready:            {{
-        ok('YES')
-        if hostvars[host]._prometheus_ready.status | default(0) == 200
-        else bad('NO')
-      }}
-{% endfor %}
-
-  {{ CYAN }}> Loki ({{ groups['loki'] | join(', ') }}){{ RESET }}
-{% for host in groups['loki'] | sort %}
-    {{ host }}:
-      Ready:            {{
-        ok('YES')
-        if hostvars[host]._loki_ready.status | default(0) == 200
-        else bad('NO')
-      }}
-{% endfor %}
-
-  {{ CYAN }}> Grafana ({{ groups['grafana'] | join(', ') }}){{ RESET }}
-{% for host in groups['grafana'] | sort %}
-    {{ host }}:
-      Status:           {{
-        ok('UP')
-        if hostvars[host]._grafana_health.json.database | default('') == 'ok'
-        else bad('DOWN')
-      }}
-      Datasources:      {{ hostvars[host]._grafana_datasources.json | default([]) | length }}
-{% endfor %}
+  {{ CYAN }}> Prometheus Stack (K3s Managed){{ RESET }}
+    Use the Load Balancer section above for individual service status.
 
 {{ BOLD }}[ APPLICATIONS ]{{ RESET }}
   {{ CYAN }}> Firefly III ({{ groups['firefly'] | join(', ') }}){{ RESET }}
@@ -230,9 +227,10 @@
 
 {{ BOLD }}[ SERVICE URLS ]{{ RESET }}
   Vault:           {{ CYAN }}https://vault.{{ base_domain }}{{ RESET }}
-  Prometheus:      {{ CYAN }}https://prometheus.{{ base_domain }}{{ RESET }}
-  Loki:            {{ CYAN }}https://loki.{{ base_domain }}/ready{{ RESET }}
-  Grafana:         {{ CYAN }}https://grafana.{{ base_domain }}{{ RESET }}
+  Prometheus:      {{ CYAN }}https://prometheus.k3s.{{ base_domain }}{{ RESET }}
+  Alertmanager:    {{ CYAN }}https://alertmanager.k3s.{{ base_domain }}{{ RESET }}
+  Loki:            {{ CYAN }}https://loki.k3s.{{ base_domain }}/ready{{ RESET }}
+  Grafana:         {{ CYAN }}https://grafana.k3s.{{ base_domain }}{{ RESET }}
   Firefly:         {{ CYAN }}https://firefly.{{ base_domain }}{{ RESET }}
   Pi-hole Pri:     {{ CYAN }}https://primary.pihole.{{ base_domain }}{{ RESET }}
   Pi-hole Rep1:    {{ CYAN }}https://replica1.pihole.{{ base_domain }}{{ RESET }}
@@ -243,5 +241,7 @@
   ArgoCD:          {{ CYAN }}https://argocd.k3s.{{ base_domain }}{{ RESET }}
   Goldilocks:      {{ CYAN }}https://goldilocks.k3s.{{ base_domain }}{{ RESET }}
   Homepage:        {{ CYAN }}https://homepage.k3s.{{ base_domain }}{{ RESET }}
+  Seaweed Filer:   {{ CYAN }}https://seaweedfs-filer.k3s.{{ base_domain }}{{ RESET }}
+  Seaweed S3:      {{ CYAN }}https://seaweedfs-s3.k3s.{{ base_domain }}{{ RESET }}
 
 ================================================================================

@@ -1,7 +1,0 @@
----
-- name: Restart grafana
-  containers.podman.podman_container:
-    name: "{{ grafana_container_name }}"
-    state: started
-    restart: true
-  become: true

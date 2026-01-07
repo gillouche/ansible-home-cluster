@@ -115,6 +115,46 @@
       register: _lb_k3s_api_health_check
       failed_when: false
 
+    - name: Verify Prometheus via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/-/healthy"
+        method: GET
+        headers:
+          Host: "prometheus.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_prometheus_health_check
+      failed_when: false
+
+    - name: Verify Alertmanager via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/#/status"
+        method: GET
+        headers:
+          Host: "alertmanager.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_alertmanager_health_check
+      failed_when: false
+
+    - name: Verify Grafana via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/api/health"
+        method: GET
+        headers:
+          Host: "grafana.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_grafana_health_check
+      failed_when: false
+
+    - name: Verify Loki via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/ready"
+        method: GET
+        headers:
+          Host: "loki.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_loki_health_check
+      failed_when: false
+
     - name: Verify kube-state-metrics via LB VIP (HAProxy)
       ansible.builtin.uri:
         url: "http://{{ load_balancer_virtual_ip }}/metrics"
@@ -161,6 +201,26 @@
           Host: "homepage.k3s.{{ base_domain }}"
         status_code: [200]
       register: _lb_homepage_health_check
+      failed_when: false
+
+    - name: Verify SeaweedFS Filer via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/"
+        method: GET
+        headers:
+          Host: "seaweedfs-filer.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_seaweedfs_filer_health_check
+      failed_when: false
+
+    - name: Verify SeaweedFS S3 via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/"
+        method: GET
+        headers:
+          Host: "seaweedfs-s3.k3s.{{ base_domain }}"
+        status_code: [200, 403]
+      register: _lb_seaweedfs_s3_health_check
       failed_when: false
 
 - name: "Reverse Proxy Health Check"
@@ -211,133 +271,6 @@
       register: _nexus_metrics
       failed_when: false
 
-- name: "Prometheus Health Check"
-  hosts: prometheus
-  gather_facts: true
-  become: false
-  tags: [health, health_prometheus]
-  vars_files:
-    - ../../../roles/prometheus/defaults/main.yml
-  tasks:
-    - name: Query Prometheus Health
-      ansible.builtin.uri:
-        url: "http://localhost:{{ prometheus_port }}/-/healthy"
-        method: GET
-        status_code: 200
-      register: _prometheus_health
-      failed_when: false
-
-    - name: Query Prometheus Ready
-      ansible.builtin.uri:
-        url: "http://localhost:{{ prometheus_port }}/-/ready"
-        method: GET
-        status_code: 200
-      register: _prometheus_ready
-      failed_when: false
-
-- name: "Node Exporter Health Check"
-  hosts: all
-  gather_facts: true
-  become: false
-  tags: [health, health_node_exporter]
-  vars_files:
-    - ../../../roles/prometheus_node_exporter/defaults/main.yml
-  tasks:
-    - name: Query Node Exporter Metrics
-      ansible.builtin.uri:
-        url: "http://localhost:{{ prometheus_node_exporter_port }}/metrics"
-        method: GET
-        status_code: 200
-      register: _node_exporter_status
-      failed_when: false
-
-- name: "Promtail Health Check"
-  hosts: all
-  gather_facts: true
-  become: false
-  tags: [health, health_promtail]
-  vars_files:
-    - ../../../roles/loki_promtail/defaults/main.yml
-  tasks:
-    - name: Query Promtail Health
-      ansible.builtin.uri:
-        url: "http://localhost:{{ loki_promtail_http_listen_port }}/ready"
-        method: GET
-        status_code: 200
-      register: _promtail_ready
-      failed_when: false
-
-- name: "Loki Health Check"
-  hosts: loki
-  gather_facts: true
-  become: false
-  tags: [health, health_loki]
-  vars_files:
-    - ../../../roles/loki/defaults/main.yml
-  tasks:
-    - name: Query Loki Ready
-      ansible.builtin.uri:
-        url: "http://localhost:{{ loki_port }}/ready"
-        method: GET
-        status_code: 200
-      register: _loki_ready
-      failed_when: false
-
-    - name: Query Loki Log Level
-      ansible.builtin.uri:
-        url: "http://localhost:{{ loki_port }}/log_level"
-        method: GET
-        status_code: 200
-      register: _loki_log_level
-      failed_when: false
-
-    - name: Query Loki Build Info
-      ansible.builtin.uri:
-        url: "http://localhost:{{ loki_port }}/loki/api/v1/status/buildinfo"
-        method: GET
-        status_code: 200
-      register: _loki_build_info
-      failed_when: false
-
-- name: "Grafana Health Check"
-  hosts: grafana
-  gather_facts: true
-  become: false
-  tags: [health, health_grafana]
-  vars_files:
-    - ../../../roles/grafana/defaults/main.yml
-    - ../../../inventories/group_vars/grafana/vault.yml
-  tasks:
-    - name: Query Grafana Health (Basic)
-      ansible.builtin.uri:
-        url: "http://localhost:{{ grafana_port }}/api/health"
-        method: GET
-        status_code: 200
-      register: _grafana_health
-      failed_when: false
-
-    - name: Query Grafana Datasources
-      ansible.builtin.uri:
-        url: "http://localhost:{{ grafana_port }}/api/datasources"
-        method: GET
-        user: "{{ grafana_admin_user }}"
-        password: "{{ grafana_admin_password }}"
-        force_basic_auth: true
-        status_code: 200
-      register: _grafana_datasources
-      failed_when: false
-
-    - name: Query Grafana Alert Rules
-      ansible.builtin.uri:
-        url: "http://localhost:{{ grafana_port }}/api/prometheus/grafana/api/v1/rules"
-        method: GET
-        user: "{{ grafana_admin_user }}"
-        password: "{{ grafana_admin_password }}"
-        force_basic_auth: true
-        status_code: 200
-      register: _grafana_alerts
-      failed_when: false
-
 - name: "Firefly Health Check"
   hosts: firefly
   gather_facts: true
@@ -386,8 +319,8 @@
       ansible.builtin.command: >-
         curl --silent --output /dev/null --write-out "%{http_code}"
         --cacert {{ homelab_ca_bundle_path | expanduser }}
-        --resolve prometheus.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
-        https://prometheus.{{ base_domain }}/-/healthy
+        --resolve prometheus.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://prometheus.k3s.{{ base_domain }}/-/healthy
       register: _external_prometheus_ready_cmd
       changed_when: false
       failed_when: false
@@ -401,8 +334,8 @@
       ansible.builtin.command: >-
         curl --silent --output /dev/null --write-out "%{http_code}"
         --cacert {{ homelab_ca_bundle_path | expanduser }}
-        --resolve loki.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
-        https://loki.{{ base_domain }}/ready
+        --resolve loki.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://loki.k3s.{{ base_domain }}/ready
       register: _external_loki_ready_cmd
       changed_when: false
       failed_when: false
@@ -416,8 +349,8 @@
       ansible.builtin.command: >-
         curl --silent --output /dev/null --write-out "%{http_code}"
         --cacert {{ homelab_ca_bundle_path | expanduser }}
-        --resolve grafana.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
-        https://grafana.{{ base_domain }}/api/health
+        --resolve grafana.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://grafana.k3s.{{ base_domain }}/api/health
       register: _external_grafana_ready_cmd
       changed_when: false
       failed_when: false

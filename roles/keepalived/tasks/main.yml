@@ -6,6 +6,7 @@
     gather_subset:
       - min
   when: ansible_distribution is not defined
+  tags: [always]
 
 - name: Ensure keepalived is installed (Arch)
   community.general.pacman:
@@ -13,6 +14,7 @@
     state: present
   become: true
   when: (ansible_facts['distribution'] | lower) == 'archlinux'
+  tags: [always]
 
 - name: Ensure keepalived conf.d directory exists
   ansible.builtin.file:
@@ -22,6 +24,7 @@
     group: root
     mode: '0755'
   become: true
+  tags: [always]
 
 - name: Normalize keepalived main configuration (include conf.d)
   ansible.builtin.copy:
@@ -35,15 +38,17 @@
       }
       include /etc/keepalived/conf.d/*.conf
   become: true
+  tags: [always]
 
-- name: Ensure non-local bind is enabled for services on VIP (recommended)
+- name: Ensure non-local bind is enabled for services on VIP
   ansible.posix.sysctl:
     name: net.ipv4.ip_nonlocal_bind
     value: '1'
     state: present
-    sysctl_set: true
+    sysctl_file: /etc/sysctl.d/90-keepalived.conf
     reload: true
   become: true
+  tags: [always]
 
 - name: Enable and start keepalived
   ansible.builtin.systemd:
@@ -52,3 +57,4 @@
     enabled: true
     daemon_reload: true
   become: true
+  tags: [always]

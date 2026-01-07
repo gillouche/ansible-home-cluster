@@ -89,14 +89,6 @@
   roles:
     - role: k3s_longhorn
 
-- name: Update Prometheus configuration with K3s token
-  hosts: prometheus
-  gather_facts: true
-  become: false
-  tags: [k3s, k3s_monitoring, k3s_prometheus]
-  roles:
-    - role: prometheus
-
 - name: Fetch K3s Kubeconfig
   hosts: server[0]
   become: true

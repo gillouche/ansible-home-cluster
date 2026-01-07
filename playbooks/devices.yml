@@ -19,14 +19,10 @@
 - name: Infrastructure Setup
   import_playbook: includes/setup/infrastructure.yml
 
-# 5. Monitoring: prometheus, loki, exporters, grafana
-- name: Monitoring Setup
-  import_playbook: includes/setup/monitoring.yml
-
-# 6. Applications: Firefly
+# 5. Applications: Firefly
 - name: Applications Setup
   import_playbook: includes/setup/apps.yml
 
-# 7. k3s: k3s cluster
+# 6. k3s: k3s cluster
 - name: K3s install
   import_playbook: includes/setup/k3s.yml
