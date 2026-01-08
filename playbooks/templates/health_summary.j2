@@ -12,6 +12,7 @@
 {% macro ok(text='OK') %}{{ GREEN }}{{ text }}{{ RESET }}{% endmacro %}
 {% macro warn(text='WARN') %}{{ YELLOW }}{{ text }}{{ RESET }}{% endmacro %}
 {% macro bad(text='DOWN') %}{{ RED }}{{ text }}{{ RESET }}{% endmacro %}
+{% macro cyan(text='') %}{{ CYAN }}{{ text }}{{ RESET }}{% endmacro %}
 {% macro yes() %}{{ ok('YES') }}{% endmacro %}
 {% macro no() %}{{ bad('NO') }}{% endmacro %}
 
@@ -199,6 +200,24 @@
 {{ BOLD }}[ MONITORING ]{{ RESET }}
   {{ CYAN }}> Prometheus Stack (K3s Managed){{ RESET }}
     Use the Load Balancer section above for individual service status.
+
+{{ BOLD }}[ LONGHORN STORAGE ]{{ RESET }}
+  {{ CYAN }}> Clusters & Volumes{{ RESET }}
+{% set lh_nodes_data = hostvars[groups['server'][0]]._longhorn_nodes_json.stdout | default('{"items":[]}') | from_json %}
+{% set lh_nodes = lh_nodes_data['items'] | default([]) %}
+{% set lh_vols_data = hostvars[groups['server'][0]]._longhorn_volumes_json.stdout | default('{"items":[]}') | from_json %}
+{% set lh_vols = lh_vols_data['items'] | default([]) %}
+{% set healthy_vols = lh_vols | selectattr('status.robustness', 'equalto', 'healthy') | list | length %}
+{% set detached_vols = lh_vols | selectattr('status.state', 'equalto', 'detached') | list | length %}
+{% set degraded_vols = lh_vols | selectattr('status.robustness', 'equalto', 'degraded') | list | length %}
+{% set faulted_vols = lh_vols | selectattr('status.robustness', 'equalto', 'faulted') | list | length %}
+    Volumes:       {{ ok(healthy_vols ~ ' Healthy') }}, {{ cyan(detached_vols ~ ' Detached') if detached_vols > 0 else '0 Detached' }}, {{ warn(degraded_vols ~ ' Degraded') if degraded_vols > 0 else '0 Degraded' }}, {{ bad(faulted_vols ~ ' Faulted') if faulted_vols > 0 else '0 Faulted' }} (Total: {{ lh_vols | length }})
+    Nodes Status:
+{% for node in lh_nodes | sort(attribute='metadata.name') %}
+{%   set ready_cond = node.status.conditions | default([]) | selectattr('type', 'equalto', 'Ready') | first | default({'status': 'False'}) %}
+{%   set schedulable = node.spec.allowScheduling | default(false) %}
+      - {{ node.metadata.name }}: {{ ok('Ready') if ready_cond.status == 'True' else bad('NotReady') }}, {{ ok('Schedulable') if schedulable else warn('Unscheduled') }}
+{% endfor %}
 
 {{ BOLD }}[ APPLICATIONS ]{{ RESET }}
   {{ CYAN }}> Firefly III ({{ groups['firefly'] | join(', ') }}){{ RESET }}
