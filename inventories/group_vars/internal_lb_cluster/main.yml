@@ -182,19 +182,21 @@ load_balancer_haproxy_backends:
   - name: k3s_api_backend_https
     mode: http
     balance: roundrobin
+    httpchk: "GET /healthz"
+    http_check_expect: "status 401"
     servers:
       - name: k3s_server1
         addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
         port: "{{ global_k3s_api_port }}"
-        opts: "check check-ssl verify none ssl verify none"
+        opts: "check check-ssl verify none ssl"
       - name: k3s_server2
         addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
         port: "{{ global_k3s_api_port }}"
-        opts: "check check-ssl verify none ssl verify none"
+        opts: "check check-ssl verify none ssl"
       - name: k3s_server3
         addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: "{{ global_k3s_api_port }}"
-        opts: "check check-ssl verify none ssl verify none"
+        opts: "check check-ssl verify none ssl"
 
   # Pi-hole Backends
   - name: pihole_primary
