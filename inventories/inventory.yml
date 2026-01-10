@@ -146,6 +146,8 @@ all:
                 storage: ssd
                 gpu: false
                 node.longhorn.io/create-default-disk: "true"
+              k3s_node_taints:
+                - "CriticalAddonsOnly=true:PreferNoSchedule"
             rpi5b16g2ssd:
               k3s_node_labels:
                 node-class: rpi5
@@ -153,6 +155,8 @@ all:
                 storage: ssd
                 gpu: false
                 node.longhorn.io/create-default-disk: "true"
+              k3s_node_taints:
+                - "CriticalAddonsOnly=true:PreferNoSchedule"
             rpi5b16g3ssd:
               k3s_node_labels:
                 node-class: rpi5
@@ -160,6 +164,8 @@ all:
                 storage: ssd
                 gpu: false
                 node.longhorn.io/create-default-disk: "true"
+              k3s_node_taints:
+                - "CriticalAddonsOnly=true:PreferNoSchedule"
         agent:
           hosts:
             rpi4b8g1:

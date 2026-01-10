@@ -57,3 +57,26 @@
   loop: "{{ k3s_labels_to_apply | from_json }}"
   become: true
   changed_when: false
+
+- name: Prepare K3s node taints list
+  ansible.builtin.set_fact:
+    k3s_taints_to_apply: |
+      {% set results = [] %}
+      {% for host in groups['k3s_cluster'] %}
+        {% if hostvars[host]['k3s_node_taints'] is defined %}
+          {% for taint in hostvars[host]['k3s_node_taints'] %}
+            {% set _ = results.append({'host': host, 'taint': taint}) %}
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
+      {{ results | to_json }}
+  run_once: true
+
+- name: Apply K3s node taints from inventory
+  ansible.builtin.shell: |
+    kubectl taint node {{ item.host }} {{ item.taint }} --overwrite
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  loop: "{{ k3s_taints_to_apply | from_json }}"
+  become: true
+  changed_when: false
