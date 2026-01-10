@@ -73,6 +73,15 @@
     mode: '0755'
   become: true
 
+- name: Ensure HAProxy conf.d directory exists
+  ansible.builtin.file:
+    path: /etc/haproxy/conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
 - name: Render HAProxy configuration
   ansible.builtin.template:
     src: haproxy.cfg.j2
@@ -83,11 +92,34 @@
   notify: Restart haproxy
   become: true
 
+- name: Ensure HAProxy systemd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/{{ load_balancer_haproxy_service }}.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Install HAProxy systemd drop-in configuration
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/{{ load_balancer_haproxy_service }}.service.d/conf-d.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy.cfg -f /etc/haproxy/conf.d/ -p /run/haproxy.pid
+  become: true
+  notify: Reload systemd
+
 - name: Enable and start HAProxy service
-  ansible.builtin.service:
+  ansible.builtin.systemd:
     name: "{{ load_balancer_haproxy_service }}"
     state: started
     enabled: true
+    daemon_reload: true
   become: true
 
 - name: Install HAProxy CA watch service

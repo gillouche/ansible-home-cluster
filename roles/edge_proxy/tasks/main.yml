@@ -181,7 +181,7 @@
     image: "{{ reverse_proxy_image }}"
     state: started
     restart_policy: unless-stopped
-    recreate: false
+    recreate: true
     user: 0
     network_mode: host
     env: >-
@@ -193,10 +193,23 @@
       - "{{ reverse_proxy_config_dir }}/Caddyfile:/etc/caddy/Caddyfile"
       - "{{ reverse_proxy_data_dir }}:/data"
       - "{{ reverse_proxy_certs_dir }}/ca-bundle.pem:/etc/ssl/certs/internal-ca-bundle.pem"
+    generate_systemd:
+      path: /etc/systemd/system/
+      restart_policy: always
+      names: true
   become: true
+  notify: Restart reverse proxy
 
-- name: Sync logic for Replicas
+- name: Enable and start Reverse Proxy systemd service
+  ansible.builtin.systemd:
+    name: "container-{{ reverse_proxy_container_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
   when: not reverse_proxy_is_primary | bool
+
+- name: Clean up old rsync components
   become: true
   block:
     - name: Disable and stop old caddy-rsync timer

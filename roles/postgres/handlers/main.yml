@@ -1,7 +1,19 @@
 ---
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+
 - name: Restart Postgres
   containers.podman.podman_container:
     name: "{{ postgres_container_name }}"
+    image: "{{ postgres_image }}"
     state: started
     restart: true
+  become: true
+
+- name: Restart haproxy
+  ansible.builtin.service:
+    name: "{{ postgres_haproxy_service }}"
+    state: restarted
   become: true

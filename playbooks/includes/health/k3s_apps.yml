@@ -1,0 +1,287 @@
+---
+- name: "Gather facts for localhost"
+  hosts: localhost
+  gather_facts: true
+  become: false
+  tags: [k3s, k3s_apps, health_local]
+  vars:
+    ansible_connection: local
+  tasks:
+    - name: Ensure facts are gathered # noqa: run-once
+      ansible.builtin.set_fact:
+        _health_facts_gathered: true
+      run_once: true
+
+- name: "Internal Load Balancer Health Check (K3s Workloads)"
+  hosts: server
+  gather_facts: true
+  become: false
+  tags: [k3s, k3s_apps, health_lb, health_lb_apps]
+  tasks:
+    - name: Verify K3s API via API VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "https://{{ k3s_api_vip }}:6443/healthz"
+        method: GET
+        status_code: [200, 401]
+        validate_certs: false
+      register: _lb_k3s_api_health_check
+      failed_when: false
+
+    - name: Verify Prometheus via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/-/healthy"
+        method: GET
+        headers:
+          Host: "prometheus.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_prometheus_health_check
+      failed_when: false
+
+    - name: Verify Alertmanager via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/#/status"
+        method: GET
+        headers:
+          Host: "alertmanager.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_alertmanager_health_check
+      failed_when: false
+
+    - name: Verify Grafana via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/api/health"
+        method: GET
+        headers:
+          Host: "grafana.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_grafana_health_check
+      failed_when: false
+
+    - name: Verify Loki via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/ready"
+        method: GET
+        headers:
+          Host: "loki.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_loki_health_check
+      failed_when: false
+
+    - name: Verify kube-state-metrics via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/metrics"
+        method: GET
+        headers:
+          Host: "ksm.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_ksm_health_check
+      failed_when: false
+
+    - name: Verify Traefik via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}:9000"
+        method: GET
+        status_code: [200, 404]
+      register: _lb_traefik_health_check
+      failed_when: false
+
+    - name: Verify Goldilocks via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/"
+        method: GET
+        headers:
+          Host: "goldilocks.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_goldilocks_health_check
+      failed_when: false
+
+    - name: Verify Homepage via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/"
+        method: GET
+        headers:
+          Host: "homepage.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_homepage_health_check
+      failed_when: false
+
+    - name: Verify SeaweedFS Filer via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/"
+        method: GET
+        headers:
+          Host: "seaweedfs-filer.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_seaweedfs_filer_health_check
+      failed_when: false
+
+    - name: Verify SeaweedFS S3 via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/"
+        method: GET
+        headers:
+          Host: "seaweedfs-s3.k3s.{{ base_domain }}"
+        status_code: [200, 403]
+      register: _lb_seaweedfs_s3_health_check
+      failed_when: false
+
+- name: "Longhorn Health Check"
+  hosts: server
+  gather_facts: false
+  become: true
+  tags: [k3s, k3s_apps, health_longhorn]
+  tasks:
+    - name: Gather Longhorn Nodes Status
+      ansible.builtin.command: k3s kubectl get nodes.longhorn.io -n longhorn-system -o json
+      register: _longhorn_nodes_json
+      changed_when: false
+      failed_when: false
+
+    - name: Gather Longhorn Volumes Status
+      ansible.builtin.command: k3s kubectl get volumes.longhorn.io -n longhorn-system -o json
+      register: _longhorn_volumes_json
+      changed_when: false
+      failed_when: false
+
+- name: "External Services Health Check - K3s Workloads (via Proxy)"
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tags: [k3s, k3s_apps, health_external]
+  tasks:
+    - name: Verify Prometheus via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        --resolve prometheus.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://prometheus.k3s.{{ base_domain }}/-/healthy
+      register: _external_prometheus_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Prometheus status fact
+      ansible.builtin.set_fact:
+        _external_prometheus_ready:
+          status: "{{ _external_prometheus_ready_cmd.stdout | int if _external_prometheus_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify Loki via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        --resolve loki.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://loki.k3s.{{ base_domain }}/ready
+      register: _external_loki_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Loki status fact
+      ansible.builtin.set_fact:
+        _external_loki_ready:
+          status: "{{ _external_loki_ready_cmd.stdout | int if _external_loki_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify Grafana via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        --resolve grafana.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://grafana.k3s.{{ base_domain }}/api/health
+      register: _external_grafana_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Grafana status fact
+      ansible.builtin.set_fact:
+        _external_grafana_ready:
+          status: "{{ _external_grafana_ready_cmd.stdout | int if _external_grafana_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify Longhorn UI via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        --resolve longhorn.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://longhorn.k3s.{{ base_domain }}
+      register: _external_longhorn_ui_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Longhorn UI status fact
+      ansible.builtin.set_fact:
+        _external_longhorn_ui_ready:
+          status: "{{ _external_longhorn_ui_ready_cmd.stdout | int if _external_longhorn_ui_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify Kubernetes Dashboard via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
+        --resolve dashboard.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://dashboard.k3s.{{ base_domain }}
+      register: _external_dashboard_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Kubernetes Dashboard status fact
+      ansible.builtin.set_fact:
+        _external_dashboard_ready:
+          status: "{{ _external_dashboard_ready_cmd.stdout | int if _external_dashboard_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify Homepage via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        --resolve homepage.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://homepage.k3s.{{ base_domain }}
+      register: _external_homepage_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Homepage status fact
+      ansible.builtin.set_fact:
+        _external_homepage_ready:
+          status: "{{ _external_homepage_ready_cmd.stdout | int if _external_homepage_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify SeaweedFS Filer via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        --resolve seaweedfs-filer.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://seaweedfs-filer.k3s.{{ base_domain }}
+      register: _external_seaweed_filer_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set SeaweedFS Filer status fact
+      ansible.builtin.set_fact:
+        _external_seaweed_filer_ready:
+          status: "{{ _external_seaweed_filer_ready_cmd.stdout | int if _external_seaweed_filer_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify SeaweedFS S3 via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        --resolve seaweedfs-s3.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://seaweedfs-s3.k3s.{{ base_domain }}
+      register: _external_seaweed_s3_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set SeaweedFS S3 status fact
+      ansible.builtin.set_fact:
+        _external_seaweed_s3_ready:
+          status: "{{ _external_seaweed_s3_ready_cmd.stdout | int if _external_seaweed_s3_ready_cmd.stdout | length > 0 else 0 }}"
+
+- name: "K3s Workloads Health Report"
+  hosts: localhost
+  gather_facts: false
+  tags: [k3s, k3s_apps, health_summary]
+  vars_files:
+    - ../../../inventories/group_vars/all/main.yml
+  tasks:
+    - name: Render health report # noqa: run-once no-relative-paths
+      ansible.builtin.template:
+        src: "../../templates/health_summary_k3s_apps.j2"
+        dest: /tmp/cluster-health-report-k3s-apps.txt
+        mode: '0644'
+      run_once: true
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+
+    - name: Show health report # noqa: run-once
+      ansible.builtin.pause:
+        prompt: "{{ lookup('file', '/tmp/cluster-health-report-k3s-apps.txt') }}"
+      run_once: true
+      delegate_to: localhost
+      vars:
+        ansible_connection: local

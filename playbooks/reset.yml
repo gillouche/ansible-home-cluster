@@ -22,3 +22,7 @@
 - name: Flush Firewall
   import_playbook: includes/reset/flush_firewall.yml
   tags: [reset_firewall]
+
+# 5. Reset K3s Cluster (Nodes, DB, Storage)
+- name: Reset K3s
+  import_playbook: includes/reset/k3s_reset.yml

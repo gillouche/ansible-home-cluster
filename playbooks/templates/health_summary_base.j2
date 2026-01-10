@@ -1,0 +1,117 @@
+{% import "health_summary_macros.j2" as macros with context %}
+================================================================================
+{{ macros.BOLD }}                      HOMELAB: BASE INFRASTRUCTURE REPORT{{ macros.RESET }}
+================================================================================
+
+################################################################################
+{{ macros.BOLD }}[ SECTION 1: DEVICES & BASE INFRASTRUCTURE ]{{ macros.RESET }}
+################################################################################
+
+{{ macros.BOLD }}[ SYSTEM CLOCK ]{{ macros.RESET }}
+{% if groups['all'] | map('extract', hostvars, '_device_time') | select('defined') | list | length > 0 %}
+{% for host in groups['all'] | sort %}
+  {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
+    Status:        {{
+      macros.ok('SYNCHRONIZED')
+      if (hostvars[host]['_device_time'].stdout | default(0) | int) >= (hostvars['localhost']['_controller_time'].stdout | default(9999999999) | int)
+      else macros.bad('DRIFT DETECTED')
+    }}
+    Offset:        {{ (hostvars[host]['_device_time'].stdout | default(0) | int) - (hostvars['localhost']['_controller_time'].stdout | default(0) | int) }}s relative to Controller
+{% endfor %}
+{% endif %}
+
+{{ macros.BOLD }}[ VAULT CLUSTER ]{{ macros.RESET }}
+{% if groups['vault_cluster'] | map('extract', hostvars, '_vault_node_health') | select('defined') | list | length > 0 %}
+{% for host in groups['vault_cluster'] | sort %}
+  {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
+    Type:          {{ 'TRANSIT' if host in groups['vault_transit'] else 'MAIN' }}
+    Status:        {% set h = hostvars[host]._vault_node_health | default({}) -%}
+                   {%- set s = h.status | default(0) -%}
+                   {%- set j = h.json | default({}) -%}
+                   {%- if s == 200 -%}
+                     {{ macros.ok('HEALTHY (Leader)') }}
+                   {%- elif s == 429 -%}
+                     {%- if j.standby | default(false) -%}
+                       {{ macros.ok('HEALTHY (Follower)') }}
+                     {%- elif j.performance_standby | default(false) -%}
+                       {{ macros.ok('HEALTHY (Perf Standby)') }}
+                     {%- else -%}
+                       {{ macros.ok('HEALTHY (Follower)') }}
+                     {%- endif -%}
+                   {%- elif s == 501 -%}
+                     {{ macros.warn('NOT INITIALIZED') }}
+                   {%- elif s == 503 -%}
+                     {{ macros.warn('SEALED') }}
+                   {%- else -%}
+                     {{ macros.bad('DOWN / ERROR') }}
+                   {%- endif %}
+    Code:          {{ s if s != 0 else 'N/A' }}
+    Version:       {{ j.version | default('N/A') }}
+{% endfor %}
+{% endif %}
+
+{{ macros.BOLD }}[ PI-HOLE DNS ]{{ macros.RESET }}
+{% if groups['dns_cluster'] | map('extract', hostvars, '_pihole_vip_dns_check') | select('defined') | list | length > 0 %}
+{% for host in groups['dns_cluster'] | sort %}
+  {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
+    VIP ({{ pihole_virtual_ip | default('N/A') }}):   {{
+      macros.ok('SUCCESS')
+      if hostvars[host]._pihole_vip_dns_check.rc | default(-1) == 0
+         and hostvars[host]._pihole_vip_dns_check.stdout | default('') != ''
+      else macros.bad('FAILED')
+    }}
+    Local (127.0.0.1):      {{
+      macros.ok('SUCCESS')
+      if hostvars[host]._pihole_local_dns_check.rc | default(-1) == 0
+         and hostvars[host]._pihole_local_dns_check.stdout | default('') != ''
+      else macros.bad('FAILED')
+    }}
+{% endfor %}
+{% endif %}
+
+{{ macros.BOLD }}[ BASE WORKLOADS (Proxy, Nexus, Firefly) ]{{ macros.RESET }}
+{% set proxy_data = groups['edge_proxy_cluster'] | map('extract', hostvars, '_proxy_wildcard_stat') | select('defined') | list %}
+{% set nexus_data = groups['artifactory'] | map('extract', hostvars, '_nexus_status') | select('defined') | list %}
+{% set firefly_data = groups['firefly'] | map('extract', hostvars, '_firefly_health') | select('defined') | list %}
+{% if proxy_data | length > 0 or nexus_data | length > 0 or firefly_data | length > 0 %}
+{% for host in groups['edge_proxy_cluster'] | sort %}
+  {{ macros.CYAN }}> Edge Proxy: {{ host }}{{ macros.RESET }}
+    Wildcard Cert:     {{ macros.ok('PRESENT') if hostvars[host]._proxy_wildcard_stat.stat.exists | default(false) else macros.bad('MISSING') }}
+    Backend (LB) Reach:{{ macros.ok('YES') if hostvars[host]._proxy_backend_check.status is defined else macros.bad('NO') }}
+    VIP Active:        {{ macros.ok('YES') if hostvars[host]._proxy_has_vip | default(false) else macros.cyan('NO (Backup)') }}
+{% endfor %}
+{% for host in groups['artifactory'] | sort %}
+  {{ macros.CYAN }}> Nexus: {{ host }}{{ macros.RESET }}
+    Status:           {{ macros.ok('HEALTHY') if hostvars[host]._nexus_status.status | default(0) == 200 else macros.bad('DOWN') }}
+{% endfor %}
+{% for host in groups['firefly'] | sort %}
+  {{ macros.CYAN }}> Firefly III: {{ host }}{{ macros.RESET }}
+    Status:           {{ macros.ok('UP') if hostvars[host]._firefly_health.status | default(0) == 200 else macros.bad('DOWN') }}
+{% endfor %}
+{% endif %}
+
+{{ macros.BOLD }}[ INTERNAL LOAD BALANCER (Base) ]{{ macros.RESET }}
+{% set lb_base_data = groups['internal_lb_cluster'] | map('extract', hostvars, '_lb_vault_health_check') | select('defined') | list %}
+{% if lb_base_data | length > 0 %}
+{% for host in groups['internal_lb_cluster'] | sort %}
+  {{ macros.CYAN }}> {{ host }} (Base Infrastructure){{ macros.RESET }}
+    Vault:         {{ macros.ok('UP') if (hostvars[host]._lb_vault_health_check.status | default(0)) in [200, 429] else macros.bad('DOWN') }}
+{% endfor %}
+{% endif %}
+
+################################################################################
+{{ macros.BOLD }}[ EXTERNAL ACCESS & SERVICES (Base) ]{{ macros.RESET }}
+################################################################################
+
+{{ macros.BOLD }}[ EXTERNAL ACCESS (via {{ reverse_proxy_virtual_ip }}) ]{{ macros.RESET }}
+  {{ macros.CYAN }}-- Base Infrastructure --{{ macros.RESET }}
+  Vault (HTTPS):         {{ macros.ok('UP') if (_external_vault_ready.status | default(-1)) in [200, 429] else macros.bad('DOWN') }}
+  Firefly (HTTPS):      {{ macros.ok('UP') if (_external_firefly_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Pi-hole Pri (HTTPS):  {{ macros.ok('UP') if (_external_pihole_primary_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+
+{{ macros.BOLD }}[ SERVICE URLS ]{{ macros.RESET }}
+  Vault:           {{ macros.CYAN }}https://vault.{{ base_domain }}{{ macros.RESET }}
+  Firefly:         {{ macros.CYAN }}https://firefly.{{ base_domain }}{{ macros.RESET }}
+  Pi-hole Pri:     {{ macros.CYAN }}https://primary.pihole.{{ base_domain }}{{ macros.RESET }}
+
+================================================================================

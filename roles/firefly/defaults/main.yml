@@ -10,7 +10,7 @@ firefly_data_dir: "{{ firefly_home }}/data"
 firefly_upload_dir: "{{ firefly_home }}/upload"
 firefly_container_name: firefly
 firefly_image: "fireflyiii/core:latest"
-firefly_port: 8082
+firefly_port: "{{ global_firefly_port | default(8082) }}"
 firefly_timezone: "Europe/Zurich"
 firefly_app_url: "https://firefly.gillouche.homelab"
 firefly_site_owner: "firefly@gillouche.homelab"

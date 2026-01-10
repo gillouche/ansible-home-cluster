@@ -144,9 +144,9 @@
 
 - name: Copy signed PKI Intermediate CA certificate back to Vault leader # noqa: no-handler
   ansible.builtin.copy:
-    content: >-
-      {{ lookup('file', vault_cluster_ca_dir_controller | expanduser ~ '/vault-pki-intermediate.crt')
-      ~ '\n' ~ lookup('file', homelab_ca_bundle_path) }}
+    content: |
+      {{ lookup('file', vault_cluster_ca_dir_controller | expanduser ~ '/vault-pki-intermediate.crt') }}
+      {{ lookup('file', vault_cluster_ca_cert_controller | expanduser) }}
     dest: "{{ vault_host_tls_dir }}/vault-pki-intermediate.crt"
     owner: "{{ vault_runtime_user | default('vault') }}"
     group: "{{ vault_runtime_group_name | default('vault') }}"
@@ -196,6 +196,59 @@
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
   changed_when: false
+
+- name: Get pki issuers configuration
+  ansible.builtin.command: /usr/local/bin/vault read -format=json pki/config/issuers
+  environment:
+    VAULT_ADDR: "{{ _vault_leader_addr }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _pki_issuers_config
+  changed_when: false
+  check_mode: false
+
+- name: List pki issuers
+  ansible.builtin.command: /usr/local/bin/vault list -format=json pki/issuers
+  environment:
+    VAULT_ADDR: "{{ _vault_leader_addr }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _pki_issuers_list
+  changed_when: false
+  when: (_pki_issuers_config.stdout | from_json).data.default == ""
+
+- name: Find pki intermediate issuer ID
+  ansible.builtin.shell: |
+    for issuer in {{ (_pki_issuers_list.stdout | from_json) | join(' ') }}; do
+      subject=$(/usr/local/bin/vault read -format=json pki/issuer/$issuer | jq -r '.data.certificate' | openssl x509 -noout -subject)
+      if echo "$subject" | grep -q "Homelab Intermediate CA"; then
+        echo "$issuer"
+        exit 0
+      fi
+    done
+    exit 1
+  environment:
+    VAULT_ADDR: "{{ _vault_leader_addr }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _pki_intermediate_issuer_id
+  changed_when: false
+  when:
+    - (_pki_issuers_config.stdout | from_json).data.default == ""
+    - _pki_issuers_list.rc == 0
+
+- name: Set default pki issuer
+  ansible.builtin.command: >
+    /usr/local/bin/vault write pki/config/issuers
+    default="{{ _pki_intermediate_issuer_id.stdout }}"
+  environment:
+    VAULT_ADDR: "{{ _vault_leader_addr }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  changed_when: true
+  when:
+    - (_pki_issuers_config.stdout | from_json).data.default == ""
+    - _pki_intermediate_issuer_id.rc == 0
 
 # Check if PKI mount 'pki_int' is already configured
 - name: Read pki_int CA certificate to check existence

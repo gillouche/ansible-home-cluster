@@ -1,0 +1,177 @@
+# ==============================================================================
+# K3s Cluster Reset Playbook
+# ==============================================================================
+# This playbook uninstalls K3s, resets the database, and/or cleans storage.
+#
+# Usage:
+#   ansible-playbook playbooks/reset.yml -t k3s           # Full K3s reset (nodes+db+storage)
+#   ansible-playbook playbooks/reset.yml -t k3s_nodes     # Only uninstall K3s & reset DB
+#   ansible-playbook playbooks/reset.yml -t k3s_storage   # Only clean Longhorn storage
+# ==============================================================================
+
+# 1. Uninstall K3s from Servers and Agents
+- name: Uninstall K3s Cluster
+  hosts: k3s_cluster
+  become: true
+  gather_facts: true
+  tags: [k3s, k3s_nodes]
+  tasks:
+    - name: Check for K3s Uninstall Scripts
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /usr/local/bin/k3s-uninstall.sh
+        - /usr/local/bin/k3s-agent-uninstall.sh
+      register: k3s_scripts
+
+    - name: Stop k3s service
+      ansible.builtin.systemd:
+        name: k3s
+        state: stopped
+        enabled: false
+      when:
+        - "'server' in group_names"
+      failed_when: false
+
+    - name: Run K3s Server Uninstall
+      ansible.builtin.command: /usr/local/bin/k3s-uninstall.sh
+      when:
+        - "'server' in group_names"
+        - k3s_scripts.results[0].stat.exists
+      register: uninstall_server
+      changed_when: uninstall_server.rc == 0
+
+    - name: Stop k3s-agent service if present
+      ansible.builtin.systemd:
+        name: k3s-agent
+        state: stopped
+        enabled: false
+      when:
+        - "'agent' in group_names"
+      failed_when: false
+
+    - name: Run K3s Agent Uninstall
+      ansible.builtin.command: /usr/local/bin/k3s-agent-uninstall.sh
+      when:
+        - "'agent' in group_names"
+        - k3s_scripts.results[1].stat.exists
+      register: uninstall_agent
+      changed_when: uninstall_agent.rc == 0
+
+    - name: Unmount all K3s and Kubelet mount points
+      ansible.builtin.shell: |
+        for m in $(grep -E '/var/lib/kubelet|/var/lib/rancher|/run/k3s' /proc/mounts | cut -d ' ' -f 2 | sort -r); do
+          umount -l "$m" || true
+        done
+      become: true
+      changed_when: false
+
+    - name: Clean up Rancher and CNI Directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/rancher
+        - /var/lib/rancher
+        - "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}"
+        - /var/lib/kubelet
+        - /var/lib/longhorn
+        - /etc/cni
+        - /opt/cni
+        - /var/lib/cni
+
+    - name: Remove K3s Keepalived Configurations
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/keepalived/conf.d/k3s-api.conf
+        - /etc/keepalived/conf.d/k3s-lb.conf
+      register: _k3s_keepalived_clean
+
+    - name: Restart Keepalived to release VIPs
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted
+      when: _k3s_keepalived_clean.changed
+      failed_when: false # Ignore if keepalived is not installed on some nodes
+
+    - name: Force Kill K3s Processes
+      ansible.builtin.shell: |
+        pkill -9 -f k3s || true
+        pkill -9 -f containerd-shim || true
+      failed_when: false
+
+    - name: Verify no K3s processes are running
+      ansible.builtin.shell: "pgrep -a k3s"
+      register: _k3s_running
+      failed_when: _k3s_running.rc == 0
+      ignore_errors: true
+
+    - name: Warn if K3s is still running
+      ansible.builtin.fail:
+        msg: "CRITICAL: K3s processes are still running on {{ inventory_hostname }}. Please manually kill them before proceeding."
+      when: _k3s_running.rc == 0
+
+#    - name: Reboot Nodes (Ensure clean state)
+#      ansible.builtin.reboot:
+#        reboot_timeout: 300
+
+# 2. Reset Postgres and Etcd Cluster (HA)
+- name: Reset HA Infrastructure for K3s
+  hosts: postgres
+  become: true
+  gather_facts: false
+  tags: [k3s, k3s_nodes]
+  tasks:
+    - name: Stop and Remove HA Components
+      containers.podman.podman_container:
+        name: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ postgres_container_name | default('postgres') }}"
+        - "{{ etcd_container_name | default('etcd') }}"
+      failed_when: false
+
+    - name: Wipe HA Data Directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ postgres_data_dir | default('/mnt/data/postgres') }}"
+        - "{{ etcd_data_dir | default('/mnt/data/etcd') }}"
+
+    - name: Remove HA Infrastructure Keepalived/HAProxy Configurations
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/keepalived/conf.d/postgres.conf
+        - /etc/haproxy/conf.d/postgres.cfg
+        - /etc/systemd/system/haproxy.service.d/conf-d.conf
+      register: _ha_infra_clean
+
+    - name: Restart Keepalived/HAProxy to release HA VIPs
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - keepalived
+        - haproxy
+      when: _ha_infra_clean.changed
+      failed_when: false
+
+# 3. Clean Longhorn Storage
+- name: Clean Longhorn Storage
+  hosts: agent_storage
+  become: true
+  gather_facts: false
+  tags: [k3s, k3s_storage]
+  tasks:
+    - name: Wipe Longhorn Data Directory
+      ansible.builtin.file:
+        path: /mnt/data/longhorn
+        state: absent
+      become: true
+      register: clean_storage
+      changed_when: true

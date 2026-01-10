@@ -57,7 +57,7 @@
     state: started
     restart_policy: always
     ports:
-      - "{{ firefly_port }}:8080"
+      - "{{ firefly_port }}:80"
     env:
       APP_ENV: production
       TZ: "{{ firefly_timezone }}"

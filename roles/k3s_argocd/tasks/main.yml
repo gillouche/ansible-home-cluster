@@ -19,6 +19,37 @@
   become: true
   changed_when: false
 
+- name: Create temporary directory for Sealed Secret manifests
+  ansible.builtin.file:
+    path: /tmp/sealed-secrets
+    state: directory
+    mode: '0700'
+  become: true
+
+- name: Copy Sealed Secret Manifests to remote
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /tmp/sealed-secrets/{{ item | basename }}
+    mode: '0600'
+  with_fileglob:
+    - "{{ role_path }}/files/*.yaml"
+  become: true
+
+- name: Apply Sealed Secret Manifests
+  ansible.builtin.shell: >-
+    kubectl apply -f /tmp/sealed-secrets/{{ item | basename }}
+  become: true
+  with_fileglob:
+    - "{{ role_path }}/files/*.yaml"
+  register: _sealed_secrets_apply
+  changed_when: "'created' in _sealed_secrets_apply.stdout or 'configured' in _sealed_secrets_apply.stdout"
+
+- name: Remove temporary directory for Sealed Secret manifests
+  ansible.builtin.file:
+    path: /tmp/sealed-secrets
+    state: absent
+  become: true
+
 - name: Get ArgoCD Admin Password
   ansible.builtin.shell: |
     set -o pipefail
@@ -45,4 +76,4 @@
 
 - name: Print ArgoCD Password location
   ansible.builtin.debug:
-    msg: "ArgoCD Admin Password saved to {{ argocd_credentials_file }}"
+    msg: "ArgoCD Admin Password saved to {{ argocd_credentials_file }} -> you now need to apply root.yaml from gitops repo."

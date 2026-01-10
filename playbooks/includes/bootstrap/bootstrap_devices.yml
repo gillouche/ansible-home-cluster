@@ -16,13 +16,13 @@
   pre_tasks:
     - name: Check if inventories/group_vars/all/vault.yml exists
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../../inventories/group_vars/all/vault.yml"
+        path: "{{ playbook_dir }}/../../../inventories/group_vars/all/vault.yml"
       register: _all_vault_file
       no_log: true
 
     - name: Load vaulted credentials from group_vars/all/vault.yml (if present)
       ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../../inventories/group_vars/all/vault.yml"
+        file: "{{ playbook_dir }}/../../../inventories/group_vars/all/vault.yml"
       when: _all_vault_file.stat.exists | default(false)
       no_log: true
 

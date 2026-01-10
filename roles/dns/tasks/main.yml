@@ -54,46 +54,6 @@
   become: false
 
 # ------------------------------------------------------------------------------
-# Migration Logic
-# ------------------------------------------------------------------------------
-
-- name: Check if old pihole directory exists
-  ansible.builtin.stat:
-    path: "{{ pihole_old_root_dir }}"
-  register: _old_pihole_dir_stat
-  become: false
-
-- name: Migration Block
-  when:
-    - _old_pihole_dir_stat.stat.exists
-    - _old_pihole_dir_stat.stat.isdir
-  become: true
-  block:
-    - name: Stop running pihole container prior to migration
-      containers.podman.podman_container:
-        name: "{{ pihole_container_name }}"
-        state: stopped
-      failed_when: false
-
-    - name: Migrate data from old to new home (rsync) # noqa: command-instead-of-module
-      ansible.builtin.command: >
-        rsync -avz --ignore-existing "{{ pihole_old_root_dir }}/" "{{ pihole_root_dir }}/"
-      changed_when: true
-
-    - name: Ensure correct ownership on new home
-      ansible.builtin.file:
-        path: "{{ pihole_root_dir }}"
-        owner: "{{ pihole_user }}"
-        group: "{{ pihole_group }}"
-        recurse: true
-        state: directory
-
-    - name: Backup old directory
-      ansible.builtin.command: >
-        mv "{{ pihole_old_root_dir }}" "{{ pihole_old_root_dir }}.migrated.{{ ansible_date_time.iso8601_basic_short }}"
-      changed_when: true
-
-# ------------------------------------------------------------------------------
 # Normal configuration
 # ------------------------------------------------------------------------------
 
@@ -323,8 +283,8 @@
   containers.podman.podman_container:
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
-    state: started
-    recreate: false
+    state: created
+    recreate: true
     hostname: "{{ inventory_hostname }}"
     restart_policy: always
     cap_add:
@@ -333,25 +293,50 @@
       - DAC_OVERRIDE
       - SETFCAP
     published_ports:
-      - "{{ pihole_dns_tcp_port }}:53/tcp"
-      - "{{ pihole_dns_udp_port }}:53/udp"
-      - "{{ pihole_http_host_port }}:80/tcp"
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "{{ pihole_http_host_port | default(8080) }}:80/tcp"
     env:
       TZ: "{{ pihole_timezone }}"
       FTLCONF_webserver_api_password: "{{ pihole_web_password }}"
       FTLCONF_dns_listeningMode: "ALL"
       FTLCONF_dns_upstreams: "{{ pihole_dns }}"
       FTLCONF_dns_piholePtr: "HOSTNAME"
+      # Ensure Pi-hole binds to 0.0.0.0 inside the bridged container
+      # so that Podman can map the host's VIP to it.
+      FTLCONF_webserver_interface: "0.0.0.0"
+      FTLCONF_dns_interface: "0.0.0.0"
     volumes:
       - "{{ pihole_host_etc_dir }}/:/etc/pihole/"
       - "{{ pihole_host_dnsmasq_dir }}/:/etc/dnsmasq.d/"
   become: true
+  notify: Restart pihole systemd
 
-- name: Wait for pihole web UI to be up
+- name: Install Pi-hole systemd service unit
+  ansible.builtin.template:
+    src: pihole.service.j2
+    dest: "/etc/systemd/system/container-{{ pihole_container_name }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Restart pihole systemd
+
+- name: Enable and start Pi-hole systemd service
+  ansible.builtin.systemd:
+    name: "container-{{ pihole_container_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+
+- name: Wait for Pi-hole web interface to be available
   ansible.builtin.wait_for:
+    host: "127.0.0.1"
     port: "{{ pihole_http_host_port | int }}"
     delay: 5
     timeout: 60
+  become: false
 
 - name: Add cron to update gravity every day
   ansible.builtin.cron:

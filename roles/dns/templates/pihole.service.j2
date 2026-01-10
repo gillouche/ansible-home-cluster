@@ -1,0 +1,16 @@
+[Unit]
+Description=Podman {{ pihole_container_name }}.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+Restart=always
+TimeoutStopSec=70
+ExecStartPre=-/usr/bin/podman stop -t 10 {{ pihole_container_name }}
+ExecStart=/usr/bin/podman start -a {{ pihole_container_name }}
+ExecStop=/usr/bin/podman stop -t 10 {{ pihole_container_name }}
+Type=simple
+
+[Install]
+WantedBy=multi-user.target

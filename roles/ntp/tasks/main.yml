@@ -6,6 +6,13 @@
       - min
   when: ansible_distribution is not defined
 
+- name: Install ntp package
+  ansible.builtin.package:
+    name: ntp
+    state: present
+  become: true
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+
 - name: Disable and stop systemd-timesyncd (conflicts with ntpd)
   ansible.builtin.systemd:
     name: systemd-timesyncd
@@ -13,13 +20,7 @@
     state: stopped
   become: true
   failed_when: false
-
-- name: Ensure ntp package is installed (Arch)
-  community.general.pacman:
-    name: ntp
-    state: present
-  become: true
-  when: (ansible_facts['distribution'] | lower) == 'archlinux'
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
 
 - name: Deploy ntp.conf template
   ansible.builtin.template:
@@ -30,19 +31,70 @@
     mode: '0644'
   become: true
   notify: Restart ntpd
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
 
-- name: Enable and start ntpd.service (Arch)
+- name: Deploy forced time sync script
+  ansible.builtin.template:
+    src: force-time-sync.sh.j2
+    dest: /usr/local/bin/force-time-sync.sh
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+
+- name: Deploy force-time-sync.service unit
+  ansible.builtin.template:
+    src: force-time-sync.service.j2
+    dest: /etc/systemd/system/force-time-sync.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+
+- name: Ensure systemd drop-in directory for ntpd exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/ntpd.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+
+- name: Deploy ntpd systemd drop-in to wait for force-time-sync
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ntpd.service.d/override.conf
+    content: |
+      [Unit]
+      After=force-time-sync.service
+      Wants=force-time-sync.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+
+- name: Enable and start force-time-sync.service
   ansible.builtin.systemd:
-    name: ntpd.service
+    name: force-time-sync.service
     enabled: true
     state: started
     daemon_reload: true
   become: true
-  when: (ansible_facts['distribution'] | lower) == 'archlinux'
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
 
-- name: Force immediate time sync
-  ansible.builtin.command: ntpd -gq
+- name: Start and enable ntpd
+  ansible.builtin.systemd:
+    name: ntpd
+    state: started
+    enabled: true
   become: true
-  changed_when: false
-  failed_when: false
-  notify: Restart ntpd
+  register: _ntp_start
+  until: _ntp_start is success
+  retries: 5
+  delay: 5
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']

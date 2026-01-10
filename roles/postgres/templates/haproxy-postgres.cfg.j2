@@ -1,0 +1,14 @@
+# Managed by Ansible - Postgres HAProxy configuration
+
+listen postgres
+    bind 0.0.0.0:{{ postgres_proxy_port }}
+    mode tcp
+    http-check connect
+    option httpchk
+    http-check send meth GET uri /patroni ver HTTP/1.0
+    http-check expect status 200
+    http-check expect rstring "\"role\":\s*\"master\""
+    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+{% for host in groups['postgres'] | sort %}
+    server {{ host }} {{ hostvars[host].ansible_host | default(hostvars[host].ansible_facts.default_ipv4.address) }}:{{ postgres_port }} check port {{ postgres_patroni_port }}
+{% endfor %}

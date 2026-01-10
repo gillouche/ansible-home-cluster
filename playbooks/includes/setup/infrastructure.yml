@@ -50,3 +50,11 @@
   tags: [infra, artifactory]
   roles:
     - role: artifactory
+
+- name: "Setup AMD GPU"
+  hosts: homeserver
+  gather_facts: true
+  become: false
+  tags: [infra, gpu]
+  roles:
+    - role: gpu_amd

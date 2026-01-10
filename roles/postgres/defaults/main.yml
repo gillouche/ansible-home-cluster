@@ -1,13 +1,20 @@
 ---
 postgres_container_name: postgres
-postgres_image: postgres:16-alpine
+postgres_image: "ghcr.io/zalando/spilo-16:latest"
 postgres_port: 5432
+postgres_proxy_port: "{{ global_k3s_db_port | default(15432) }}"
+postgres_patroni_port: 8008
+postgres_version: "16"
+
+# HAProxy for Postgres
+postgres_haproxy_package: haproxy
+postgres_haproxy_service: haproxy
 
 # System User
 postgres_user: postgres
 postgres_group: postgres
-postgres_uid: 70
-postgres_gid: 70
+postgres_uid: 101
+postgres_gid: 101
 postgres_home: /home/postgres
 
 # Data paths
@@ -15,6 +22,7 @@ postgres_data_dir: /mnt/data/postgres
 postgres_config_dir: "{{ postgres_home }}/config"
 
 # Database Configuration (Override these in vault)
+postgres_cluster_name: k3scluster
 postgres_db_user: "{{ global_k3s_db_user | default('k3s') }}"
 postgres_db_password: changeme
 postgres_db_name: "{{ global_k3s_db_name | default('kubernetes') }}"

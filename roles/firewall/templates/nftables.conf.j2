@@ -26,10 +26,16 @@ iif lo accept
 
 # FULL TRUST: LAN, Podman and K3s
 ip saddr { {{ lan_subnet }}, {{ podman_subnet }}, {{ k3s_cluster_cidr }}, {{ k3s_service_cidr }} } accept
-
+# Allow VRRP (Keepalived)
+ip protocol vrrp accept
 # Diagnostics (optional but sane)
 ip protocol icmp accept
 meta l4proto ipv6-icmp accept
+
+# Allow K3s API (Critical for Agents/VIP)
+tcp dport {{ global_k3s_api_port }} accept
+# Allow Postgres (Local HAProxy)
+tcp dport { {{ postgres_port }}, {{ global_k3s_db_port }} } accept
 }
 
 ###################

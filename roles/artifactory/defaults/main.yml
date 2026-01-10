@@ -7,7 +7,7 @@ artifactory_nexus_uid: 200
 artifactory_nexus_gid: 200
 artifactory_nexus_home: "/home/nexus"
 artifactory_nexus_data_dir: "/mnt/data/nexus"
-artifactory_nexus_port: 8081
+artifactory_nexus_port: "{{ global_nexus_port | default(8081) }}"
 artifactory_nexus_container_name: "nexus"
 artifactory_nexus_publish_user: "publish"
 artifactory_nexus_publish_user_password: "password"

@@ -2,12 +2,6 @@
 # Common SSH defaults (kept here if you want variables instead of ansible.cfg)
 ansible_ssh_private_key_file: ~/.ssh/id_ed25519_local
 
-ansible_user: alarm
-ansible_ssh_pass: "{{ ansible_password }}"
-
-ansible_become_method: sudo
-ansible_become_password: "{{ vault_device_become_password }}"
-
 # Global variables for all hosts
 base_domain: gillouche.homelab
 wildcard_domains:
@@ -25,10 +19,9 @@ k3s_service_cidr: "10.43.0.0/16"
 # Software Versions (Shared Agents)
 # ----------------------------------------
 
-# Vault trust/CA distribution (controller + hosts)
-vault_install_root_ca_on_hosts: true
-vault_trust_ca_on_controller: true
-vault_controller_install_keychain: login
+# tls trust/CA distribution (controller + hosts)
+tls_trust_ca_on_controller: true
+tls_controller_install_keychain: login
 
 # Controller (macOS) browser trust switch
 vault_firefox_enable_enterprise_roots: true
@@ -41,11 +34,16 @@ k3s_lb_vip: 192.168.0.248
 # Shared Database Configuration
 # -----------------------------
 # These are used by both the Postgres role (to create DB) and K3s (to connect)
-global_k3s_db_host: 192.168.0.83
-global_k3s_db_port: 5432
+global_k3s_db_host: 192.168.0.247
+global_k3s_db_port: 15432
 global_k3s_db_name: kubernetes
 global_k3s_db_user: k3s
 # global_k3s_db_password: defined in vault
+
+# Postgres VIP (managed by keepalived)
+postgres_virtual_ip: 192.168.0.247
+postgres_vrrp_router_id: 88
+postgres_vrrp_auth_pass: "{{ vault_postgres_vrrp_auth_pass | default('changeme-postgres') }}"
 
 # Centralized Networking Configuration
 # ------------------------------------
@@ -59,6 +57,17 @@ pihole_virtual_ip: 192.168.0.251
 pihole_dns_tcp_port: 53
 pihole_dns_udp_port: 53
 pihole_http_host_port: 8080
+global_pihole_http_port: 8080
+pihole_transit_ip: 192.168.0.80
+
+# K3s
+global_k3s_api_port: 6443
+global_k3s_traefik_port: 9000
+global_etcd_port: 2379
+
+# Apps
+global_nexus_port: 8081
+global_firefly_port: 8082
 
 # Reverse Proxy (Caddy)
 reverse_proxy_virtual_ip: 192.168.0.252

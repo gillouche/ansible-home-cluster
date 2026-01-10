@@ -2,7 +2,7 @@
 vault_image: "hashicorp/vault:1.21.1"
 vault_version: "1.21.1"
 vault_container_name: "vault"
-vault_api_port: 18200
+vault_api_port: "{{ global_vault_api_port | default(18200) }}"
 
 # Container-internal paths
 vault_cfg_path_in_container: "/vault/config/vault.hcl"
@@ -62,13 +62,13 @@ vault_wait_active_retries: 45
 vault_wait_active_delay: 2
 
 # Clustering control
-vault_cluster_port: 18201
+vault_cluster_port: "{{ global_vault_cluster_port | default(18201) }}"
 vault_tls_cert_path: "{{ vault_tls_dir_in_container }}/api.crt"
 vault_tls_key_path: "{{ vault_tls_dir_in_container }}/api.key"
 
 # Transit Seal Defaults
 vault_enable_transit_seal: true
-vault_transit_addr: "https://192.168.0.80:18200"
+vault_transit_addr: "https://{{ pihole_transit_ip | default('192.168.0.80') }}:{{ global_vault_api_port | default(18200) }}"
 vault_transit_token: ""
 vault_transit_key_name: "autounseal"
 vault_transit_mount_path: "transit/"

@@ -7,11 +7,7 @@
     - never
     - bootstrap_controller_host
 
-  pre_tasks:
-    - name: Load vaulted credentials from group_vars/all/vault.yml
-      ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../inventories/group_vars/all/vault.yml"
-      no_log: true
+  pre_tasks: []
 
   roles:
     - role: controller_network

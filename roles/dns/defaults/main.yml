@@ -51,4 +51,4 @@ pihole_vip_prefixlen: 24
 # Networking/ports for Podman
 pihole_dns_tcp_port: 53
 pihole_dns_udp_port: 53
-pihole_http_host_port: 8080
+pihole_http_host_port: "{{ global_pihole_http_port | default(8080) }}"

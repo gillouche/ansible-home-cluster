@@ -1,0 +1,67 @@
+# Managed by Ansible - Patroni configuration for {{ inventory_hostname }}
+scope: {{ postgres_cluster_name }}
+namespace: /service/
+name: {{ inventory_hostname }}
+
+restapi:
+  listen: "0.0.0.0:{{ postgres_patroni_port }}"
+  connect_address: "{{ ansible_host | default(ansible_facts.default_ipv4.address) }}:{{ postgres_patroni_port }}"
+  http_header:
+    Connection: close
+
+etcd:
+  hosts:
+{% for host in groups['postgres'] %}
+    - "{{ hostvars[host].ansible_host | default(hostvars[host].ansible_facts.default_ipv4.address) }}:{{ global_etcd_port | default(2379) }}"
+{% endfor %}
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    postgresql:
+      use_pg_rewind: true
+      parameters:
+        archive_mode: "on"
+        archive_command: mkdir -p /home/postgres/pgdata/archives && test ! -f /home/postgres/pgdata/archives/%f && cp %p /home/postgres/pgdata/archives/%f
+        wal_level: replica
+        hot_standby: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_keep_segments: 8
+  init:
+    postgresql:
+      auth:
+        superuser:
+          username: postgres
+          password: "{{ postgres_db_password }}"
+        replication:
+          username: replicator
+          password: "{{ postgres_db_password }}"
+
+postgresql:
+  port: {{ postgres_port }}
+  listen: "0.0.0.0:{{ postgres_port }}"
+  connect_address: "{{ ansible_host | default(ansible_facts.default_ipv4.address) }}:{{ postgres_port }}"
+  data_dir: /home/postgres/pgdata/pgdata
+  bin_dir: /usr/lib/postgresql/{{ postgres_version }}/bin
+  pgpass: /home/postgres/.pgpass
+  authentication:
+    superuser:
+      username: postgres
+      password: "{{ postgres_db_password }}"
+    replication:
+      username: replicator
+      password: "{{ postgres_db_password }}"
+    parameters:
+      unix_socket_directories: '/var/run/postgresql, /tmp'
+      port: {{ postgres_port }}
+  parameters:
+    unix_socket_directories: '/var/run/postgresql, /tmp'
+    port: {{ postgres_port }}
+
+tags:
+  nosqlite: true
+  clonefrom: false

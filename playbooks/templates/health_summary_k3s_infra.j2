@@ -1,0 +1,80 @@
+{% import "health_summary_macros.j2" as macros with context %}
+================================================================================
+{{ macros.BOLD }}                        HOMELAB: K3S PLATFORM REPORT{{ macros.RESET }}
+================================================================================
+
+################################################################################
+{{ macros.BOLD }}[ SECTION 2: K3S PLATFORM INFRASTRUCTURE ]{{ macros.RESET }}
+################################################################################
+
+{{ macros.BOLD }}[ ETCD CLUSTER (Postgres Coordination) ]{{ macros.RESET }}
+{% set etcd_nodes_ready = groups['postgres'] | map('extract', hostvars, '_etcd_node_health') | select('defined') | list %}
+{% if etcd_nodes_ready | length > 0 %}
+  {{ macros.CYAN }}> Global Cluster Status:{{ macros.RESET }} {{
+    macros.ok('HEALTHY (Quorum OK)')
+    if (etcd_nodes_ready | selectattr('status', 'equalto', 200) | list | length) >= ((groups['postgres'] | length / 2) | round(0, 'ceil') | int)
+    else macros.bad('DEGRADED (No Quorum)')
+  }}
+{% for host in groups['postgres'] | sort %}
+  {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
+    Node Health:   {{ macros.ok('UP') if hostvars[host]._etcd_node_health.status | default(0) == 200 else macros.bad('DOWN') }}
+{% endfor %}
+{% endif %}
+
+{{ macros.BOLD }}[ POSTGRES HA CLUSTER (Patroni) ]{{ macros.RESET }}
+{% if hostvars['localhost']._postgres_vip_check is defined %}
+  {{ macros.CYAN }}> VIP ({{ global_k3s_db_host }}):{{ macros.RESET }} {{ macros.ok('REACHABLE') if hostvars['localhost']._postgres_vip_check.state | default('') == 'started' else macros.bad('UNREACHABLE') }}
+{% set pg_nodes = groups['postgres'] | sort %}
+{% set pg_ns = namespace(healthy_count=0) %}
+{% for host in pg_nodes %}
+  {% if hostvars[host]._postgres_cmd_check.rc | default(-1) == 0 %}
+    {% set pg_ns.healthy_count = pg_ns.healthy_count + 1 %}
+  {% endif %}
+{% endfor %}
+  {{ macros.CYAN }}> Cluster Availability:{{ macros.RESET }} {{ macros.ok(pg_ns.healthy_count ~ '/' ~ pg_nodes | length ~ ' Instances UP') if pg_ns.healthy_count == pg_nodes | length else (macros.bad('DOWN') if pg_ns.healthy_count == 0 else macros.warn(pg_ns.healthy_count ~ '/' ~ pg_nodes | length ~ ' Instances UP')) }}
+{% for host in pg_nodes %}
+  {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
+    Patroni API:   {% set p = hostvars[host]._patroni_node_health.status | default(0) %}
+                   {% if p == 200 %}{{ macros.ok('HEALTHY (Leader)') }}
+                   {% elif p == 503 %}{{ macros.ok('HEALTHY (Replica)') }}
+                   {% else %}{{ macros.bad('DOWN / ERROR') }}{% endif %}
+    Local Proxy:   {{ macros.ok('OPEN (' ~ (global_k3s_db_port | default(15432)) ~ ')') if hostvars[host]._postgres_proxy_port.state | default('') == 'started' else macros.bad('CLOSED') }}
+    DB Container:  {{ macros.ok('UP (' ~ (postgres_port | default(5432)) ~ ')') if hostvars[host]._postgres_container_port.state | default('') == 'started' else macros.bad('DOWN') }}
+    Ready (CMD):   {{ macros.ok('YES') if hostvars[host]._postgres_cmd_check.rc | default(-1) == 0 else macros.bad('NO') }}
+{% endfor %}
+{% endif %}
+
+{{ macros.BOLD }}[ KUBERNETES SERVICE ]{{ macros.RESET }}
+{% set k3s_servers = groups['server'] | default([]) %}
+{% if k3s_servers | length > 0 and hostvars[k3s_servers[0]]._k3s_service_status is defined %}
+{% for host in k3s_servers | sort %}
+  {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
+    K3s Service:   {{ macros.ok('ACTIVE') if hostvars[host]._k3s_service_status.status.ActiveState | default('inactive') == 'active' else macros.bad('INACTIVE') }}
+    Node Ready:    {{ macros.ok('YES') if hostvars[host].inventory_hostname in (hostvars[host]._k3s_node_status.stdout | default('')) and 'Ready' in (hostvars[host]._k3s_node_status.stdout | default('')) else macros.bad('NO') }}
+    API VIP:       {{ macros.ok('REACHABLE') if hostvars[host]._k3s_vip_status.status | default(0) in [200, 401] else macros.bad('UNREACHABLE') }}
+    LB VIP:        {{ macros.ok('REACHABLE') if hostvars[host]._k3s_lb_vip_status.status | default(0) in [200, 404] else macros.bad('UNREACHABLE') }}
+    ArgoCD (LB):   {{ macros.ok('UP') if hostvars[host]._lb_argocd_health_check.status | default(0) == 200 else macros.bad('DOWN') }}
+{% endfor %}
+{% endif %}
+
+################################################################################
+{{ macros.BOLD }}[ EXTERNAL ACCESS & SERVICES (K3s Platform) ]{{ macros.RESET }}
+################################################################################
+
+{{ macros.BOLD }}[ EXTERNAL ACCESS (via {{ reverse_proxy_virtual_ip }}) ]{{ macros.RESET }}
+  {{ macros.CYAN }}-- K3s infra --{{ macros.RESET }}
+  K3s API (HTTPS):      {{ macros.ok('UP') if (_external_k3s_api_ready.status | default(-1)) in [200, 401] else macros.bad('DOWN') }}
+{% set k3s_server = groups['server'][0] if groups['server'] | length > 0 else none %}
+{% if k3s_server and hostvars[k3s_server]._argocd_deployment_status is defined and hostvars[k3s_server]._argocd_deployment_status.stdout | default('') != '' %}
+{%   set argocd_deploy = (hostvars[k3s_server]._argocd_deployment_status.stdout | from_json)['items'] | default([]) %}
+{%   set argocd_server = argocd_deploy | selectattr('metadata.name', 'equalto', 'argocd-server') | first | default(none) %}
+{%   if argocd_server %}
+  ArgoCD Server:        {{ macros.ok('HEALTHY (' ~ argocd_server.status.readyReplicas | default(0) ~ '/' ~ argocd_server.status.replicas | default(0) ~ ')') if argocd_server.status.readyReplicas | default(0) == argocd_server.status.replicas | default(0) else macros.bad('DEGRADED') }}
+{%   endif %}
+{% endif %}
+  ArgoCD (HTTPS):       {{ macros.ok('UP') if (_external_argocd_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+
+{{ macros.BOLD }}[ SERVICE URLS ]{{ macros.RESET }}
+  ArgoCD:          {{ macros.CYAN }}https://argocd.k3s.{{ base_domain }}{{ macros.RESET }}
+
+================================================================================

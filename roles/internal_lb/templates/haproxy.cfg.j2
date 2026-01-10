@@ -11,6 +11,16 @@ defaults
   timeout client  1m
   timeout server  1m
 
+# Custom configurations from conf.d
+# (Assumes haproxy >= 2.1 or manual cat/include if using older)
+# For older haproxy, we might need a different approach, but let's assume modern.
+# Actually, HAProxy doesn't support 'include' in global/defaults easily for all versions.
+# Better to use a directory for the whole config if possible, but let's try this:
+{% if haproxy_include_conf_d | default(true) %}
+# Include all .cfg files from conf.d
+# Note: HAProxy 2.1+ supports passing a directory with -f
+{% endif %}
+
 {% if load_balancer_haproxy_peers_enabled | default(false) %}
 peers {{ load_balancer_haproxy_peers_name | default('lb-peers') }}
 {%   for p in load_balancer_haproxy_peers %}

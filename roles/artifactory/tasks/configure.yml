@@ -1,7 +1,7 @@
 ---
 - name: Enable Anonymous Access
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/security/anonymous"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
     method: PUT
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -16,7 +16,7 @@
 
 - name: Get current EULA status
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/system/eula"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/system/eula"
     method: GET
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -27,7 +27,7 @@
 
 - name: Accept End User License Agreement (EULA)
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/system/eula"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/system/eula"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -42,7 +42,7 @@
 
 - name: Get list of existing repositories
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/repositories"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories"
     method: GET
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -53,7 +53,7 @@
 
 - name: Create Docker Hub Proxy repository
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/repositories/docker/proxy"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/docker/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -89,7 +89,7 @@
 
 - name: Create Quay Proxy repository
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/repositories/docker/proxy"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/docker/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -125,7 +125,7 @@
 
 - name: Create Docker Group repository
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/repositories/docker/group"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/docker/group"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -151,7 +151,7 @@
 
 - name: Create PyPI Proxy repository
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/repositories/pypi/proxy"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/pypi/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -179,7 +179,7 @@
 
 - name: Create Helm Proxy repository
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/repositories/helm/proxy"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/helm/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -207,7 +207,7 @@
 
 - name: Create Go Proxy repository
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/repositories/go/proxy"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/go/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -235,7 +235,7 @@
 
 - name: Create Cargo Proxy repository
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/repositories/cargo/proxy"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/cargo/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -263,7 +263,7 @@
 
 - name: Get list of users
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/security/users"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/users"
     method: GET
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"
@@ -274,7 +274,7 @@
 
 - name: Create publish user
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/security/users"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/users"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password }}"

@@ -3,12 +3,14 @@
 # Homelab Cluster Health Check Orchestrator
 # ==============================================================================
 
-# 1. Container Status (Podman)
-- name: Check container status
-  import_playbook: includes/health/container_status.yml
-  tags: [health, container_status]
+- name: Run base health checks
+  import_playbook: includes/health/base.yml
+  tags: base
 
-# 2. Detailed health checks
-- name: Run health checks
-  import_playbook: includes/health/health.yml
-  tags: [health]
+- name: Run k3s infra health checks
+  import_playbook: includes/health/k3s_infra.yml
+  tags: [k3s, k3s_infra]
+
+- name: Run k3s apps health checks
+  import_playbook: includes/health/k3s_apps.yml
+  tags: [k3s, k3s_apps]

@@ -1,0 +1,72 @@
+{% import "health_summary_macros.j2" as macros with context %}
+================================================================================
+{{ macros.BOLD }}                        HOMELAB: K3S WORKLOADS REPORT{{ macros.RESET }}
+================================================================================
+
+################################################################################
+{{ macros.BOLD }}[ SECTION 3: K3S WORKLOADS ]{{ macros.RESET }}
+################################################################################
+
+{{ macros.BOLD }}[ INTERNAL LOAD BALANCER (Service Routing) ]{{ macros.RESET }}
+{% set lb_apps_data = groups['server'] | map('extract', hostvars, '_lb_prometheus_health_check') | select('defined') | list %}
+{% if lb_apps_data | length > 0 %}
+{% for host in groups['server'] | sort %}
+  {{ macros.CYAN }}> {{ host }} (K3s Workloads){{ macros.RESET }}
+    Prometheus:    {{ macros.ok('UP') if (hostvars[host]._lb_prometheus_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
+    Alertmanager:  {{ macros.ok('UP') if (hostvars[host]._lb_alertmanager_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
+    Grafana:       {{ macros.ok('UP') if (hostvars[host]._lb_grafana_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
+    Loki:          {{ macros.ok('UP') if (hostvars[host]._lb_loki_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
+    Homepage:      {{ macros.ok('UP') if (hostvars[host]._lb_homepage_health_check.status | default(0)) in [200] else macros.bad('DOWN') }}
+    K3s Traefik:   {{ macros.ok('UP') if (hostvars[host]._lb_traefik_health_check.status | default(0)) in [200, 404] else macros.bad('DOWN') }}
+    KubeMetrics:   {{ macros.ok('UP') if (hostvars[host]._lb_ksm_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
+    Goldilocks:    {{ macros.ok('UP') if (hostvars[host]._lb_goldilocks_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
+    Seaweed Filer: {{ macros.ok('UP') if (hostvars[host]._lb_seaweedfs_filer_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
+    Seaweed S3:    {{ macros.ok('UP') if (hostvars[host]._lb_seaweedfs_s3_health_check.status | default(0)) in [200, 403] else macros.bad('DOWN') }}
+{% endfor %}
+{% endif %}
+
+{{ macros.BOLD }}[ LONGHORN STORAGE ]{{ macros.RESET }}
+{% if groups['server'] is defined and groups['server'] | length > 0 and hostvars[groups['server'][0]]._longhorn_nodes_json is defined %}
+{% set lh_nodes_data = (hostvars[groups['server'][0]]._longhorn_nodes_json | default({})).stdout | default('{"items":[]}', true) | from_json %}
+{% set lh_nodes = lh_nodes_data['items'] | default([]) %}
+{% set lh_vols_data = (hostvars[groups['server'][0]]._longhorn_volumes_json | default({})).stdout | default('{"items":[]}', true) | from_json %}
+{% set lh_vols = lh_vols_data['items'] | default([]) %}
+{% set healthy_vols = lh_vols | selectattr('status.robustness', 'equalto', 'healthy') | list | length %}
+{% set detached_vols = lh_vols | selectattr('status.robustness', 'equalto', 'detached') | list | length or lh_vols | selectattr('status.state', 'equalto', 'detached') | list | length %}
+{% set degraded_vols = lh_vols | selectattr('status.robustness', 'equalto', 'degraded') | list | length %}
+{% set faulted_vols = lh_vols | selectattr('status.robustness', 'equalto', 'faulted') | list | length %}
+    Volumes Status: {{ macros.ok(healthy_vols ~ ' Healthy') }}, {{ macros.cyan(detached_vols ~ ' Detached') if detached_vols > 0 else '0 Detached' }}, {{ macros.warn(degraded_vols ~ ' Degraded') if degraded_vols > 0 else '0 Degraded' }}, {{ macros.bad(faulted_vols ~ ' Faulted') if faulted_vols > 0 else '0 Faulted' }} (Total: {{ lh_vols | length }})
+    Nodes Status:
+{% for node in lh_nodes | sort(attribute='metadata.name') %}
+{%   set ready_cond = node.status.conditions | default([]) | selectattr('type', 'equalto', 'Ready') | first | default({'status': 'False'}) %}
+{%   set schedulable = node.spec.allowScheduling | default(false) %}
+      - {{ node.metadata.name }}: {{ macros.ok('Ready') if ready_cond.status == 'True' else macros.bad('NotReady') }}, {{ macros.ok('Schedulable') if schedulable else macros.warn('Unscheduled') }}
+{% endfor %}
+{% endif %}
+
+################################################################################
+{{ macros.BOLD }}[ EXTERNAL ACCESS & SERVICES (K3s Workloads) ]{{ macros.RESET }}
+################################################################################
+
+{{ macros.BOLD }}[ EXTERNAL ACCESS (via {{ reverse_proxy_virtual_ip }}) ]{{ macros.RESET }}
+  {{ macros.CYAN }}-- K3s Workloads --{{ macros.RESET }}
+  Prometheus (HTTPS):   {{ macros.ok('UP') if (_external_prometheus_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Loki (HTTPS):         {{ macros.ok('UP') if (_external_loki_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Grafana (HTTPS):      {{ macros.ok('UP') if (_external_grafana_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Longhorn (HTTPS):     {{ macros.ok('UP') if (_external_longhorn_ui_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Dashboard (HTTPS):    {{ macros.ok('UP') if (_external_dashboard_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Homepage (HTTPS):     {{ macros.ok('UP') if (_external_homepage_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Seaweed Filer (HTTPS): {{ macros.ok('UP') if (_external_seaweed_filer_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Seaweed S3 (HTTPS):    {{ macros.ok('UP') if (_external_seaweed_s3_ready.status | default(-1)) in [200, 403] else macros.bad('DOWN') }}
+
+{{ macros.BOLD }}[ SERVICE URLS ]{{ macros.RESET }}
+  Prometheus:      {{ macros.CYAN }}https://prometheus.k3s.{{ base_domain }}{{ macros.RESET }}
+  Grafana:         {{ macros.CYAN }}https://grafana.k3s.{{ base_domain }}{{ macros.RESET }}
+  Homepage:        {{ macros.CYAN }}https://homepage.k3s.{{ base_domain }}{{ macros.RESET }}
+  Loki:            {{ macros.CYAN }}https://loki.k3s.{{ base_domain }}{{ macros.RESET }}
+  Longhorn:        {{ macros.CYAN }}https://longhorn.k3s.{{ base_domain }}{{ macros.RESET }}
+  Dashboard:       {{ macros.CYAN }}https://dashboard.k3s.{{ base_domain }}{{ macros.RESET }}
+  Seaweed Filer:   {{ macros.CYAN }}https://seaweedfs-filer.k3s.{{ base_domain }}{{ macros.RESET }}
+  Seaweed S3:      {{ macros.CYAN }}https://seaweedfs-s3.k3s.{{ base_domain }}{{ macros.RESET }}
+
+================================================================================

@@ -7,35 +7,78 @@
 # primarily ensuring Vault is unsealed before dependent services start.
 #
 # Usage:
-#   ansible-playbook playbooks/restore.yml
+#   ansible-playbook playbooks/restore.yml -t base
+#   ansible-playbook playbooks/restore.yml -t k3s
 # ==============================================================================
+
+# 0. Force Time Sync (CRITICAL: RPi lacks RTC, ntpd often fails to jump large offsets)
+- name: "Force Time Sync (All Nodes)"
+  hosts: all
+  gather_facts: true
+  become: true
+  tags: [always, base, ntp, time]
+  tasks:
+    - name: Stop ntpd service to free port 123
+      ansible.builtin.systemd:
+        name: ntpd
+        state: stopped
+      failed_when: false
+
+    - name: Force immediate time sync (SNTP)
+      ansible.builtin.command: timeout 20s sntp -S pool.ntp.org
+      register: _sntp_sync
+      changed_when: _sntp_sync.rc == 0
+      failed_when: false
+
+    - name: Force immediate time sync (HTTP fallback via Google)
+      ansible.builtin.shell: |
+        HTTP_DATE=$(curl -s --head --connect-timeout 5 http://google.com | grep ^Date: | sed 's/Date: //g')
+        if [ -n "$HTTP_DATE" ]; then
+          date -s "$HTTP_DATE"
+        else
+          exit 1
+        fi
+      when: _sntp_sync.rc != 0
+      register: _http_sync
+      changed_when: _http_sync.rc == 0
+      failed_when: false
+
+    - name: Restart ntpd service
+      ansible.builtin.systemd:
+        name: ntpd
+        state: started
+        enabled: true
+      failed_when: false
 
 # 1. Vault Transit (CRITICAL: Must be first to allow auto-unseal)
 - name: "Restore Vault Transit"
   hosts: vault_transit
-  gather_facts: true
-  become: false
-  tags: [vault, transit]
+  gather_facts: false
+  become: true
+  tags: [never, base, vault, transit]
   tasks:
-    - name: Ensure Vault Transit is running and unsealed
-      ansible.builtin.import_role:
-        name: vault
-      vars:
-        vault_stage: transit
-        vault_enable_transit_seal: false
+    - name: Start Vault Transit container
+      ansible.builtin.command: podman start vault
+      register: _vault_start
+      changed_when: _vault_start.rc == 0
+      failed_when:
+        - _vault_start.rc != 0
+        - "'already' not in _vault_start.stderr"
 
 # 2. Vault Leader (Auto-unseal relies on Transit)
 - name: "Restore Vault Leader"
   hosts: vault_leader
   gather_facts: false
   become: true
-  tags: [vault, leader]
+  tags: [never, base, vault, leader]
   tasks:
-    - name: Start Vault Leader
+    - name: Start Vault Leader container
       ansible.builtin.command: podman start vault
-      register: _start_leader
-      changed_when: _start_leader.rc == 0
-      failed_when: false
+      register: _vault_start
+      changed_when: _vault_start.rc == 0
+      failed_when:
+        - _vault_start.rc != 0
+        - "'already' not in _vault_start.stderr"
 
     - name: Wait for Vault Leader to be unsealed
       ansible.builtin.command: /usr/local/bin/vault status -format=json
@@ -55,13 +98,15 @@
   hosts: vault_followers
   gather_facts: false
   become: true
-  tags: [vault, followers]
+  tags: [never, base, vault, followers]
   tasks:
-    - name: Start Vault Follower
+    - name: Start Vault Follower container
       ansible.builtin.command: podman start vault
-      register: _start_follower
-      changed_when: _start_follower.rc == 0
-      failed_when: false
+      register: _vault_start
+      changed_when: _vault_start.rc == 0
+      failed_when:
+        - _vault_start.rc != 0
+        - "'already' not in _vault_start.stderr"
 
     - name: Wait for Vault Follower to be unsealed
       ansible.builtin.command: /usr/local/bin/vault status -format=json
@@ -81,65 +126,135 @@
   hosts: dns_cluster
   gather_facts: false
   become: true
-  tags: [infra, dns]
+  tags: [never, base, infra, dns]
   tasks:
     - name: Start Pi-hole container
       ansible.builtin.command: podman start pihole
-      register: _start_pihole
-      changed_when: _start_pihole.rc == 0
-      failed_when: false
+      register: _pihole_start
+      changed_when: _pihole_start.rc == 0
+      failed_when:
+        - _pihole_start.rc != 0
+        - "'already' not in _pihole_start.stderr"
 
-    - name: Start Keepalived (VRRP)
-      ansible.builtin.service:
+    - name: Start Keepalived
+      ansible.builtin.systemd:
         name: keepalived
         state: started
+      register: _keepalived_start
+      until: _keepalived_start.status.ActiveState | default('') == "active"
+      retries: 5
+      delay: 5
 
 - name: "Restore Internal Load Balancer"
   hosts: internal_lb_cluster
   gather_facts: false
   become: true
-  tags: [infra, lb]
+  tags: [never, base, infra, lb]
   tasks:
-    - name: Start HAProxy and Keepalived
-      ansible.builtin.service:
-        name: "{{ item }}"
+    - name: Start HAProxy
+      ansible.builtin.systemd:
+        name: haproxy
         state: started
-      loop:
-        - haproxy
-        - keepalived
-        - haproxy-ca-watch.path
+      register: _haproxy_start
+      until: _haproxy_start.status.ActiveState | default('') == "active"
+      retries: 5
+      delay: 5
+
+    - name: Start Keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: started
+      register: _keepalived_start
+      until: _keepalived_start.status.ActiveState | default('') == "active"
+      retries: 5
+      delay: 5
 
 - name: "Restore Edge Proxy (Caddy)"
   hosts: edge_proxy_cluster
   gather_facts: false
   become: true
-  tags: [infra, proxy]
+  tags: [never, base, infra, proxy]
   tasks:
     - name: Start Caddy container
       ansible.builtin.command: podman start edge-proxy
-      register: _start_caddy
-      changed_when: _start_caddy.rc == 0
-      failed_when: false
+      register: _caddy_start
+      changed_when: _caddy_start.rc == 0
+      failed_when:
+        - _caddy_start.rc != 0
+        - "'already' not in _caddy_start.stderr"
 
-    - name: Start Keepalived (VRRP)
-      ansible.builtin.service:
+    - name: Start Keepalived
+      ansible.builtin.systemd:
         name: keepalived
         state: started
+      register: _keepalived_start
+      until: _keepalived_start.status.ActiveState | default('') == "active"
+      retries: 5
+      delay: 5
+
+- name: "Restore Etcd (Postgres coordination)"
+  hosts: postgres
+  gather_facts: true
+  become: true
+  tags: [never, k3s, infra, etcd]
+  tasks:
+    - name: Start Etcd container
+      ansible.builtin.command: podman start etcd
+      register: _etcd_start
+      changed_when: _etcd_start.rc == 0
+      failed_when:
+        - _etcd_start.rc != 0
+        - "'already' not in _etcd_start.stderr"
+
+    - name: Wait for Etcd port to be open
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(ansible_facts.default_ipv4.address) }}"
+        port: "{{ global_etcd_port | default(2379) }}"
+        timeout: 60
+
+    - name: Wait for Etcd health endpoint
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host | default(ansible_facts.default_ipv4.address) }}:{{ global_etcd_port | default(2379) }}/health"
+        status_code: 200
+      register: _etcd_health
+      retries: 20
+      delay: 3
+      until: _etcd_health.status == 200
 
 - name: "Restore Postgres"
   hosts: postgres
-  gather_facts: false
+  gather_facts: true
   become: true
-  tags: [infra, postgres]
+  tags: [never, k3s, infra, postgres]
   tasks:
+    - name: Start HAProxy
+      ansible.builtin.systemd:
+        name: "{{ postgres_haproxy_service | default('haproxy') }}"
+        state: started
+      register: _haproxy_start
+      until: _haproxy_start.status.ActiveState | default('') == "active"
+      retries: 5
+      delay: 5
+
+    - name: Start Keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: started
+      register: _keepalived_start
+      until: _keepalived_start.status.ActiveState | default('') == "active"
+      retries: 10
+      delay: 5
+
     - name: Start Postgres container
       ansible.builtin.command: podman start postgres
-      register: _start_postgres
-      changed_when: _start_postgres.rc == 0
-      failed_when: false
+      register: _postgres_start
+      changed_when: _postgres_start.rc == 0
+      failed_when:
+        - _postgres_start.rc != 0
+        - "'already' not in _postgres_start.stderr"
 
     - name: Wait for Postgres to be ready
-      ansible.builtin.command: podman exec postgres pg_isready
+      ansible.builtin.command: podman exec postgres pg_isready -p {{ postgres_port | default(5432) }}
       register: _pg_isready
       until: _pg_isready.rc == 0
       retries: 30
@@ -147,38 +262,46 @@
       changed_when: false
 
     - name: Fix Kine sequence
-      ansible.builtin.command: >-
-        podman exec -e PGPASSWORD="{{ global_k3s_db_password }}" postgres
-        psql -U {{ global_k3s_db_user | default('k3s') }}
+      ansible.builtin.shell: >-
+        podman exec -e PGPASSWORD='{{ global_k3s_db_password }}' postgres
+        psql -h {{ global_k3s_db_host }} -p {{ global_k3s_db_port | default(15432) }} -U {{ global_k3s_db_user | default('k3s') }}
         -d {{ global_k3s_db_name | default('kubernetes') }}
         -c "SELECT setval('kine_id_seq', (SELECT MAX(id) FROM kine));"
+      register: _kine_fix
+      until: _kine_fix.rc == 0
+      retries: 5
+      delay: 5
       changed_when: true
       no_log: true
+      run_once: true
+      when: inventory_hostname == groups['postgres'][0]
 
 - name: "Restore Nexus"
   hosts: artifactory
   gather_facts: false
   become: true
-  tags: [infra, artifactory]
+  tags: [never, base, infra, artifactory]
   tasks:
-    - name: Start Nexus
+    - name: Start Nexus container
       ansible.builtin.command: podman start nexus
-      register: _start_nexus
-      changed_when: _start_nexus.rc == 0
-      failed_when: false
+      register: _nexus_start
+      changed_when: _nexus_start.rc == 0
+      failed_when:
+        - _nexus_start.rc != 0
+        - "'already' not in _nexus_start.stderr"
 
 - name: "Restore K3s Cluster"
   hosts: server
   gather_facts: false
   become: true
-  tags: [infra, k3s]
+  tags: [never, k3s, infra]
   serial: 1
   tasks:
     - name: Start K3s Service
       ansible.builtin.systemd:
         name: k3s
         state: started
-        enabled: true
+        enabled: false
 
     - name: Wait for K3s Service to be Active
       ansible.builtin.systemd:
@@ -207,13 +330,13 @@
   hosts: agent
   gather_facts: false
   become: true
-  tags: [infra, k3s_agent]
+  tags: [never, k3s, infra, k3s_agent]
   tasks:
     - name: Start K3s Agent Service
       ansible.builtin.systemd:
         name: k3s-agent
         state: started
-        enabled: true
+        enabled: false
 
     - name: Wait for K3s Agent Service to be Active
       ansible.builtin.systemd:
@@ -244,25 +367,12 @@
   hosts: firefly
   gather_facts: false
   become: true
-  tags: [apps, firefly]
+  tags: [never, base, apps, firefly]
   tasks:
-    - name: Start Firefly III
+    - name: Start Firefly III container
       ansible.builtin.command: podman start firefly
-      register: _start_firefly
-      changed_when: _start_firefly.rc == 0
-      failed_when: false
-
-# 6. Wait for Services to Settle
-- name: "Wait for Services to Settle"
-  hosts: localhost
-  gather_facts: false
-  tags: [wait]
-  tasks:
-    - name: Wait 30s for containers to fully initialize
-      ansible.builtin.pause:
-        seconds: 30
-
-# 9. Verify Health
-- name: "Verify Cluster Health"
-  import_playbook: health.yml
-  tags: [health]
+      register: _firefly_start
+      changed_when: _firefly_start.rc == 0
+      failed_when:
+        - _firefly_start.rc != 0
+        - "'already' not in _firefly_start.stderr"

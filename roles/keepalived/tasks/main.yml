@@ -50,10 +50,9 @@
   become: true
   tags: [always]
 
-- name: Enable and start keepalived
+- name: Enable keepalived
   ansible.builtin.systemd:
     name: keepalived
-    state: started
     enabled: true
     daemon_reload: true
   become: true

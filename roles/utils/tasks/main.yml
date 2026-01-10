@@ -25,14 +25,12 @@
       - traceroute
       - nmap
       - whois
-      - gnu-netcat
       - httpie
       - python-pip
       - python-hvac
       - rsync
       - less
       - unzip
-      - uboot-tools
       - smartmontools
       - iproute2        # provides ss, ip
       - iputils         # provides ping, arping
@@ -47,3 +45,24 @@
   become: true
   when:
     - (ansible_facts['distribution'] | lower) == 'archlinux'
+
+- name: Install Raspberry Pi specific tools (Arch)
+  community.general.pacman:
+    state: present
+    name:
+      - uboot-tools
+      - gnu-netcat
+  become: true
+  when:
+    - (ansible_facts['distribution'] | lower) == 'archlinux'
+    - ansible_facts['architecture'] == 'aarch64'
+
+- name: Install x86_64 specific tools (Arch)
+  community.general.pacman:
+    state: present
+    name:
+      - openbsd-netcat
+  become: true
+  when:
+    - (ansible_facts['distribution'] | lower) == 'archlinux'
+    - ansible_facts['architecture'] == 'x86_64'

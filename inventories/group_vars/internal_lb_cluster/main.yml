@@ -166,15 +166,15 @@ load_balancer_haproxy_backends:
     default_server: "check inter 5s fall 2 rise 1"
     servers:
       - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
         port: 6443
         opts: "check check-ssl verify none"
       - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
         port: 6443
         opts: "check check-ssl verify none"
       - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 6443
         opts: "check check-ssl verify none"
 
@@ -184,16 +184,16 @@ load_balancer_haproxy_backends:
     balance: roundrobin
     servers:
       - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
-        port: 6443
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: "{{ global_k3s_api_port }}"
         opts: "check check-ssl verify none ssl verify none"
       - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
-        port: 6443
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: "{{ global_k3s_api_port }}"
         opts: "check check-ssl verify none ssl verify none"
       - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
-        port: 6443
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        port: "{{ global_k3s_api_port }}"
         opts: "check check-ssl verify none ssl verify none"
 
   # Pi-hole Backends
@@ -202,7 +202,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: pihole_primary
         addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
-        port: 8080
+        port: "{{ pihole_http_host_port }}"
         opts: "check"
 
   - name: pihole_replica1
@@ -210,7 +210,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: pihole_replica1
         addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
-        port: 8080
+        port: "{{ pihole_http_host_port }}"
         opts: "check"
 
   - name: pihole_replica2
@@ -218,7 +218,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: pihole_replica2
         addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
-        port: 8080
+        port: "{{ pihole_http_host_port }}"
         opts: "check"
 
   - name: pihole_backend
@@ -227,15 +227,15 @@ load_balancer_haproxy_backends:
     servers:
       - name: pihole1
         addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
-        port: 8080
+        port: "{{ pihole_http_host_port }}"
         opts: "check"
       - name: pihole2
         addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
-        port: 8080
+        port: "{{ pihole_http_host_port }}"
         opts: "check"
       - name: pihole3
         addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
-        port: 8080
+        port: "{{ pihole_http_host_port }}"
         opts: "check"
 
   # Nexus Backend
@@ -244,7 +244,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: nexus
         addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 8081
+        port: "{{ global_nexus_port }}"
         opts: "check"
 
   # Prometheus Backend
@@ -254,7 +254,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: k3s_lb
         addr: "{{ k3s_lb_vip }}"
-        port: 9000
+        port: "{{ global_k3s_traefik_port }}"
 
   # Alertmanager Backend
   - name: alertmanager_backend
@@ -263,7 +263,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: k3s_lb
         addr: "{{ k3s_lb_vip }}"
-        port: 9000
+        port: "{{ global_k3s_traefik_port }}"
 
   # Grafana Backend
   - name: grafana_backend
@@ -272,7 +272,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: k3s_lb
         addr: "{{ k3s_lb_vip }}"
-        port: 9000
+        port: "{{ global_k3s_traefik_port }}"
 
   # Loki Backend
   - name: loki_backend
@@ -281,7 +281,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: k3s_lb
         addr: "{{ k3s_lb_vip }}"
-        port: 9000
+        port: "{{ global_k3s_traefik_port }}"
 
   # Firefly Backend
   - name: firefly_backend
@@ -289,7 +289,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: firefly
         addr: "{{ hostvars['rpi5b8g1'].ansible_host }}"
-        port: 8082
+        port: "{{ global_firefly_port }}"
         opts: "check"
 
   # Longhorn UI Backend
@@ -299,7 +299,7 @@ load_balancer_haproxy_backends:
     servers:
       - name: k3s_lb
         addr: "{{ k3s_lb_vip }}"
-        port: 9000
+        port: "{{ global_k3s_traefik_port }}"
 
   # Kube State Metrics Backend
   - name: kube_state_metrics_back

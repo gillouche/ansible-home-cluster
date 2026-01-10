@@ -59,7 +59,7 @@
 
 - name: Wait for Nexus to be ready
   ansible.builtin.uri:
-    url: "http://localhost:8081/service/rest/v1/status"
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/status"
     status_code: 200
     validate_certs: false
   register: _nexus_status

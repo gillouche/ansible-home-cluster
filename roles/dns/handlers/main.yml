@@ -1,14 +1,22 @@
 ---
-# handlers for pihole
+- name: Restart pihole systemd
+  ansible.builtin.systemd:
+    name: "container-{{ pihole_container_name }}"
+    state: restarted
+    daemon_reload: true
+  become: true
+  # Use a slight delay or ignore early errors if systemd and podman are racing
+  register: _restart_pihole
+  until: _restart_pihole is succeeded
+  retries: 3
+  delay: 5
+
+- name: Restart pihole dns
+  ansible.builtin.command: "podman exec {{ pihole_container_name }} pihole restartdns"
+  become: true
 
 - name: Restart keepalived
   ansible.builtin.service:
     name: keepalived
     state: restarted
   become: true
-
-- name: Restart pihole dns
-  ansible.builtin.command: podman exec {{ pihole_container_name }} pihole reloaddns
-  become: true
-  changed_when: false
-  check_mode: no

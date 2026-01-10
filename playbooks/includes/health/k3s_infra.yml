@@ -1,0 +1,207 @@
+---
+- name: "Gather facts for localhost"
+  hosts: localhost
+  gather_facts: true
+  become: false
+  tags: [k3s, k3s_infra, health_local]
+  vars:
+    ansible_connection: local
+  tasks:
+    - name: Ensure facts are gathered # noqa: run-once
+      ansible.builtin.set_fact:
+        _health_facts_gathered: true
+      run_once: true
+
+- name: "Etcd Cluster Health Check"
+  hosts: postgres
+  gather_facts: true
+  become: false
+  tags: [k3s, k3s_infra, health_etcd]
+  tasks:
+    - name: Query Etcd health status (Individual Nodes)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ global_etcd_port | default(2379) }}/health"
+        method: GET
+        status_code: 200
+      register: _etcd_node_health
+      failed_when: false
+
+- name: "Postgres HA Health Check"
+  hosts: postgres
+  gather_facts: true
+  become: false
+  tags: [k3s, k3s_infra, health_postgres]
+  vars_files:
+    - ../../../roles/postgres/defaults/main.yml
+  tasks:
+    - name: Check Patroni API Health (Individual Nodes)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ postgres_patroni_port | default(8008) }}/leader"
+        method: GET
+        status_code: [200, 503]
+      register: _patroni_node_health
+      failed_when: false
+
+    - name: Check Local HAProxy Port ({{ global_k3s_db_port | default(15432) }})
+      ansible.builtin.wait_for:
+        port: "{{ global_k3s_db_port | default(15432) }}"
+        host: 127.0.0.1
+        timeout: 5
+      register: _postgres_proxy_port
+      failed_when: false
+
+    - name: Check Postgres Container Port ({{ postgres_port | default(5432) }})
+      ansible.builtin.wait_for:
+        port: "{{ postgres_port | default(5432) }}"
+        host: 127.0.0.1
+        timeout: 5
+      register: _postgres_container_port
+      failed_when: false
+
+    - name: Check Postgres Ready (Command)
+      ansible.builtin.command: "podman exec {{ postgres_container_name }} pg_isready -U {{ postgres_db_user }} -p {{ postgres_port }}"
+      register: _postgres_cmd_check
+      become: true
+      failed_when: false
+      changed_when: false
+
+- name: "Postgres VIP Health Check"
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tags: [k3s, k3s_infra, health_postgres]
+  tasks:
+    - name: Verify Postgres connectivity via VIP
+      ansible.builtin.wait_for:
+        host: "{{ global_k3s_db_host }}"
+        port: "{{ global_k3s_db_port | default(15432) }}"
+        timeout: 5
+      register: _postgres_vip_check
+      failed_when: false
+
+- name: "K3s Cluster Health Check"
+  hosts: server
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_infra, health_k3s]
+  vars_files:
+    - ../../../inventories/group_vars/k3s_cluster/main.yml
+    - ../../../inventories/group_vars/all/main.yml
+  tasks:
+    - name: Check K3s Service Status
+      ansible.builtin.systemd:
+        name: k3s
+      register: _k3s_service_status
+      failed_when: false
+
+    - name: Check Node Readiness (kubectl)
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      register: _k3s_node_status
+      changed_when: false
+      failed_when: false
+
+    - name: Check API VIP Reachability
+      ansible.builtin.uri:
+        url: "https://{{ k3s_api_vip }}:6443/healthz"
+        validate_certs: false
+        status_code: [200, 401]
+      register: _k3s_vip_status
+      failed_when: false
+
+    - name: Check K3s LB VIP Reachability
+      ansible.builtin.uri:
+        url: "http://{{ k3s_lb_vip }}:9000"
+        validate_certs: false
+        status_code: [200, 404] # 404 is fine as long as we reach Traefik
+      register: _k3s_lb_vip_status
+      failed_when: false
+
+    - name: Verify ArgoCD via LB VIP (HAProxy)
+      ansible.builtin.uri:
+        url: "http://{{ load_balancer_virtual_ip }}/"
+        method: GET
+        headers:
+          Host: "argocd.k3s.{{ base_domain }}"
+        status_code: [200]
+      register: _lb_argocd_health_check
+      failed_when: false
+
+    - name: Check ArgoCD Deployment Status
+      ansible.builtin.command: k3s kubectl get deployment -n argocd -o json
+      register: _argocd_deployment_status
+      changed_when: false
+      failed_when: false
+
+- name: "External Services Health Check - K3s Infra (via Proxy)"
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tags: [k3s, k3s_infra, health_external]
+  tasks:
+    - name: Verify K3s API (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        --resolve api.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://api.k3s.{{ base_domain }}/healthz
+      register: _external_k3s_api_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set K3s API status fact
+      ansible.builtin.set_fact:
+        _external_k3s_api_ready:
+          status: "{{ _external_k3s_api_ready_cmd.stdout | int if _external_k3s_api_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify ArgoCD via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
+        --resolve argocd.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://argocd.k3s.{{ base_domain }}
+      register: _external_argocd_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set ArgoCD status fact
+      ansible.builtin.set_fact:
+        _external_argocd_ready:
+          status: "{{ _external_argocd_ready_cmd.stdout | int if _external_argocd_ready_cmd.stdout | length > 0 else 0 }}"
+
+- name: "K3s Platform Health Report"
+  hosts: localhost
+  gather_facts: false
+  tags: [k3s, k3s_infra, health_summary]
+  vars_files:
+    - ../../../inventories/group_vars/all/main.yml
+  tasks:
+    - name: Render health report # noqa: run-once no-relative-paths
+      ansible.builtin.template:
+        src: "../../templates/health_summary_k3s_infra.j2"
+        dest: /tmp/cluster-health-report-k3s-infra.txt
+        mode: '0644'
+      run_once: true
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+
+    - name: Show health report # noqa: run-once
+      ansible.builtin.pause:
+        prompt: "{{ lookup('file', '/tmp/cluster-health-report-k3s-infra.txt') }}"
+      run_once: true
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+
+- name: "Layer 2 Checkpoint: K3s Platform"
+  hosts: localhost
+  gather_facts: false
+  tags: [k3s, k3s_infra, health_checkpoint]
+  tasks:
+    - name: Assert K3s Platform Health
+      ansible.builtin.assert:
+        that:
+          - (groups['postgres'] | map('extract', hostvars, '_etcd_node_health') | select('defined') | map(attribute='status', default=0) | select('equalto', 200) | list | length) >= ((groups['postgres'] | length / 2) | round(0, 'ceil') | int)
+          - hostvars['localhost']._postgres_vip_check.state | default('skipped') in ['started', 'skipped']
+          - (groups['server'] | map('extract', hostvars, '_k3s_vip_status') | select('defined') | map(attribute='status', default=0) | intersect([200, 401]) | list | length) > 0
+        fail_msg: "CRITICAL: K3s Platform Infrastructure (Etcd, Postgres, or K3s VIP) is DOWN. Cannot proceed to workloads."
+        success_msg: "K3s Platform is healthy. Proceeding to K3s Workloads layer."
+      ignore_errors: "{{ 'k3s_apps' not in ansible_run_tags and 'all' not in ansible_run_tags }}"

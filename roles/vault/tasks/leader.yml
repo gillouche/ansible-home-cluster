@@ -250,8 +250,8 @@
 - name: Extract known root token for verification
   ansible.builtin.set_fact:
     _known_token: >-
-      {{ ((_cluster_init_loaded.content | default('{}') | b64decode | from_json).root_token) | default('') }}
-  when: _cluster_init_loaded is defined
+      {{ ((_cluster_init_loaded.content | default('e30=') | b64decode | from_json).root_token) | default('') }}
+  when: _cluster_init_loaded.content is defined
 
 - name: Check Root Token Validity (if initialized and unsealed)
   ansible.builtin.command: /usr/local/bin/vault token lookup -format=json

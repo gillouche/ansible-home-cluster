@@ -1,9 +1,15 @@
+vrrp_script check_pihole {
+  script "/usr/bin/podman healthcheck run pihole || /usr/bin/pgrep -f pihole"
+  interval 3
+  weight 2
+}
+
 vrrp_instance VI_Pihole {
-state {{ vrrp_state }}
-interface {{ vrrp_interface }}
-virtual_router_id 51
-priority {{ vrrp_priority }}
-advert_int 1
+  state {{ vrrp_state }}
+  interface {{ vrrp_interface }}
+  virtual_router_id 51
+  priority {{ vrrp_priority }}
+  advert_int 1
 
   authentication {
     auth_type PASS
@@ -12,5 +18,9 @@ advert_int 1
 
   virtual_ipaddress {
     {{ vip_address }}/{{ pihole_vip_prefixlen }}
+  }
+
+  track_script {
+    check_pihole
   }
 }

@@ -72,18 +72,32 @@
     - name: Browser and System Trust (macOS)
       when: ansible_os_family == 'Darwin'
       block:
+        - name: Get local certificate fingerprint
+          ansible.builtin.command: openssl x509 -noout -fingerprint -sha256 -in "{{ homelab_root_ca_cert_path }}"
+          register: _local_cert_fingerprint
+          changed_when: false
+
         - name: Check if Homelab Root CA is in macOS keychain
-          ansible.builtin.command: security find-certificate -c "Homelab Root CA"
+          ansible.builtin.shell: |
+            set -o pipefail
+            security find-certificate -c "Homelab Root CA" -p | openssl x509 -noout -fingerprint -sha256
           register: _macos_cert_check
           failed_when: false
           changed_when: false
+
+        - name: Remove old Homelab Root CA from macOS keychain if fingerprint mismatch
+          ansible.builtin.command: security delete-certificate -c "Homelab Root CA"
+          when:
+            - _macos_cert_check.rc == 0
+            - _local_cert_fingerprint.stdout not in _macos_cert_check.stdout
+          changed_when: true
 
         - name: Install Homelab Root CA into macOS login keychain
           ansible.builtin.command: >-
             security add-trusted-cert -d -r trustRoot -k /Users/{{ ansible_user_id }}/Library/Keychains/login.keychain-db
             "{{ homelab_root_ca_cert_path }}"
           changed_when: true
-          when: _macos_cert_check.rc != 0
+          when: _macos_cert_check.rc != 0 or _local_cert_fingerprint.stdout not in _macos_cert_check.stdout
 
         - name: Firefox Enterprise Roots (macOS)
           when: vault_firefox_enable_enterprise_roots | default(false) | bool

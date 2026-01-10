@@ -1,0 +1,69 @@
+---
+- name: Install base GPU and ROCm requirements (Arch)
+  community.general.pacman:
+    name:
+      - linux-firmware
+      - mesa
+      - xf86-video-amdgpu
+      - rocm-hip-runtime
+      - rocm-opencl-runtime
+      - rocminfo
+    state: present
+    update_cache: true
+  become: true
+
+- name: Ensure amdgpu module is not blacklisted
+  ansible.builtin.file:
+    path: /etc/modprobe.d/blacklist-amdgpu.conf
+    state: absent
+  become: true
+  notify: Regenerate initramfs
+
+- name: Check if amdgpu is in mkinitcpio MODULES
+  ansible.builtin.shell: grep '^MODULES=' /etc/mkinitcpio.conf | grep -q amdgpu
+  register: _amdgpu_in_modules
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Add amdgpu to mkinitcpio MODULES
+  ansible.builtin.replace:
+    path: /etc/mkinitcpio.conf
+    regexp: '^MODULES=\((.*)\)'
+    replace: 'MODULES=(\1 amdgpu)'
+  become: true
+  notify: Regenerate initramfs
+  when: _amdgpu_in_modules.rc != 0
+
+- name: Create ROCm environment profile
+  ansible.builtin.copy:
+    dest: /etc/profile.d/rocm.sh
+    content: |
+      export PATH=/opt/rocm/bin:$PATH
+      export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+    mode: '0644'
+  become: true
+
+- name: Ensure k3s user (root) is in render and video groups
+  ansible.builtin.user:
+    name: root
+    groups: render,video
+    append: true
+  become: true
+
+- name: Increase shared memory limit for ROCm/ML workloads
+  ansible.posix.sysctl:
+    name: kernel.shmmax
+    value: '68719476736' # 64GB
+    state: present
+    reload: true
+  become: true
+
+- name: Validate ROCm installation
+  ansible.builtin.command: /opt/rocm/bin/rocminfo
+  register: _rocminfo_check
+  changed_when: false
+  failed_when: _rocminfo_check.rc != 0
+  become: true
+  tags:
+    - validation

@@ -17,3 +17,12 @@ pool 3.pool.ntp.org iburst
 restrict default nomodify nopeer noquery
 restrict 127.0.0.1
 restrict ::1
+
+# Ignore virtual interfaces to prevent crashes during startup
+# (Known issue with AARCH64/Arch assertions when binding to unstable veth/flannel IPs)
+interface ignore wildcard
+interface listen 127.0.0.1
+interface listen ::1
+{% if ansible_facts['default_ipv4']['address'] is defined %}
+interface listen {{ ansible_facts['default_ipv4']['address'] }}
+{% endif %}

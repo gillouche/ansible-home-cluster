@@ -1,3 +1,9 @@
+vrrp_script check_k3s_lb {
+  script "/usr/bin/pgrep -f 'k3s server'"
+  interval 3
+  weight 2
+}
+
 vrrp_instance VI_K3s_LB {
   state {{ 'MASTER' if inventory_hostname == groups['server'][0] else 'BACKUP' }}
   interface {{ k3s_lb_vrrp_interface | default('end0') }}
@@ -12,5 +18,9 @@ vrrp_instance VI_K3s_LB {
 
   virtual_ipaddress {
     {{ k3s_lb_vip }}/{{ k3s_lb_vip_prefixlen }}
+  }
+
+  track_script {
+    check_k3s_lb
   }
 }

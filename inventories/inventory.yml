@@ -45,8 +45,26 @@ all:
       ansible_host: 192.168.0.86
       ansible_ssh_user: alarm
       target_user: alarm
+    homeserver:
+      ansible_host: 192.168.0.87
+      ansible_ssh_user: alarm
+      target_user: alarm
 
   children:
+    devices:
+      hosts:
+        rpi4b8g1:
+        rpi4b8g2:
+        rpi4b8g3:
+        rpi4b8g4:
+        rpi5b8g1:
+        rpi5b16g1ssd:
+        rpi5b16g2ssd:
+        rpi5b16g3ssd:
+        rpi5b16g4:
+        rpi5b16g5:
+        rpi5b16g6:
+        homeserver:
     dns_cluster:
       hosts:
         rpi5b16g4:
@@ -107,73 +125,100 @@ all:
         rpi5b8g1:
     postgres:
       hosts:
+        rpi5b16g1ssd:
+        rpi5b16g2ssd:
         rpi5b16g3ssd:
+    postgres_leader:
+      hosts:
+        rpi5b16g3ssd:
+    postgres_replicas:
+      hosts:
+        rpi5b16g1ssd:
+        rpi5b16g2ssd:
     k3s_cluster:
       children:
         server:
           hosts:
-            rpi5b16g4:
+            rpi5b16g1ssd:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: stable
-                storage: ephemeral
-            rpi5b16g5:
+                storage: ssd
+                gpu: false
+                node.longhorn.io/create-default-disk: "true"
+            rpi5b16g2ssd:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: stable
-                storage: ephemeral
-            rpi5b16g6:
+                storage: ssd
+                gpu: false
+                node.longhorn.io/create-default-disk: "true"
+            rpi5b16g3ssd:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: stable
-                storage: ephemeral
+                storage: ssd
+                gpu: false
+                node.longhorn.io/create-default-disk: "true"
         agent:
           hosts:
             rpi4b8g1:
               k3s_node_labels:
                 node-class: rpi4
                 reliability: best-effort
-                storage: ephemeral
+                storage: sdcard
+                gpu: false
             rpi4b8g2:
               k3s_node_labels:
                 node-class: rpi4
                 reliability: best-effort
-                storage: ephemeral
+                storage: sdcard
+                gpu: false
             rpi4b8g3:
               k3s_node_labels:
                 node-class: rpi4
                 reliability: best-effort
-                storage: ephemeral
+                storage: sdcard
+                gpu: false
             rpi4b8g4:
               k3s_node_labels:
                 node-class: rpi4
                 reliability: best-effort
-                storage: ephemeral
+                storage: sdcard
+                gpu: false
             rpi5b8g1:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: best-effort
-                storage: ephemeral
-            rpi5b16g1ssd:
+                storage: sdcard
+                gpu: false
+            rpi5b16g4:
               k3s_node_labels:
                 node-class: rpi5
-                reliability: preferred
-                storage: ssd
-                node.longhorn.io/create-default-disk: "true"
-            rpi5b16g2ssd:
+                reliability: best-effort
+                storage: sdcard
+                gpu: false
+            rpi5b16g5:
               k3s_node_labels:
                 node-class: rpi5
-                reliability: preferred
-                storage: ssd
-                node.longhorn.io/create-default-disk: "true"
-            rpi5b16g3ssd:
+                reliability: best-effort
+                storage: sdcard
+                gpu: false
+            rpi5b16g6:
               k3s_node_labels:
                 node-class: rpi5
+                reliability: best-effort
+                storage: sdcard
+                gpu: false
+            homeserver:
+              k3s_node_labels:
+                node-class: homeserver
                 reliability: preferred
                 storage: ssd
-                node.longhorn.io/create-default-disk: "true"
+                gpu: true
         agent_storage:
           hosts:
             rpi5b16g1ssd:
             rpi5b16g2ssd:
             rpi5b16g3ssd:
+            homeserver:

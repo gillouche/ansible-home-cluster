@@ -1,3 +1,9 @@
+vrrp_script check_haproxy_lb {
+  script "/usr/bin/killall -0 haproxy"
+  interval 2
+  weight 2
+}
+
 vrrp_instance VI_LoadBalancer {
   state {{ vrrp_state }}
   interface {{ vrrp_interface }}
@@ -12,5 +18,9 @@ vrrp_instance VI_LoadBalancer {
 
   virtual_ipaddress {
     {{ vip_address }}/{{ load_balancer_vip_prefixlen }}
+  }
+
+  track_script {
+    check_haproxy_lb
   }
 }

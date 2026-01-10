@@ -1,17 +1,79 @@
 ---
-- name: "Setup Postgres for HA k3s"
+- name: "Setup Etcd for Patroni + keepalived"
   hosts: postgres
+  gather_facts: true
+  become: true
+  tags: [k3s, etcd, postgres]
+  roles:
+    - role: etcd
+    - role: keepalived
+
+- name: "Verify Etcd Cluster Health"
+  hosts: postgres
+  gather_facts: false
+  become: false
+  tags: [k3s, etcd, postgres]
+  tasks:
+    - name: Wait for Etcd health endpoint
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host | default(ansible_facts.default_ipv4.address) }}:2379/health"
+        status_code: 200
+      register: _etcd_health
+      retries: 15
+      delay: 2
+      until: _etcd_health.status == 200
+
+- name: "Setup Postgres Leader"
+  hosts: postgres_leader
   gather_facts: true
   become: true
   tags: [k3s, postgres]
   roles:
     - role: postgres
 
+- name: "Setup Postgres Followers"
+  hosts: postgres_replicas
+  gather_facts: true
+  become: true
+  tags: [k3s, postgres]
+  roles:
+    - role: postgres
+
+- name: "Verify Postgres VIP and HAProxy Readiness"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [k3s, postgres]
+  tasks:
+    - name: Wait for Postgres VIP to respond on HAProxy port
+      ansible.builtin.wait_for:
+        host: "{{ global_k3s_db_host }}"
+        port: "{{ global_k3s_db_port }}"
+        state: started
+        timeout: 60
+
 - name: Cluster prep
   hosts: k3s_cluster
   gather_facts: true
   become: true
   tags: [k3s, k3s_prep]
+  pre_tasks:
+    - name: Check for default K3s directory
+      ansible.builtin.stat:
+        path: /var/lib/rancher/k3s
+      register: _default_k3s_dir
+
+    - name: Remove default K3s directory if it conflicts with custom location
+      ansible.builtin.file:
+        path: /var/lib/rancher/k3s
+        state: absent
+      when:
+        - "'server' in group_names"
+        - k3s_server_location is defined
+        - k3s_server_location != '/var/lib/rancher/k3s'
+        - _default_k3s_dir.stat.exists
+        - _default_k3s_dir.stat.isdir
+        - not _default_k3s_dir.stat.islnk
   roles:
     - role: k3s.orchestration.prereq
     - role: k3s.orchestration.raspberrypi
@@ -20,6 +82,15 @@
   hosts: server
   become: true
   tags: [k3s, k3s_server]
+  pre_tasks:
+    - name: Ensure K3s data directory exists on SSD
+      ansible.builtin.file:
+        path: "{{ k3s_server_location }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      when: k3s_server_location is defined
   roles:
     - role: k3s_networking
     - role: k3s.orchestration.k3s_server
@@ -32,12 +103,12 @@
   tasks:
     - name: Check for node-token
       ansible.builtin.stat:
-        path: /var/lib/rancher/k3s/server/node-token
+        path: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/node-token"
       register: _node_token_stat
 
     - name: Read node-token
       ansible.builtin.slurp:
-        src: /var/lib/rancher/k3s/server/node-token
+        src: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/node-token"
       register: _node_token_content
       when: _node_token_stat.stat.exists
 
@@ -50,6 +121,10 @@
   hosts: agent
   become: true
   tags: [k3s, k3s_agent]
+  pre_tasks:
+    - name: Ensure systemd is reloaded before agent setup
+      ansible.builtin.systemd:
+        daemon_reload: true
   roles:
     - role: k3s.orchestration.k3s_agent
 

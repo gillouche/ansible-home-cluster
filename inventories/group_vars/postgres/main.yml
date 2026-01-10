@@ -1,2 +1,2 @@
 ---
-postgres_image: postgres:18.1-alpine
+postgres_image: "ghcr.io/zalando/spilo-16:3.3-p1"

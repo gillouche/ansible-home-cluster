@@ -1,4 +1,40 @@
 ---
+- name: Ensure all K3s nodes are healthy and reachable
+  ansible.builtin.shell: |
+    kubectl get nodes --no-headers
+  register: _k3s_nodes_check
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  changed_when: false
+  until:
+    - _k3s_nodes_check.rc == 0
+    - "(_k3s_nodes_check.stdout_lines | length) >= (groups['k3s_cluster'] | length)"
+    - "not 'NotReady' in _k3s_nodes_check.stdout"
+  retries: 5
+  delay: 10
+
+- name: Identify missing or unhealthy nodes
+  ansible.builtin.set_fact:
+    missing_nodes: "{{ groups['k3s_cluster'] | reject('in', _k3s_nodes_check.stdout) | list }}"
+    not_ready_nodes: "{{ _k3s_nodes_check.stdout_lines | select('search', 'NotReady') | map('split') | map('first') | list }}"
+  run_once: true
+
+- name: Assert K3s cluster health
+  ansible.builtin.assert:
+    that:
+      - _k3s_nodes_check.rc == 0
+      - (missing_nodes | length) == 0
+      - (not_ready_nodes | length) == 0
+    fail_msg: |
+      K3s cluster is not healthy!
+      Missing nodes: {{ missing_nodes | join(', ') }}
+      NotReady nodes: {{ not_ready_nodes | join(', ') }}
+      Current nodes in cluster:
+      {{ _k3s_nodes_check.stdout }}
+    success_msg: "All K3s nodes are healthy. Proceeding to apply labels."
+  run_once: true
+
 - name: Prepare K3s node labels list
   ansible.builtin.set_fact:
     k3s_labels_to_apply: |
