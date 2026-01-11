@@ -241,17 +241,31 @@
   failed_when: false
   become: true
 
-- name: Parse Remediation Status
+- name: Initialize Remediation Status defaults
   ansible.builtin.set_fact:
-    _rem_is_init: "{{ (_rem_status.stdout | from_json).initialized | default(false) }}"
-    _rem_is_sealed: "{{ (_rem_status.stdout | from_json).sealed | default(true) }}"
-  when: _rem_status.rc == 0
+    _rem_is_init: false
+    _rem_is_sealed: true
+  when: _rem_status.rc is defined
 
-- name: Extract known root token for verification
+- name: Parse Remediation Status (if valid JSON)
   ansible.builtin.set_fact:
-    _known_token: >-
-      {{ ((_cluster_init_loaded.content | default('e30=') | b64decode | from_json).root_token) | default('') }}
+    _rem_is_init: "{{ (_rem_status.stdout | default('{}', true) | from_json).initialized | default(false) }}"
+    _rem_is_sealed: "{{ (_rem_status.stdout | default('{}', true) | from_json).sealed | default(true) }}"
+  when:
+    - _rem_status.rc is defined
+    - (_rem_status.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+
+- name: Initialize known root token default
+  ansible.builtin.set_fact:
+    _known_token: ''
   when: _cluster_init_loaded.content is defined
+
+- name: Extract known root token for verification (if valid JSON)
+  ansible.builtin.set_fact:
+    _known_token: "{{ ((_cluster_init_loaded.content | b64decode | default('{}', true) | from_json).root_token) | default('') }}"
+  when:
+    - _cluster_init_loaded.content is defined
+    - (_cluster_init_loaded.content | b64decode | regex_search('^\s*[\[{]')) != ''
 
 - name: Check Root Token Validity (if initialized and unsealed)
   ansible.builtin.command: /usr/local/bin/vault token lookup -format=json
@@ -330,9 +344,14 @@
   failed_when: false
   become: true
 
-- name: Detect if Vault needs initialization (Fresh install or wipe)
+- name: Initialize Vault needs initialization default
   ansible.builtin.set_fact:
-    vault_needs_init: "{{ not ((_leader_status_preinit.stdout | default('{}') | from_json).initialized | default(false)) }}"
+    vault_needs_init: true
+
+- name: Detect if Vault needs initialization (if valid JSON)
+  ansible.builtin.set_fact:
+    vault_needs_init: "{{ not ((_leader_status_preinit.stdout | default('{}', true) | from_json).initialized | default(false)) }}"
+  when: (_leader_status_preinit.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Backup stale cluster-init.json if Vault is fresh
   ansible.builtin.copy:
@@ -364,6 +383,7 @@
       - (_leader_init.stdout | default('') | regex_search('^\s*[\[{]')) != ''
     fail_msg: >-
       Vault leader init output was not JSON. Ensure the CLI honors -format=json. The role sets VAULT_FORMAT=json.
+      Actual output: {{ _leader_init.stdout | default('EMPTY') }}
   when:
     - _leader_init is defined
     - (_leader_init.rc | default(1)) == 0
@@ -378,6 +398,7 @@
   when:
     - _leader_init is defined
     - (_leader_init.rc | default(1)) == 0
+    - (_leader_init.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Load root token from controller init JSON if not provided (leader)
   ansible.builtin.slurp:
@@ -392,22 +413,20 @@
 
 - name: Set vault_root_token from controller file (leader)
   ansible.builtin.set_fact:
-    vault_root_token: >-
-      {{ (
-            (_leader_init_json.content | default('') | b64decode | default('{}', true))
-          | from_json
-        ).root_token | default(vault_root_token | default('')) }}
+    vault_root_token: "{{ (_leader_init_json.content | b64decode | default('{}', true) | from_json).root_token | default(vault_root_token | default('')) }}"
   when:
     - (vault_root_token | default('') | length) == 0
-    - (_leader_init_json is defined)
+    - (_leader_init_json.content is defined)
     - not vault_needs_init
+    - (_leader_init_json.content | b64decode | regex_search('^\s*[\[{]')) != ''
 
 - name: Set vault_root_token from leader init output when file just created (leader)
   ansible.builtin.set_fact:
-    vault_root_token: "{{ (_leader_init.stdout | from_json).root_token }}"
+    vault_root_token: "{{ (_leader_init.stdout | default('{}', true) | from_json).root_token }}"
   when:
     - _leader_init is defined
     - (_leader_init.rc | default(1)) == 0
+    - (_leader_init.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Write /root/.vault-token when vault_root_token is available (leader)
   ansible.builtin.copy:
@@ -465,7 +484,8 @@
   delay: "{{ vault_wait_delay | default(2) }}"
   until: >-
     (_leader_status_after_init.rc | default(1)) == 0 and
-    ((_leader_status_after_init.stdout | from_json).sealed | default(true)) == false
+    ((_leader_status_after_init.stdout | default('{}', true) | regex_search('^\s*[\[{]')) != '') and
+    ((_leader_status_after_init.stdout | default('{}', true) | from_json).sealed | default(true)) == false
   become: true
   when:
     - vault_enable_transit_seal | default(false)
@@ -475,19 +495,21 @@
   ansible.builtin.copy:
     dest: "{{ vault_init_export_path | expanduser }}"
     mode: '0600'
-    content: "{{ (_leader_init.stdout | from_json) | to_nice_json }}"
+    content: "{{ (_leader_init.stdout | default('{}', true) | from_json) | to_nice_json }}"
   delegate_to: localhost
   run_once: true
   when:
     - _leader_init is defined
     - _leader_init.changed
+    - (_leader_init.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Set vault_root_token from leader init output (transit leader)
   ansible.builtin.set_fact:
-    vault_root_token: "{{ (_leader_init.stdout | from_json).root_token }}"
+    vault_root_token: "{{ (_leader_init.stdout | default('{}', true) | from_json).root_token }}"
   when:
     - _leader_init is defined
     - _leader_init.changed
+    - (_leader_init.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Write /root/.vault-token when vault_root_token is available (transit leader)
   ansible.builtin.copy:

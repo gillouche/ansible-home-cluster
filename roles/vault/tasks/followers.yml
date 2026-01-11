@@ -32,12 +32,10 @@
 
 - name: Set vault_root_token from controller file
   ansible.builtin.set_fact:
-    vault_root_token: >-
-      {{ (
-            (_cluster_init_loaded.content | default('') | b64decode | default('{}', true))
-          | from_json
-        ).root_token | default(vault_root_token | default('')) }}
-  when: _cluster_init_loaded.content is defined
+    vault_root_token: "{{ (_cluster_init_loaded.content | b64decode | default('{}', true) | from_json).root_token | default(vault_root_token | default('')) }}"
+  when:
+    - _cluster_init_loaded.content is defined
+    - (_cluster_init_loaded.content | b64decode | regex_search('^\s*[\[{]')) != ''
 
 - name: Ensure TLS directory exists for follower
   ansible.builtin.file:
@@ -267,10 +265,11 @@
   delay: "{{ vault_wait_delay | default(2) }}"
   until: >-
     (_follower_status_after_init.rc | default(1)) == 0 and
-    not ((_follower_status_after_init.stdout | from_json).sealed | default(true))
+    ((_follower_status_after_init.stdout | default('{}', true) | regex_search('^\s*[\[{]')) != '') and
+    not ((_follower_status_after_init.stdout | default('{}', true) | from_json).sealed | default(true))
   become: true
   when:
     - vault_enable_transit_seal | default(false)
     - inventory_hostname in (groups['vault_followers'] | default([]))
-    - (_follower_status_preinit.stdout | default('{}')) | length > 0
-    - (not ((_follower_status_preinit.stdout | from_json).initialized | default(false)) | bool)
+    - (_follower_status_preinit.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+    - (not ((_follower_status_preinit.stdout | default('{}', true) | from_json).initialized | default(false)) | bool)

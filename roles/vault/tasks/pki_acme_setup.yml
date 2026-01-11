@@ -36,7 +36,9 @@
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
   changed_when: true
-  when: "'pki/' not in (_vault_secrets_list.stdout | from_json)"
+  when:
+    - (_vault_secrets_list.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+    - "'pki/' not in (_vault_secrets_list.stdout | default('{}', true) | from_json)"
 
 - name: Generate PKI Intermediate CA CSR
   ansible.builtin.command: >
@@ -53,11 +55,13 @@
 
 - name: Fetch PKI Intermediate CA CSR to controller # noqa: no-handler
   ansible.builtin.copy:
-    content: "{{ (_generated_pki_csr_cmd.stdout | from_json).data.csr }}"
+    content: "{{ (_generated_pki_csr_cmd.stdout | default('{}', true) | from_json).data.csr }}"
     dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/vault-pki-intermediate.csr"
     mode: '0600'
   delegate_to: localhost
-  when: _generated_pki_csr_cmd.changed
+  when:
+    - _generated_pki_csr_cmd.changed
+    - (_generated_pki_csr_cmd.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Create Python script to sign Intermediate CA
   ansible.builtin.copy:
@@ -215,11 +219,13 @@
     VAULT_SKIP_VERIFY: "true"
   register: _pki_issuers_list
   changed_when: false
-  when: (_pki_issuers_config.stdout | from_json).data.default == ""
+  when:
+    - (_pki_issuers_config.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+    - (_pki_issuers_config.stdout | default('{}', true) | from_json).data.default == ""
 
 - name: Find pki intermediate issuer ID
   ansible.builtin.shell: |
-    for issuer in {{ (_pki_issuers_list.stdout | from_json) | join(' ') }}; do
+    for issuer in {{ (_pki_issuers_list.stdout | default('[]', true) | from_json) | join(' ') }}; do
       subject=$(/usr/local/bin/vault read -format=json pki/issuer/$issuer | jq -r '.data.certificate' | openssl x509 -noout -subject)
       if echo "$subject" | grep -q "Homelab Intermediate CA"; then
         echo "$issuer"
@@ -234,8 +240,10 @@
   register: _pki_intermediate_issuer_id
   changed_when: false
   when:
-    - (_pki_issuers_config.stdout | from_json).data.default == ""
+    - (_pki_issuers_config.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+    - (_pki_issuers_config.stdout | default('{}', true) | from_json).data.default == ""
     - _pki_issuers_list.rc == 0
+    - (_pki_issuers_list.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Set default pki issuer
   ansible.builtin.command: >
@@ -247,7 +255,8 @@
     VAULT_SKIP_VERIFY: "true"
   changed_when: true
   when:
-    - (_pki_issuers_config.stdout | from_json).data.default == ""
+    - (_pki_issuers_config.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+    - (_pki_issuers_config.stdout | default('{}', true) | from_json).data.default == ""
     - _pki_intermediate_issuer_id.rc == 0
 
 # Check if PKI mount 'pki_int' is already configured
@@ -272,7 +281,9 @@
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
   changed_when: true
-  when: "'pki_int/' not in (_vault_secrets_list.stdout | from_json)"
+  when:
+    - (_vault_secrets_list.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+    - "'pki_int/' not in (_vault_secrets_list.stdout | default('{}', true) | from_json)"
 
 - name: Generate PKI_INT Intermediate CA CSR
   ansible.builtin.command: >
@@ -289,18 +300,22 @@
 
 - name: Fetch PKI_INT Intermediate CA CSR to controller # noqa: no-handler
   ansible.builtin.copy:
-    content: "{{ (_generated_pki_int_csr_cmd.stdout | from_json).data.csr }}"
+    content: "{{ (_generated_pki_int_csr_cmd.stdout | default('{}', true) | from_json).data.csr }}"
     dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/vault-pki-int-sub-intermediate.csr"
     mode: '0600'
   delegate_to: localhost
-  when: _generated_pki_int_csr_cmd.changed
+  when:
+    - _generated_pki_int_csr_cmd.changed
+    - (_generated_pki_int_csr_cmd.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Copy PKI_INT Intermediate CA CSR to Vault leader # noqa: no-handler
   ansible.builtin.copy:
     src: "{{ vault_cluster_ca_dir_controller | expanduser }}/vault-pki-int-sub-intermediate.csr"
     dest: /tmp/vault-pki-int-sub-intermediate.csr
     mode: '0644'
-  when: _generated_pki_int_csr_cmd.changed
+  when:
+    - _generated_pki_int_csr_cmd.changed
+    - (_generated_pki_int_csr_cmd.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Sign PKI_INT Intermediate CA CSR with Vault PKI # noqa: no-handler
   ansible.builtin.command: >
@@ -318,7 +333,7 @@
 
 - name: Copy signed PKI_INT Intermediate CA certificate back to Vault leader # noqa: no-handler
   ansible.builtin.copy:
-    content: "{{ (_signed_pki_int_csr.stdout | from_json).data.certificate }}"
+    content: "{{ (_signed_pki_int_csr.stdout | default('{}', true) | from_json).data.certificate }}"
     dest: "{{ vault_host_tls_dir }}/vault-pki-int-sub-intermediate.crt"
     owner: "{{ vault_runtime_user | default('vault') }}"
     group: "{{ vault_runtime_group_name | default('vault') }}"
@@ -336,7 +351,9 @@
     VAULT_SKIP_VERIFY: "true"
   changed_when: true
   become: true
-  when: _signed_pki_int_csr.changed # Only set if a new cert was just signed
+  when:
+    - _signed_pki_int_csr.changed
+    - (_signed_pki_int_csr.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Configure intermediate PKI cluster (pki_int)
   ansible.builtin.command: >
@@ -449,12 +466,14 @@
 
 - name: Store edge-proxy token on controller # noqa: no-handler
   ansible.builtin.copy:
-    content: "{{ (_edge_proxy_token_output.stdout | from_json).auth.client_token }}"
+    content: "{{ (_edge_proxy_token_output.stdout | default('{}', true) | from_json).auth.client_token }}"
     dest: "{{ vault_edge_proxy_token_path }}"
     mode: '0600'
   delegate_to: localhost
   become: false
-  when: _edge_proxy_token_output.changed or (not _edge_proxy_token_stat.stat.exists and _edge_proxy_token_output.stdout is defined)
+  when:
+    - (_edge_proxy_token_output.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+    - (_edge_proxy_token_output.changed or (not _edge_proxy_token_stat.stat.exists and _edge_proxy_token_output.stdout is defined))
   tags: [vault_token_refresh]
 
 - name: Configure intermediate PKI URLs (pki_int)

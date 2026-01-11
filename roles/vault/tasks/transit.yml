@@ -140,9 +140,14 @@
   failed_when: false
   become: true
 
-- name: Detect if Transit Vault needs initialization (Fresh install or wipe)
+- name: Initialize Vault needs initialization default
   ansible.builtin.set_fact:
-    vault_needs_init: "{{ not ((_vault_status_check.stdout | default('{}') | from_json).initialized | default(false)) }}"
+    vault_needs_init: true
+
+- name: Detect if Transit Vault needs initialization (if valid JSON)
+  ansible.builtin.set_fact:
+    vault_needs_init: "{{ not ((_vault_status_check.stdout | default('{}', true) | from_json).initialized | default(false)) }}"
+  when: (_vault_status_check.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Check for existing transit init JSON on controller
   ansible.builtin.stat:
@@ -180,13 +185,13 @@
 - name: Set unseal keys and root token from loaded init JSON (if present)
   ansible.builtin.set_fact:
     vault_unseal_keys_b64: >-
-      {{ (_transit_init_loaded.content | default('') | b64decode | from_json).unseal_keys_b64 | default([]) }}
+      {{ (_transit_init_loaded.content | default('') | b64decode | default('{}', true) | from_json).unseal_keys_b64 | default([]) }}
     vault_root_token: >-
-      {{ (_transit_init_loaded.content | default('') | b64decode | from_json).root_token | default('') }}
+      {{ (_transit_init_loaded.content | default('') | b64decode | default('{}', true) | from_json).root_token | default('') }}
   when:
-    - _transit_init_loaded is defined
+    - _transit_init_loaded.content is defined
     - not (_transit_init_loaded.skipped | default(false))
-    - (_transit_init_loaded.content | default('') | length) > 0
+    - (_transit_init_loaded.content | default('') | b64decode | regex_search('^\s*[\[{]')) != ''
 
 - name: Initialize Vault (if not already initialized)
   ansible.builtin.command: /usr/local/bin/vault operator init -key-shares=1 -key-threshold=1 -format=json
@@ -200,17 +205,21 @@
 
 - name: Store transit init JSON to controller # noqa: no-handler
   ansible.builtin.copy:
-    content: "{{ _vault_init_output.stdout }}"
+    content: "{{ (_vault_init_output.stdout | default('{}', true) | from_json) | to_nice_json }}"
     dest: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
     mode: '0600'
   delegate_to: localhost
-  when: _vault_init_output.changed
+  when:
+    - _vault_init_output.changed
+    - (_vault_init_output.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Set unseal keys and root token from NEW init output (if initialization just happened) # noqa: no-handler
   ansible.builtin.set_fact:
-    vault_unseal_keys_b64: "{{ (_vault_init_output.stdout | from_json).unseal_keys_b64 }}"
-    vault_root_token: "{{ (_vault_init_output.stdout | from_json).root_token }}"
-  when: _vault_init_output.changed
+    vault_unseal_keys_b64: "{{ (_vault_init_output.stdout | default('{}', true) | from_json).unseal_keys_b64 }}"
+    vault_root_token: "{{ (_vault_init_output.stdout | default('{}', true) | from_json).root_token }}"
+  when:
+    - _vault_init_output.changed
+    - (_vault_init_output.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Unseal Vault
   ansible.builtin.command: /usr/local/bin/vault operator unseal {{ item }}
@@ -223,7 +232,7 @@
   become: true
   when: >
     (vault_unseal_keys_b64 | default([])) | length > 0 and
-    (_vault_status_check.stdout | default('{}') | from_json).sealed | default(true)
+    ((_vault_status_check.stdout | default('{}', true) | from_json).sealed | default(true))
 
 - name: Enable transit secrets engine
   ansible.builtin.command: /usr/local/bin/vault secrets enable -path=transit transit
@@ -264,12 +273,30 @@
 
 - name: Check if transit token file exists on controller
   ansible.builtin.stat:
-    path: >-
-      {{ vault_transit_token_export_path |
-      default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}
+    path: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
   delegate_to: localhost
   register: _transit_token_file_stat
   run_once: true
+
+- name: Read transit token from controller
+  ansible.builtin.slurp:
+    src: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
+  register: _transit_token_slurp
+  delegate_to: localhost
+  run_once: true
+  when: _transit_token_file_stat.stat.exists
+
+- name: Verify if transit token is valid
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/auth/token/lookup-self"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _transit_token_slurp.content | b64decode | trim }}"
+    validate_certs: false
+    status_code: [200, 403]
+  register: _transit_token_lookup
+  when: _transit_token_file_stat.stat.exists
+  become: true
 
 - name: Create transit token
   ansible.builtin.command: /usr/local/bin/vault token create -policy="autounseal" -renewable=true -ttl=72h -format=json
@@ -280,14 +307,14 @@
   register: _vault_transit_token_output
   changed_when: _vault_transit_token_output.rc == 0
   become: true
-  when: not _transit_token_file_stat.stat.exists
+  when: >-
+    not _transit_token_file_stat.stat.exists or
+    (_transit_token_lookup.status | default(0)) == 403 or
+    'vault_token_refresh' in ansible_run_tags
 
 - name: Ensure Vault controller export directory exists
   ansible.builtin.file:
-    path: >-
-      {{ (vault_transit_token_export_path |
-      default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') |
-      expanduser) | ansible.builtin.dirname }}
+    path: "{{ (vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser) | ansible.builtin.dirname }}"
     state: directory
     mode: '0700'
   delegate_to: localhost
@@ -295,12 +322,10 @@
 
 - name: Store transit token on controller
   ansible.builtin.copy:
-    content: "{{ (_vault_transit_token_output.stdout | from_json).auth.client_token }}"
-    dest: >-
-      {{ vault_transit_token_export_path |
-      default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}
+    content: "{{ (_vault_transit_token_output.stdout | default('{}', true) | from_json).auth.client_token }}"
+    dest: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
     mode: '0600'
   delegate_to: localhost
   when:
-    - _vault_transit_token_output.changed
-    - not _transit_token_file_stat.stat.exists
+    - (_vault_transit_token_output.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+    - (_vault_transit_token_output.changed or (not _transit_token_file_stat.stat.exists and _vault_transit_token_output.stdout is defined))
