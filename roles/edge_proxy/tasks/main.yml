@@ -207,7 +207,6 @@
     state: started
     daemon_reload: true
   become: true
-  when: not reverse_proxy_is_primary | bool
 
 - name: Clean up old rsync components
   become: true
@@ -232,15 +231,6 @@
   when: reverse_proxy_is_primary | bool
   become: true
   block:
-    - name: Create certificate sync script
-      ansible.builtin.template:
-        src: caddy-sync-certs.sh.j2
-        dest: /usr/local/bin/caddy-sync-certs.sh
-        owner: root
-        group: root
-        mode: '0755'
-      register: _caddy_sync_script_task
-
     - name: Create systemd service for Caddy push
       ansible.builtin.copy:
         dest: /etc/systemd/system/caddy-push-certs.service
@@ -274,14 +264,22 @@
         enabled: true
         daemon_reload: true
 
-- name: Setup Certificate Renewal on Primary
-  when: reverse_proxy_is_primary | bool
+- name: Setup Certificate Sync and Renewal
   become: true
   block:
     - name: Ensure jq is installed
       ansible.builtin.package:
         name: jq
         state: present
+
+    - name: Create certificate sync and renewal script
+      ansible.builtin.template:
+        src: caddy-sync-certs.sh.j2
+        dest: /usr/local/bin/caddy-sync-certs.sh
+        owner: root
+        group: root
+        mode: '0755'
+      register: _caddy_sync_script_task
 
     - name: Stat existing wildcard certificate
       ansible.builtin.stat:

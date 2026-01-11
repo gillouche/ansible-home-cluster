@@ -87,6 +87,25 @@
   become: true
   when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
 
+- name: Deploy force-time-sync.timer unit
+  ansible.builtin.template:
+    src: force-time-sync.timer.j2
+    dest: /etc/systemd/system/force-time-sync.timer
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+
+- name: Enable and start force-time-sync.timer
+  ansible.builtin.systemd:
+    name: force-time-sync.timer
+    enabled: true
+    state: started
+  become: true
+  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+
 - name: Start and enable ntpd
   ansible.builtin.systemd:
     name: ntpd

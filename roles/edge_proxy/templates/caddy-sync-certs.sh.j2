@@ -9,6 +9,7 @@ DATA_DIR="{{ reverse_proxy_data_dir }}/"
 CONTAINER_NAME="{{ reverse_proxy_container_name }}"
 SSH_OPTS="-o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519"
 
+IS_PRIMARY={{ 'true' if reverse_proxy_is_primary | bool else 'false' }}
 REPLICAS=({% for host in groups['edge_proxy_cluster'] | difference(groups['edge_proxy_primary']) %}"{{ hostvars[host].ansible_host | default(host) }}" {% endfor %})
 
 usage() {
@@ -59,19 +60,23 @@ if [[ "$RENEW" == "true" ]]; then
 fi
 
 if [[ "$RENEW" == "true" || "$SYNC_ONLY" == "true" ]]; then
-    echo "Syncing data to replicas..."
-    for replica in "${REPLICAS[@]}"; do
-        echo "Pushing to $replica..."
-        rsync -avz --delete \
-          -e "ssh ${SSH_OPTS}" \
-          --rsync-path="sudo rsync" \
-          "${DATA_DIR}" "alarm@${replica}:${DATA_DIR}"
+    if [[ "$IS_PRIMARY" == "true" ]]; then
+        echo "Syncing data to replicas..."
+        for replica in "${REPLICAS[@]}"; do
+            echo "Pushing to $replica..."
+            rsync -avz --delete \
+              -e "ssh ${SSH_OPTS}" \
+              --rsync-path="sudo rsync" \
+              "${DATA_DIR}" "alarm@${replica}:${DATA_DIR}"
 
-        echo "Restarting $CONTAINER_NAME on $replica..."
-        ssh ${SSH_OPTS} "alarm@${replica}" \
-          "sudo podman inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' $CONTAINER_NAME 2>/dev/null \
-           | grep -q true && sudo podman restart $CONTAINER_NAME || true"
-    done
+            echo "Restarting $CONTAINER_NAME on $replica..."
+            ssh ${SSH_OPTS} "alarm@${replica}" \
+              "sudo podman inspect -f '{{ '{{' }}.State.Running{{ '}}' }}' $CONTAINER_NAME 2>/dev/null \
+               | grep -q true && sudo podman restart $CONTAINER_NAME || true"
+        done
+    else
+        echo "Not primary, skipping push to replicas."
+    fi
 
     # Restart locally if we renewed or if we want to ensure local is fresh (though local is source)
     if [[ "$RENEW" == "true" ]]; then

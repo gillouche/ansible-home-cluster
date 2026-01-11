@@ -1,0 +1,5 @@
+---
+- name: Reload systemd (reexec)
+  ansible.builtin.systemd:
+    daemon_reexec: true
+  become: true
