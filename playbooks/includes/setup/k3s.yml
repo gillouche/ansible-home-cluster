@@ -145,7 +145,7 @@
   hosts: server[0]
   gather_facts: true
   become: true
-  tags: [k3s, k3s_vault_config]
+  tags: [k3s, vault, k3s_vault_config]
   pre_tasks:
     - name: Load cluster init JSON # noqa: run-once
       ansible.builtin.slurp:
