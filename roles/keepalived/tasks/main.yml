@@ -16,6 +16,13 @@
   when: (ansible_facts['distribution'] | lower) == 'archlinux'
   tags: [keepalived, infra]
 
+- name: Ensure curl is installed (required for health checks)
+  ansible.builtin.package:
+    name: curl
+    state: present
+  become: true
+  tags: [keepalived, infra]
+
 - name: Ensure keepalived conf.d directory exists
   ansible.builtin.file:
     path: /etc/keepalived/conf.d
@@ -47,6 +54,16 @@
     state: present
     sysctl_file: /etc/sysctl.d/90-keepalived.conf
     reload: true
+  become: true
+  tags: [keepalived, infra]
+
+- name: Deploy keepalived notification script
+  ansible.builtin.template:
+    src: notify.sh.j2
+    dest: /usr/local/bin/keepalived_notify.sh
+    owner: root
+    group: root
+    mode: '0755'
   become: true
   tags: [keepalived, infra]
 

@@ -57,9 +57,9 @@
   become: true
   changed_when: false
 
-- name: Delete argocd-secret
+- name: Annotate argocd-secret to allow Sealed Secrets adoption
   ansible.builtin.command: >-
-    k3s kubectl delete secret argocd-secret -n {{ argocd_namespace }}
+    k3s kubectl annotate secret argocd-secret -n {{ argocd_namespace }} sealedsecrets.bitnami.com/managed="true" --overwrite
   delegate_to: "{{ groups['server'][0] }}"
   run_once: true
   become: true

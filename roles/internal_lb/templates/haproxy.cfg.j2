@@ -11,6 +11,14 @@ defaults
   timeout client  1m
   timeout server  1m
 
+listen stats
+  bind 127.0.0.1:8404
+  mode http
+  stats enable
+  stats uri /stats
+  stats refresh 10s
+  stats admin if LOCALHOST
+
 # Custom configurations from conf.d
 # (Assumes haproxy >= 2.1 or manual cat/include if using older)
 # For older haproxy, we might need a different approach, but let's assume modern.

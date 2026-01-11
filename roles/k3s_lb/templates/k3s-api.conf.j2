@@ -1,7 +1,7 @@
 vrrp_script check_k3s_api {
-  script "/usr/bin/pgrep -f 'k3s server'"
+  script "/usr/bin/curl -k --silent --fail https://127.0.0.1:6443/healthz"
   interval 3
-  weight 2
+  weight -60
   rise 2
   fall 2
 }
@@ -33,4 +33,6 @@ vrrp_instance VI_K3s_API {
   track_script {
     check_k3s_api
   }
+
+  notify "/usr/local/bin/keepalived_notify.sh"
 }

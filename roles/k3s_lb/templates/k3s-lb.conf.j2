@@ -1,7 +1,7 @@
 vrrp_script check_k3s_lb {
-  script "/usr/bin/pgrep -f 'k3s server'"
+  script "/usr/bin/curl --silent --fail http://127.0.0.1:8404/stats"
   interval 3
-  weight 2
+  weight -60
   rise 2
   fall 2
 }
@@ -33,4 +33,6 @@ vrrp_instance VI_K3s_LB {
   track_script {
     check_k3s_lb
   }
+
+  notify "/usr/local/bin/keepalived_notify.sh"
 }

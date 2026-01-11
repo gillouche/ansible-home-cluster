@@ -1,0 +1,12 @@
+#!/bin/bash
+TYPE=$1
+NAME=$2
+STATE=$3
+
+# Log to syslog
+/usr/bin/logger -t keepalived-notify "VRRP Instance $NAME changed state to $STATE"
+
+# Optional: Webhook (Discord/Slack)
+{% if keepalived_notify_webhook is defined %}
+/usr/bin/curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"Keepalived: $NAME is now $STATE on $(hostname)\"}" {{ keepalived_notify_webhook }}
+{% endif %}

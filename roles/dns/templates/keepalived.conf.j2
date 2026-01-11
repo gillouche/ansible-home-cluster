@@ -1,7 +1,7 @@
 vrrp_script check_pihole {
   script "/usr/bin/podman healthcheck run pihole || /usr/bin/pgrep -f pihole"
   interval 3
-  weight 2
+  weight -60
   rise 2
   fall 3
 }
@@ -29,4 +29,6 @@ vrrp_instance VI_Pihole {
   track_script {
     check_pihole
   }
+
+  notify "/usr/local/bin/keepalived_notify.sh"
 }

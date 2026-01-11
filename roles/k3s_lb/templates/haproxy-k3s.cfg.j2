@@ -1,6 +1,20 @@
-# Managed by Ansible - K3s API and Traefik HAProxy configuration
+defaults
+  log     global
+  mode    tcp
+  option  tcplog
+  timeout connect 5s
+  timeout client  1m
+  timeout server  1m
 
-listen k3s_api
+listen stats
+  bind 127.0.0.1:8404
+  mode http
+  stats enable
+  stats uri /stats
+  stats refresh 10s
+  stats admin if LOCALHOST
+
+# Custom configurations from conf.dlisten k3s_api
     bind {{ k3s_api_vip }}:6443
     mode tcp
     option tcplog

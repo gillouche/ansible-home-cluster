@@ -1,7 +1,7 @@
 vrrp_script check_haproxy_lb {
-  script "/usr/bin/killall -0 haproxy"
+  script "/usr/bin/curl --silent --fail http://127.0.0.1:8404/stats"
   interval 2
-  weight 2
+  weight -60
   rise 2
   fall 2
 }
@@ -33,4 +33,6 @@ vrrp_instance VI_LoadBalancer {
   track_script {
     check_haproxy_lb
   }
+
+  notify "/usr/local/bin/keepalived_notify.sh"
 }
