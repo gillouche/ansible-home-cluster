@@ -44,3 +44,23 @@
   run_once: true
   become: true
   when: _argocd_notifications_secret_check.rc == 0
+
+- name: Wait for argocd-secret to be available
+  ansible.builtin.command: >-
+    k3s kubectl get secret argocd-secret -n {{ argocd_namespace }}
+  register: _argocd_secret_check
+  until: _argocd_secret_check.rc == 0
+  retries: 30
+  delay: 10
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  changed_when: false
+
+- name: Delete argocd-secret
+  ansible.builtin.command: >-
+    k3s kubectl delete secret argocd-secret -n {{ argocd_namespace }}
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  when: _argocd_secret_check.rc == 0
