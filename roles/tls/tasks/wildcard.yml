@@ -74,13 +74,31 @@
             headers:
               X-Vault-Token: "{{ tls_wildcard_vault_token }}"
             validate_certs: false
-            status_code: [200]
+            status_code: [200, 403]
           register: _vault_wildcard_cert_raw
           delegate_to: localhost
           run_once: true
+          until: _vault_wildcard_cert_raw.status == 200
           retries: 10
           delay: 5
-          until: _vault_wildcard_cert_raw is success
+          ignore_errors: true
+
+        - name: Fail if token is invalid and suggest refresh
+          ansible.builtin.fail:
+            msg: >-
+              Vault edge-proxy token is invalid (403 Forbidden).
+              This token is stored at '{{ vault_edge_proxy_token_path }}' and is used to request certificates.
+              It might have expired or been revoked.
+              Please run the vault setup playbook to automatically refresh it:
+              'ansible-playbook playbooks/setup.yml --tags vault'
+          when: _vault_wildcard_cert_raw.status == 403
+
+        - name: Fail if request failed for reasons other than 403
+          ansible.builtin.fail:
+            msg: "Request to Vault failed: {{ _vault_wildcard_cert_raw.msg | default('Unknown error') }}"
+          when:
+            - _vault_wildcard_cert_raw.status != 200
+            - _vault_wildcard_cert_raw.status != 403
 
         - name: Propagate wildcard certificate data to all hosts
           ansible.builtin.set_fact:

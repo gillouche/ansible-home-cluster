@@ -230,36 +230,60 @@ load_balancer_haproxy_backends:
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
-        port: "{{ global_k3s_traefik_port }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        port: 9000
 
   # Alertmanager Backend
   - name: alertmanager_backend
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
-        port: "{{ global_k3s_traefik_port }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        port: 9000
 
   # Grafana Backend
   - name: grafana_backend
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
-        port: "{{ global_k3s_traefik_port }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        port: 9000
 
   # Loki Backend
   - name: loki_backend
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
-        port: "{{ global_k3s_traefik_port }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        port: 9000
 
   # Firefly Backend
   - name: firefly_backend
@@ -275,9 +299,15 @@ load_balancer_haproxy_backends:
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
-        port: "{{ global_k3s_traefik_port }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        port: 9000
 
   # Kube State Metrics Backend
   - name: kube_state_metrics_back
@@ -285,16 +315,30 @@ load_balancer_haproxy_backends:
     balance: roundrobin
     default_server: "check inter 5s fall 2 rise 1"
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 9000
 
   - name: k3s_traefik_back
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+        opts: "check"
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+        opts: "check"
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 9000
         opts: "check"
 
@@ -303,8 +347,14 @@ load_balancer_haproxy_backends:
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 9000
 
   # ArgoCD Backend
@@ -312,8 +362,14 @@ load_balancer_haproxy_backends:
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 9000
 
   # Goldilocks Backend
@@ -321,8 +377,14 @@ load_balancer_haproxy_backends:
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 9000
 
   # Homepage Backend
@@ -330,8 +392,14 @@ load_balancer_haproxy_backends:
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 9000
 
   # SeaweedFS Backends
@@ -339,14 +407,26 @@ load_balancer_haproxy_backends:
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 9000
 
   - name: seaweedfs_s3_backend
     mode: http
     balance: roundrobin
     servers:
-      - name: k3s_lb
-        addr: "{{ k3s_lb_vip }}"
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 9000

@@ -403,6 +403,27 @@
   delegate_to: localhost
   become: false
 
+- name: Read edge-proxy token from controller
+  ansible.builtin.slurp:
+    src: "{{ vault_edge_proxy_token_path }}"
+  register: _edge_proxy_token_slurp
+  delegate_to: localhost
+  become: false
+  when: _edge_proxy_token_stat.stat.exists
+
+- name: Verify if edge-proxy token is valid
+  ansible.builtin.uri:
+    url: "https://{{ _vault_leader_addr | regex_replace('^https?://', '') }}/v1/auth/token/lookup-self"
+    method: GET
+    headers:
+      X-Vault-Token: "{{ _edge_proxy_token_slurp.content | b64decode | trim }}"
+    validate_certs: false
+    status_code: [200, 403]
+  register: _edge_proxy_token_lookup
+  delegate_to: localhost
+  when: _edge_proxy_token_stat.stat.exists
+  become: false
+
 - name: Create edge-proxy token
   ansible.builtin.command: /usr/local/bin/vault token create -policy="edge-proxy-policy" -period=720h -format=json
   environment:
@@ -411,7 +432,11 @@
     VAULT_SKIP_VERIFY: "true"
   register: _edge_proxy_token_output
   changed_when: _edge_proxy_token_output.rc == 0
-  when: not _edge_proxy_token_stat.stat.exists
+  when: >-
+    not _edge_proxy_token_stat.stat.exists or
+    'vault_token_refresh' in ansible_run_tags or
+    (_edge_proxy_token_lookup.status | default(0)) == 403
+  tags: [vault_token_refresh]
 
 - name: Ensure edge-proxy token directory exists on controller
   ansible.builtin.file:
@@ -429,7 +454,8 @@
     mode: '0600'
   delegate_to: localhost
   become: false
-  when: _edge_proxy_token_output.changed
+  when: _edge_proxy_token_output.changed or (not _edge_proxy_token_stat.stat.exists and _edge_proxy_token_output.stdout is defined)
+  tags: [vault_token_refresh]
 
 - name: Configure intermediate PKI URLs (pki_int)
   ansible.builtin.command: >
