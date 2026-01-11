@@ -1,0 +1,21 @@
+---
+- name: Ensure K3s manifest directory exists
+  ansible.builtin.file:
+    path: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/manifests"
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Copy Sealed Secret Private Key to K3s manifests
+  ansible.builtin.copy:
+    src: sealed-secrets-key.yaml
+    dest: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/manifests/sealed-secrets-key.yaml"
+    mode: '0600'
+  become: true
+
+- name: Deploy Sealed Secrets via K3s HelmChart CRD
+  ansible.builtin.template:
+    src: sealed-secrets-helm.yaml.j2
+    dest: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/manifests/sealed-secrets-helm.yaml"
+    mode: '0644'
+  become: true

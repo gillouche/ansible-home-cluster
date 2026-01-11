@@ -1,7 +1,14 @@
 ---
+- name: Wait for K3s API to be ready
+  ansible.builtin.wait_for:
+    port: 6443
+    host: 127.0.0.1
+    timeout: 300
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+
 - name: Ensure all K3s nodes are healthy and reachable
-  ansible.builtin.shell: |
-    kubectl get nodes --no-headers
+  ansible.builtin.command: k3s kubectl get nodes --no-headers
   register: _k3s_nodes_check
   delegate_to: "{{ groups['server'][0] }}"
   run_once: true
@@ -11,7 +18,7 @@
     - _k3s_nodes_check.rc == 0
     - "(_k3s_nodes_check.stdout_lines | length) >= (groups['k3s_cluster'] | length)"
     - "not 'NotReady' in _k3s_nodes_check.stdout"
-  retries: 5
+  retries: 30
   delay: 10
 
 - name: Identify missing or unhealthy nodes
@@ -50,8 +57,7 @@
   run_once: true
 
 - name: Apply K3s node labels from inventory
-  ansible.builtin.shell: |
-    kubectl label node {{ item.host }} {{ item.key }}={{ item.value }} --overwrite
+  ansible.builtin.command: k3s kubectl label node {{ item.host }} {{ item.key }}={{ item.value }} --overwrite
   delegate_to: "{{ groups['server'][0] }}"
   run_once: true
   loop: "{{ k3s_labels_to_apply | from_json }}"
@@ -73,8 +79,7 @@
   run_once: true
 
 - name: Apply K3s node taints from inventory
-  ansible.builtin.shell: |
-    kubectl taint node {{ item.host }} {{ item.taint }} --overwrite
+  ansible.builtin.command: k3s kubectl taint node {{ item.host }} {{ item.taint }} --overwrite
   delegate_to: "{{ groups['server'][0] }}"
   run_once: true
   loop: "{{ k3s_taints_to_apply | from_json }}"

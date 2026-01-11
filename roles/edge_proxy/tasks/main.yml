@@ -35,30 +35,6 @@
       - min
   when: ansible_distribution is not defined
 
-- name: Token Retrieval
-  block:
-    - name: Check for edge-proxy token on controller
-      ansible.builtin.stat:
-        path: "{{ vault_edge_proxy_token_path }}"
-      register: _edge_proxy_token_stat
-      delegate_to: localhost
-      become: false
-
-    - name: Read edge-proxy token from controller
-      ansible.builtin.slurp:
-        src: "{{ vault_edge_proxy_token_path }}"
-      register: _edge_proxy_token_content
-      delegate_to: localhost
-      when: _edge_proxy_token_stat.stat.exists
-      become: false
-
-    - name: Set caddy_vault_token from file
-      ansible.builtin.set_fact:
-        caddy_vault_token: "{{ _edge_proxy_token_content.content | b64decode | trim }}"
-      when:
-        - _edge_proxy_token_stat.stat.exists
-        - caddy_vault_token is not defined or (caddy_vault_token | length) == 0
-
 - name: Determine reverse proxy role for this host
   ansible.builtin.set_fact:
     reverse_proxy_is_primary: "{{ inventory_hostname in (groups['edge_proxy_primary'] | default([])) }}"
@@ -129,22 +105,6 @@
     - {path: "{{ reverse_proxy_certs_dir }}", mode: '0755'}
   become: true
 
-- name: Allow alarm user to run rsync and podman for certificate sync
-  ansible.builtin.copy:
-    dest: /etc/sudoers.d/reverse-proxy-sync
-    content: "alarm ALL=(root) NOPASSWD: /usr/bin/rsync, /usr/bin/podman kill *, /usr/bin/podman restart *"
-    owner: root
-    group: root
-    mode: '0440'
-    validate: /usr/sbin/visudo -cf %s
-  become: true
-
-- name: Remove legacy alarm-rsync sudoers file
-  ansible.builtin.file:
-    path: /etc/sudoers.d/alarm-rsync
-    state: absent
-  become: true
-
 - name: Ensure Caddy certificates directory exists
   ansible.builtin.file:
     path: "{{ reverse_proxy_data_dir }}/caddy/certificates"
@@ -185,8 +145,8 @@
     user: 0
     network_mode: host
     env: >-
-      {{ {'VAULT_TOKEN': caddy_vault_token}
-         if (caddy_vault_token is defined and (caddy_vault_token | length > 0))
+      {{ {'VAULT_TOKEN': tls_wildcard_vault_token}
+         if (tls_wildcard_vault_token is defined and (tls_wildcard_vault_token | length > 0))
          else {}
       }}
     volumes:
@@ -197,6 +157,7 @@
       path: /etc/systemd/system/
       restart_policy: always
       names: true
+      container_prefix: container
   become: true
   notify: Restart reverse proxy
 
@@ -208,142 +169,26 @@
     daemon_reload: true
   become: true
 
-- name: Clean up old rsync components
-  become: true
-  block:
-    - name: Disable and stop old caddy-rsync timer
-      ansible.builtin.systemd:
-        name: caddy-rsync.timer
-        state: stopped
-        enabled: false
-      failed_when: false
-
-    - name: Remove old rsync helper and systemd units
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /usr/local/bin/caddy-rsync-data.sh
-        - /etc/systemd/system/caddy-rsync.service
-        - /etc/systemd/system/caddy-rsync.timer
-
-- name: Setup push-based sync on Primary
-  when: reverse_proxy_is_primary | bool
-  become: true
-  block:
-    - name: Create systemd service for Caddy push
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/caddy-push-certs.service
-        content: |
-          [Unit]
-          Description=Push Caddy certificates to replicas
-          After=network.target
-          [Service]
-          Type=oneshot
-          ExecStart=/usr/local/bin/caddy-sync-certs.sh --sync-only
-          User=root
-        mode: '0644'
-
-    - name: Create systemd path unit to watch for certificate changes
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/caddy-watch-certs.path
-        content: |
-          [Unit]
-          Description=Watch Caddy data directory for changes
-          [Path]
-          PathModified={{ reverse_proxy_data_dir }}
-          Unit=caddy-push-certs.service
-          [Install]
-          WantedBy=multi-user.target
-        mode: '0644'
-
-    - name: Enable and start caddy-watch-certs path
-      ansible.builtin.systemd:
-        name: caddy-watch-certs.path
-        state: started
-        enabled: true
-        daemon_reload: true
-
-- name: Setup Certificate Sync and Renewal
-  become: true
-  block:
-    - name: Ensure jq is installed
-      ansible.builtin.package:
-        name: jq
-        state: present
-
-    - name: Create certificate sync and renewal script
-      ansible.builtin.template:
-        src: caddy-sync-certs.sh.j2
-        dest: /usr/local/bin/caddy-sync-certs.sh
-        owner: root
-        group: root
-        mode: '0755'
-      register: _caddy_sync_script_task
-
-    - name: Stat existing wildcard certificate
-      ansible.builtin.stat:
-        path: "{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard/wildcard.crt"
-      register: _wildcard_cert_stat
-
-    - name: Read existing wildcard certificate info if present
-      community.crypto.x509_certificate_info:
-        path: "{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard/wildcard.crt"
-      register: _wildcard_cert_info
-      when: _wildcard_cert_stat.stat.exists
-
-    - name: Compute if wildcard certificate needs renewal or regeneration
-      ansible.builtin.set_fact:
-        _wildcard_cert_needs_renewal: >-
-          {{ not _wildcard_cert_stat.stat.exists or
-             ((_wildcard_cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ')).timestamp() | int) <
-             (ansible_date_time.epoch | int) + (30 * 24 * 60 * 60) or
-             (_wildcard_cert_info.subject_alt_name_items | default([]) | sort) !=
-             (reverse_proxy_domains | map('regex_replace', '^', 'DNS:') | unique | sort) }}
-
-    - name: Run renewal script immediately (bootstrap or config change)
-      ansible.builtin.command: /usr/local/bin/caddy-sync-certs.sh --renew
-      register: _cert_renew_run
-      when: _wildcard_cert_needs_renewal | default(true) or _caddy_sync_script_task.changed
-      changed_when: "_cert_renew_run.rc == 0"
-
-    - name: Create systemd service for renewal
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/caddy-renew-certs.service
-        content: |
-          [Unit]
-          Description=Renew Caddy Certificates via Vault
-          After=network.target
-          [Service]
-          Type=oneshot
-          ExecStart=/usr/local/bin/caddy-sync-certs.sh --renew
-          User=root
-        mode: '0644'
-
-    - name: Create systemd timer for renewal (weekly)
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/caddy-renew-certs.timer
-        content: |
-          [Unit]
-          Description=Renew Caddy Certificates Weekly
-          [Timer]
-          OnCalendar=weekly
-          RandomizedDelaySec=3600
-          Persistent=true
-          [Install]
-          WantedBy=timers.target
-        mode: '0644'
-
-    - name: Enable and start renewal timer
-      ansible.builtin.systemd:
-        name: caddy-renew-certs.timer
-        state: started
-        enabled: true
-        daemon_reload: true
-
-- name: Force certificate sync from Primary to Replicas
+- name: Restart Reverse Proxy if certificates were updated
   ansible.builtin.systemd:
-    name: caddy-push-certs.service
-    state: started
-  when: reverse_proxy_is_primary | bool
+    name: "container-{{ reverse_proxy_container_name }}"
+    state: restarted
   become: true
+  when: tls_wildcard_certs_updated | default(false) | bool
+
+- name: Cleanup legacy certificate management components
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /usr/local/bin/caddy-sync-certs.sh
+    - /etc/sudoers.d/reverse-proxy-sync
+    - /etc/systemd/system/caddy-push-certs.service
+    - /etc/systemd/system/caddy-watch-certs.path
+    - /etc/systemd/system/caddy-renew-certs.service
+    - /etc/systemd/system/caddy-renew-certs.timer
+    - /etc/sudoers.d/alarm-rsync
+    - /usr/local/bin/caddy-rsync-data.sh
+    - /etc/systemd/system/caddy-rsync.service
+    - /etc/systemd/system/caddy-rsync.timer

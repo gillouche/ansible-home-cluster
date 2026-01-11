@@ -74,6 +74,12 @@ reverse_proxy_virtual_ip: 192.168.0.252
 reverse_proxy_http_port: 80
 reverse_proxy_https_port: 443
 
+# Reverse proxy directory structure
+reverse_proxy_root_dir: "/home/reverse_proxy"
+reverse_proxy_config_dir: "{{ reverse_proxy_root_dir }}/config"
+reverse_proxy_data_dir: "{{ reverse_proxy_root_dir }}/data"
+reverse_proxy_certs_dir: "{{ reverse_proxy_root_dir }}/certs"
+
 # Vault PKI Role Name (shared between vault setup and tls provisioning)
 vault_pki_int_role_name: "homelab-server"
 

@@ -134,12 +134,16 @@
     - name: Gather Longhorn Nodes Status
       ansible.builtin.command: k3s kubectl get nodes.longhorn.io -n longhorn-system -o json
       register: _longhorn_nodes_json
+      run_once: true
+      delegate_to: "{{ groups['server'][0] }}"
       changed_when: false
       failed_when: false
 
     - name: Gather Longhorn Volumes Status
       ansible.builtin.command: k3s kubectl get volumes.longhorn.io -n longhorn-system -o json
       register: _longhorn_volumes_json
+      run_once: true
+      delegate_to: "{{ groups['server'][0] }}"
       changed_when: false
       failed_when: false
 

@@ -6,7 +6,6 @@
   tags: [k3s, etcd, postgres]
   roles:
     - role: etcd
-    - role: keepalived
 
 - name: "Verify Etcd Cluster Health"
   hosts: postgres
@@ -38,6 +37,14 @@
   tags: [k3s, postgres]
   roles:
     - role: postgres
+
+- name: "Setup K3s Load Balancer"
+  hosts: server
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_lb]
+  roles:
+    - role: k3s_lb
 
 - name: "Verify Postgres VIP and HAProxy Readiness"
   hosts: localhost
@@ -92,7 +99,6 @@
         group: root
       when: k3s_server_location is defined
   roles:
-    - role: k3s_networking
     - role: k3s.orchestration.k3s_server
 
 - name: Fetch K3s Token
@@ -230,6 +236,13 @@
           Kubeconfig saved to {{ ansible_env.HOME }}/.kube/k3s.yaml (context: k3s).
           To use it, run: export KUBECONFIG={{ ansible_env.HOME }}/.kube/config:{{ ansible_env.HOME }}/.kube/k3s.yaml
           or add that line to your shell profile.
+
+- name: Install Sealed Secrets
+  hosts: server[0]
+  become: true
+  tags: [k3s, k3s_sealed_secret]
+  roles:
+    - role: k3s_sealed_secret
 
 - name: Deploy ArgoCD (GitOps Bootstrap)
   hosts: server[0]

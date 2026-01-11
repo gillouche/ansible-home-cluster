@@ -1,0 +1,36 @@
+vrrp_script check_k3s_api {
+  script "/usr/bin/pgrep -f 'k3s server'"
+  interval 3
+  weight 2
+  rise 2
+  fall 2
+}
+
+vrrp_instance VI_K3s_API {
+  state {{ 'MASTER' if inventory_hostname == (groups['server'] | sort)[0] else 'BACKUP' }}
+  interface {{ ansible_facts['default_ipv4']['interface'] | default(k3s_api_vrrp_interface | default('end0')) }}
+  virtual_router_id {{ k3s_api_virtual_router_id }}
+  priority {{ 150 if inventory_hostname == (groups['server'] | sort)[0] else 100 }}
+  advert_int 1
+
+  # Prevent "flapping" by not automatically pre-empting a lower priority master
+  # if this node has higher priority but just came online.
+  # nopreempt
+
+  authentication {
+    auth_type PASS
+    auth_pass {{ k3s_vrrp_auth_pass | default('k3s-secret') }}
+  }
+
+  virtual_ipaddress {
+    {{ k3s_api_vip }}/{{ k3s_api_vip_prefixlen }}
+  }
+
+  track_interface {
+    {{ ansible_facts['default_ipv4']['interface'] | default(k3s_api_vrrp_interface | default('end0')) }}
+  }
+
+  track_script {
+    check_k3s_api
+  }
+}

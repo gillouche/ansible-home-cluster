@@ -3,7 +3,6 @@
   ansible.builtin.systemd:
     name: "container-{{ pihole_container_name }}"
     state: restarted
-    daemon_reload: true
   become: true
   # Use a slight delay or ignore early errors if systemd and podman are racing
   register: _restart_pihole

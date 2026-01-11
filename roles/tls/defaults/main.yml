@@ -15,6 +15,13 @@ tls_server_cert_days: 1825
 # Toggle to generate server certificate for the host
 tls_generate_server_cert: false
 
+# Wildcard certificate configuration (for edge proxy)
+tls_wildcard_cert_enabled: false
+tls_wildcard_cert_name: "wildcard"
+tls_wildcard_domains: []
+tls_wildcard_vault_token: ""
+tls_wildcard_dest_dir: "/etc/tls/wildcard"
+
 # Group to allow non-root read access to private keys (optional)
 tls_group_name: "tls"
 

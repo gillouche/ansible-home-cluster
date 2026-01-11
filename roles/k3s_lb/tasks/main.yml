@@ -1,0 +1,99 @@
+---
+- name: Ensure keepalived conf.d directory exists
+  ansible.builtin.file:
+    path: /etc/keepalived/conf.d
+    state: directory
+    mode: '0755'
+  become: true
+
+- name: Deploy K3s API Keepalived Config
+  ansible.builtin.template:
+    src: k3s-api.conf.j2
+    dest: /etc/keepalived/conf.d/k3s-api.conf
+    mode: '0644'
+  become: true
+  notify: Restart keepalived
+
+- name: Deploy K3s LB Keepalived Config
+  ansible.builtin.template:
+    src: k3s-lb.conf.j2
+    dest: /etc/keepalived/conf.d/k3s-lb.conf
+    mode: '0644'
+  become: true
+  notify: Restart keepalived
+
+- name: Install HAProxy package
+  ansible.builtin.package:
+    name: haproxy
+    state: present
+  become: true
+
+- name: Ensure HAProxy config directory exists
+  ansible.builtin.file:
+    path: /etc/haproxy/conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Render HAProxy main configuration (minimal)
+  ansible.builtin.copy:
+    dest: /etc/haproxy/haproxy.cfg
+    content: |
+      global
+          log /dev/log local0
+          log /dev/log local1 notice
+          daemon
+      defaults
+          log     global
+          mode    tcp
+          option  tcplog
+          timeout connect 5s
+          timeout client  1m
+          timeout server  1m
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Restart haproxy
+
+- name: Ensure HAProxy systemd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/haproxy.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Install HAProxy systemd drop-in configuration
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/haproxy.service.d/conf-d.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/sbin/haproxy -Ws -f /etc/haproxy/haproxy.cfg -f /etc/haproxy/conf.d/ -p /run/haproxy.pid
+  become: true
+  notify: Reload systemd
+
+- name: Render HAProxy configuration for K3s
+  ansible.builtin.template:
+    src: haproxy-k3s.cfg.j2
+    dest: /etc/haproxy/conf.d/k3s.cfg
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Restart haproxy
+
+- name: Enable and start HAProxy service
+  ansible.builtin.systemd:
+    name: haproxy
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true

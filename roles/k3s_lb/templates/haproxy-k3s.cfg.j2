@@ -1,0 +1,10 @@
+# Managed by Ansible - K3s API HAProxy configuration
+
+listen k3s_api
+    bind {{ k3s_api_vip }}:6443
+    mode tcp
+    option tcplog
+    default-server inter 5s fall 2 rise 1
+{% for host in groups['server'] | sort %}
+    server {{ host }} {{ hostvars[host].ansible_host }}:6443 check check-ssl verify none
+{% endfor %}

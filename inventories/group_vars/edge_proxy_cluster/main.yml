@@ -15,6 +15,11 @@ reverse_proxy_bind_ip: "{{ reverse_proxy_virtual_ip }}"
 # Using wildcards allows scaling without reconfiguring Caddy for every sub-service.
 reverse_proxy_domains: "{{ wildcard_domains }}"
 
+# TLS Wildcard configuration (consumed by tls role)
+tls_wildcard_cert_enabled: true
+tls_wildcard_domains: "{{ reverse_proxy_domains }}"
+tls_wildcard_dest_dir: "{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard"
+
 # Use localhost to contact Vault for ACME.
 # This works because Caddy runs with network_mode: host, so 127.0.0.1 refers to the host loopback where Vault is listening.
 # This ensures:

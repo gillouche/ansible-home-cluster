@@ -1,6 +1,8 @@
 ---
 - name: Create ArgoCD namespace
-  ansible.builtin.command: kubectl create namespace {{ argocd_namespace }}
+  ansible.builtin.command: k3s kubectl create namespace {{ argocd_namespace }}
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
   become: true
   register: _argocd_ns
   failed_when: _argocd_ns.rc != 0 and 'already exists' not in _argocd_ns.stderr
@@ -8,66 +10,27 @@
 
 - name: Install ArgoCD HA ({{ argocd_version }})
   ansible.builtin.command: >-
-    kubectl apply -n {{ argocd_namespace }}
+    k3s kubectl apply -n {{ argocd_namespace }}
     -f https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/ha/install.yaml
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
   become: true
   register: _argocd_install
   changed_when: "'created' in _argocd_install.stdout or 'configured' in _argocd_install.stdout"
 
 - name: Wait for ArgoCD server to be ready
-  ansible.builtin.command: kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{ argocd_namespace }}
+  ansible.builtin.command: k3s kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n {{ argocd_namespace }}
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
   become: true
   changed_when: false
-
-- name: Create temporary directory for Sealed Secret manifests
-  ansible.builtin.file:
-    path: /tmp/sealed-secrets
-    state: directory
-    mode: '0700'
-  become: true
-
-- name: Copy Sealed Secret Manifests to remote
-  ansible.builtin.copy:
-    src: "{{ item }}"
-    dest: /tmp/sealed-secrets/{{ item | basename }}
-    mode: '0600'
-  with_fileglob:
-    - "{{ role_path }}/files/*.yaml"
-  become: true
-
-- name: Check if Sealed Secret exists
-  ansible.builtin.shell: >-
-    kubectl get secret -n kube-system
-    $(grep 'name:' /tmp/sealed-secrets/{{ item | basename }} | awk '{print $2}')
-  become: true
-  with_fileglob:
-    - "{{ role_path }}/files/*.yaml"
-  register: _sealed_secrets_check
-  failed_when: false
-  changed_when: false
-
-- name: Apply Sealed Secret Manifests
-  ansible.builtin.shell: >-
-    kubectl apply -f /tmp/sealed-secrets/{{ item.item | basename }}
-  become: true
-  loop: "{{ _sealed_secrets_check.results }}"
-  when: item.rc != 0
-  register: _sealed_secrets_apply
-  changed_when: "'created' in _sealed_secrets_apply.stdout or 'configured' in _sealed_secrets_apply.stdout"
-
-- name: Remove temporary directory for Sealed Secret manifests
-  ansible.builtin.file:
-    path: /tmp/sealed-secrets
-    state: absent
-  become: true
 
 - name: Attempt login with provided password (group_vars)
   ansible.builtin.shell: >-
-    argocd login argocd.k3s.{{ base_domain }}
+    argocd login --port-forward --port-forward-namespace {{ argocd_namespace }}
     --username admin
     --password '{{ argocd_admin_password }}'
     --insecure
-    --grpc-web
   delegate_to: localhost
   become: false
   register: _argocd_cli_login_group_vars
@@ -77,7 +40,9 @@
 - name: Get ArgoCD Admin Password from secret if group_vars password failed
   ansible.builtin.shell: |
     set -o pipefail
-    kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+    k3s kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
   become: true
   register: _argocd_password_secret
   changed_when: false
@@ -85,11 +50,10 @@
 
 - name: Attempt login with secret password if group_vars password failed
   ansible.builtin.shell: >-
-    argocd login argocd.k3s.{{ base_domain }}
+    argocd login --port-forward --port-forward-namespace {{ argocd_namespace }}
     --username admin
     --password '{{ _argocd_password_secret.stdout }}'
     --insecure
-    --grpc-web
   delegate_to: localhost
   become: false
   register: _argocd_cli_login_secret
@@ -100,22 +64,6 @@
   delay: 10
   until: _argocd_cli_login_secret.rc == 0
   changed_when: "'logged in' in _argocd_cli_login_secret.stdout"
-
-- name: Fallback login via port-forward if direct login fails
-  ansible.builtin.shell: >-
-    argocd login --port-forward --port-forward-namespace {{ argocd_namespace }}
-    --username admin
-    --password '{{ _working_argocd_password }}'
-    --insecure
-  delegate_to: localhost
-  become: false
-  vars:
-    _working_argocd_password: "{{ argocd_admin_password if _argocd_cli_login_group_vars.rc == 0 else _argocd_password_secret.stdout }}"
-  when:
-    - _argocd_cli_login_group_vars.rc != 0
-    - (_argocd_cli_login_secret.rc | default(1)) != 0
-  register: _argocd_cli_login_pf
-  changed_when: "'logged in' in _argocd_cli_login_pf.stdout"
 
 - name: Set working ArgoCD password fact
   ansible.builtin.set_fact:
@@ -142,7 +90,7 @@
     msg: "ArgoCD Admin Password saved to {{ argocd_credentials_file }} -> you now need to apply root.yaml from gitops repo."
 
 - name: Set default ArgoCD server context
-  ansible.builtin.command: argocd context argocd.k3s.{{ base_domain }}
+  ansible.builtin.command: argocd context --port-forward --port-forward-namespace {{ argocd_namespace }}
   delegate_to: localhost
   become: false
   changed_when: false

@@ -2,6 +2,8 @@ vrrp_script check_pihole {
   script "/usr/bin/podman healthcheck run pihole || /usr/bin/pgrep -f pihole"
   interval 3
   weight 2
+  rise 2
+  fall 3
 }
 
 vrrp_instance VI_Pihole {
@@ -18,6 +20,10 @@ vrrp_instance VI_Pihole {
 
   virtual_ipaddress {
     {{ vip_address }}/{{ pihole_vip_prefixlen }}
+  }
+
+  track_interface {
+    {{ vrrp_interface }}
   }
 
   track_script {

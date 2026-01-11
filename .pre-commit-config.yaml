@@ -29,5 +29,5 @@ repos:
         name: Check for unencrypted Ansible vault files
         entry: bash -c 'for f in "$@"; do if ! grep -q "\$ANSIBLE_VAULT" "$f"; then echo "$f is not encrypted"; exit 1; fi; done' _
         language: system
-        files: 'group_vars/.*vault\.yml$|host_vars/.*vault\.yml$|^vault\.yml$|roles/k3s_argocd/files/sealed-secrets-key\.yaml$'
+        files: 'group_vars/.*vault\.yml$|host_vars/.*vault\.yml$|^vault\.yml$|roles/k3s_sealed_secret/files/sealed-secrets-key\.yaml$'
         description: Prevents unencrypted vault files from being committed.

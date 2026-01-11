@@ -323,7 +323,8 @@
       retries: 60
       delay: 5
       # Run only on the first node to avoid thundering herd on API
-      when: inventory_hostname == groups['server'][0]
+      run_once: true
+      delegate_to: "{{ groups['server'][0] }}"
       changed_when: false
 
 - name: "Restore K3s Agents"

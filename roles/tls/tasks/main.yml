@@ -314,3 +314,7 @@
     - {path: "{{ tls_dir }}/middle-ca.pem", group: 'root', mode: '0644'}
     - {path: "{{ tls_dir }}/ca-bundle.pem", group: 'root', mode: '0644'}
   become: true
+
+- name: Include wildcard certificate tasks
+  ansible.builtin.include_tasks: wildcard.yml
+  when: tls_wildcard_cert_enabled | default(false) | bool

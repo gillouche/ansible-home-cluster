@@ -4,6 +4,8 @@ vrrp_script check_haproxy_postgres {
     script "/usr/bin/killall -0 haproxy"
     interval 2
     weight 2
+    rise 2
+    fall 2
 }
 
 vrrp_instance VI_POSTGRES {
@@ -12,6 +14,10 @@ vrrp_instance VI_POSTGRES {
     virtual_router_id {{ postgres_vrrp_router_id | default(88) }}
     priority {{ 150 if inventory_hostname == (groups['postgres'] | sort)[0] else 100 }}
     advert_int 1
+    # Prevent "flapping" by not automatically pre-empting a lower priority master
+    # if this node has higher priority but just came online.
+    # nopreempt
+
     authentication {
         auth_type PASS
         auth_pass {{ postgres_vrrp_auth_pass | default('pg-secret') }}
@@ -19,6 +25,11 @@ vrrp_instance VI_POSTGRES {
     virtual_ipaddress {
         {{ postgres_virtual_ip }}/24
     }
+
+    track_interface {
+        {{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}
+    }
+
     track_script {
         check_haproxy_postgres
     }

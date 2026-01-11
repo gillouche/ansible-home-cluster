@@ -2,6 +2,8 @@ vrrp_script check_haproxy_lb {
   script "/usr/bin/killall -0 haproxy"
   interval 2
   weight 2
+  rise 2
+  fall 2
 }
 
 vrrp_instance VI_LoadBalancer {
@@ -11,6 +13,10 @@ vrrp_instance VI_LoadBalancer {
   priority {{ vrrp_priority }}
   advert_int 1
 
+  # Prevent "flapping" by not automatically pre-empting a lower priority master
+  # if this node has higher priority but just came online.
+  # nopreempt
+
   authentication {
     auth_type PASS
     auth_pass {{ vrrp_auth_pass }}
@@ -18,6 +24,10 @@ vrrp_instance VI_LoadBalancer {
 
   virtual_ipaddress {
     {{ vip_address }}/{{ load_balancer_vip_prefixlen }}
+  }
+
+  track_interface {
+    {{ vrrp_interface }}
   }
 
   track_script {
