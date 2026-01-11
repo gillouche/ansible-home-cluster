@@ -222,6 +222,7 @@ all:
                 reliability: preferred
                 storage: ssd
                 gpu: true
+                node.longhorn.io/create-default-disk: "true"
         agent_storage:
           hosts:
             rpi5b16g1ssd:
