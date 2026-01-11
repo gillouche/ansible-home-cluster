@@ -96,3 +96,23 @@
   changed_when: false
   when: _argocd_cli_login_group_vars.rc == 0 or (_argocd_cli_login_secret.rc | default(1)) == 0
   ignore_errors: true
+
+- name: Wait for argocd-notifications-secret to be available
+  ansible.builtin.command: >-
+    k3s kubectl get secret argocd-notifications-secret -n {{ argocd_namespace }}
+  register: _argocd_notifications_secret_check
+  until: _argocd_notifications_secret_check.rc == 0
+  retries: 30
+  delay: 10
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  changed_when: false
+
+- name: Delete argocd-notifications-secret
+  ansible.builtin.command: >-
+    k3s kubectl delete secret argocd-notifications-secret -n {{ argocd_namespace }}
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  when: _argocd_notifications_secret_check.rc == 0
