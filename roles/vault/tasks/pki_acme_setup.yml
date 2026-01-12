@@ -381,6 +381,7 @@
     issuer="{{ _default_pki_int_issuer.stdout }}"
     allow_any_name=true
     max_ttl="8760h"
+    ttl="8760h"
     no_store=false
   environment:
     VAULT_ADDR: "{{ _vault_leader_addr }}"

@@ -363,17 +363,44 @@
       run_once: true
       changed_when: false
 
-# 5. Applications
-- name: "Restore Applications"
-  hosts: firefly
+# 6. Post-Restore Verification
+- name: "Post-Restore Verification"
+  hosts: localhost
   gather_facts: false
-  become: true
-  tags: [never, base, apps, firefly]
+  become: false
+  tags: [always, k3s, vault_test]
+  vars_files:
+    - ../inventories/group_vars/all/main.yml
   tasks:
-    - name: Start Firefly III container
-      ansible.builtin.command: podman start firefly
-      register: _firefly_start
-      changed_when: _firefly_start.rc == 0
-      failed_when:
-        - _firefly_start.rc != 0
-        - "'already' not in _firefly_start.stderr"
+    - name: Test K3s Vault API endpoint (Kubernetes Auth)
+      ansible.builtin.uri:
+        url: "https://192.168.0.253:8200/v1/auth/kubernetes"
+        method: GET
+        validate_certs: true
+        ca_path: "/etc/tls/ca-bundle.pem"
+        status_code: [200, 429, 405, 403] # 405 or 403 are expected for GET on this endpoint without proper auth
+      register: _k3s_vault_health
+      ignore_errors: true
+      delegate_to: "{{ groups['server'][0] }}" # Run from a cluster node where ca-bundle.pem exists
+
+    - name: Fetch current CA bundle from Vault
+      ansible.builtin.uri:
+        url: "https://192.168.0.253:8200/v1/pki_int/ca/pem"
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: _vault_ca_bundle
+      when: _k3s_vault_health.status not in [200, 429, 405, 403]
+
+    - name: Regenerate vault-issuer.yaml if CA bundle is invalid
+      ansible.builtin.set_fact:
+        _new_cabundle: "{{ _vault_ca_bundle.content | b64encode | regex_replace('\\s+', '') }}"
+      when:
+        - _k3s_vault_health.status not in [200, 429, 405, 403]
+        - _vault_ca_bundle.status == 200
+
+    - name: Print new CA bundle for vault-issuer.yaml
+      ansible.builtin.debug:
+        msg: "New CA bundle: {{ _new_cabundle }}"
+      when: _new_cabundle is defined
+      delegate_to: localhost

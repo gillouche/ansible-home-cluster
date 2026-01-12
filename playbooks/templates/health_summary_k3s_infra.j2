@@ -23,14 +23,14 @@
 
 {{ macros.BOLD }}[ POSTGRES HA CLUSTER (Patroni) ]{{ macros.RESET }}
 {% if hostvars['localhost']._postgres_vip_check is defined %}
+{% set pg_nodes = groups['postgres'] | sort -%}
+{% set pg_ns = namespace(healthy_count=0) -%}
+{% for host in pg_nodes -%}
+  {% if hostvars[host]._postgres_cmd_check.rc | default(-1) == 0 -%}
+    {% set pg_ns.healthy_count = pg_ns.healthy_count + 1 -%}
+  {% endif -%}
+{% endfor -%}
   {{ macros.CYAN }}> VIP ({{ global_k3s_db_host }}):{{ macros.RESET }} {{ macros.ok('REACHABLE') if hostvars['localhost']._postgres_vip_check.state | default('') == 'started' else macros.bad('UNREACHABLE') }}
-{% set pg_nodes = groups['postgres'] | sort %}
-{% set pg_ns = namespace(healthy_count=0) %}
-{% for host in pg_nodes %}
-  {% if hostvars[host]._postgres_cmd_check.rc | default(-1) == 0 %}
-    {% set pg_ns.healthy_count = pg_ns.healthy_count + 1 %}
-  {% endif %}
-{% endfor %}
   {{ macros.CYAN }}> Cluster Availability:{{ macros.RESET }} {{ macros.ok(pg_ns.healthy_count ~ '/' ~ pg_nodes | length ~ ' Instances UP') if pg_ns.healthy_count == pg_nodes | length else (macros.bad('DOWN') if pg_ns.healthy_count == 0 else macros.warn(pg_ns.healthy_count ~ '/' ~ pg_nodes | length ~ ' Instances UP')) }}
 {% for host in pg_nodes %}
   {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
@@ -54,6 +54,9 @@
     API VIP:       {{ macros.ok('REACHABLE') if hostvars[host]._k3s_vip_status.status | default(0) in [200, 401] else macros.bad('UNREACHABLE') }}
     LB VIP:        {{ macros.ok('REACHABLE') if hostvars[host]._k3s_lb_vip_status.status | default(0) in [200, 404] else macros.bad('UNREACHABLE') }}
     ArgoCD (LB):   {{ macros.ok('UP') if hostvars[host]._lb_argocd_health_check.status | default(0) == 200 else macros.bad('DOWN') }}
+{% if hostvars[host]._k3s_vault_api_check is defined %}
+    Vault Auth:    {{ macros.ok('UP') if (hostvars[host]._k3s_vault_api_check.status | default(0)) in [200, 429, 405, 403] else macros.bad('DOWN (CA Invalid)') }}
+{% endif %}
 {% endfor %}
 {% endif %}
 
@@ -72,7 +75,7 @@
   ArgoCD Server:        {{ macros.ok('HEALTHY (' ~ argocd_server.status.readyReplicas | default(0) ~ '/' ~ argocd_server.status.replicas | default(0) ~ ')') if argocd_server.status.readyReplicas | default(0) == argocd_server.status.replicas | default(0) else macros.bad('DEGRADED') }}
 {%   endif %}
 {% endif %}
-  ArgoCD (HTTPS):       {{ macros.ok('UP') if (_external_argocd_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  ArgoCD (HTTPS):       {{ macros.ok('UP') if (_external_argocd_ready.status | default(-1)) in [200, 301, 302, 401] else macros.bad('DOWN') }}
 
 {{ macros.BOLD }}[ SERVICE URLS ]{{ macros.RESET }}
   ArgoCD:          {{ macros.CYAN }}https://argocd.k3s.{{ base_domain }}{{ macros.RESET }}

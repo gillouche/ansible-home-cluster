@@ -155,7 +155,7 @@
   tasks:
     - name: Verify Prometheus via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
-        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
         --resolve prometheus.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
         https://prometheus.k3s.{{ base_domain }}/-/healthy
       register: _external_prometheus_ready_cmd
@@ -169,7 +169,7 @@
 
     - name: Verify Loki via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
-        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
         --resolve loki.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
         https://loki.k3s.{{ base_domain }}/ready
       register: _external_loki_ready_cmd
@@ -183,7 +183,7 @@
 
     - name: Verify Grafana via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
-        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
         --resolve grafana.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
         https://grafana.k3s.{{ base_domain }}/api/health
       register: _external_grafana_ready_cmd
@@ -197,7 +197,7 @@
 
     - name: Verify Longhorn UI via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
-        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
         --resolve longhorn.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
         https://longhorn.k3s.{{ base_domain }}
       register: _external_longhorn_ui_ready_cmd
@@ -225,7 +225,7 @@
 
     - name: Verify Homepage via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
-        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
         --resolve homepage.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
         https://homepage.k3s.{{ base_domain }}
       register: _external_homepage_ready_cmd
@@ -239,7 +239,7 @@
 
     - name: Verify SeaweedFS Filer via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
-        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
         --resolve seaweedfs-filer.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
         https://seaweedfs-filer.k3s.{{ base_domain }}
       register: _external_seaweed_filer_ready_cmd
@@ -253,7 +253,7 @@
 
     - name: Verify SeaweedFS S3 via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
-        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
         --resolve seaweedfs-s3.k3s.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
         https://seaweedfs-s3.k3s.{{ base_domain }}
       register: _external_seaweed_s3_ready_cmd

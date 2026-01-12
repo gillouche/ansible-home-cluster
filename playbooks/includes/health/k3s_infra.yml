@@ -88,6 +88,18 @@
     - ../../../inventories/group_vars/k3s_cluster/main.yml
     - ../../../inventories/group_vars/all/main.yml
   tasks:
+    - name: Verify K3s Vault Auth API (Kubernetes Auth with CA check)
+      ansible.builtin.uri:
+        url: "https://192.168.0.253:8200/v1/auth/kubernetes"
+        method: GET
+        validate_certs: true
+        ca_path: "/etc/tls/ca-bundle.pem"
+        status_code: [200, 429, 405, 403]
+      register: _k3s_vault_api_check
+      failed_when: false
+      run_once: true
+      delegate_to: "{{ groups['server'][0] }}"
+
     - name: Check K3s Service Status
       ansible.builtin.systemd:
         name: k3s

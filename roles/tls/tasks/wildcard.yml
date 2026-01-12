@@ -57,7 +57,10 @@
                  ((_tls_wildcard_cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ')).timestamp() | int) <
                  (ansible_date_time.epoch | int) + (30 * 24 * 60 * 60) or
                  (_tls_wildcard_cert_info.subject_alt_name_items | default([]) | sort) !=
-                 (tls_wildcard_domains | map('regex_replace', '^', 'DNS:') | unique | sort) }}
+                 (tls_wildcard_domains | map('regex_replace', '^', 'DNS:') | unique | sort) or
+                 ((_tls_wildcard_cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ')).timestamp() | int) -
+                 ((_tls_wildcard_cert_info.not_before | to_datetime('%Y%m%d%H%M%SZ')).timestamp() | int) <
+                 (360 * 24 * 60 * 60) }}
           when: _tls_wildcard_cert_stat.stat.exists and _tls_wildcard_cert_stat.stat.size > 0
 
     - name: Request and distribute wildcard certificate (if renewal needed)
@@ -71,6 +74,7 @@
             body:
               common_name: "{{ tls_wildcard_domains | first }}"
               alt_names: "{{ tls_wildcard_domains[1:] | join(',') if (tls_wildcard_domains | length > 1) else omit }}"
+              ttl: "8760h"
             headers:
               X-Vault-Token: "{{ tls_wildcard_vault_token }}"
             validate_certs: false

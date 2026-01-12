@@ -177,6 +177,7 @@
       register: _lb_vault_health_check
       failed_when: false
 
+
 - name: "Reverse Proxy Health Check"
   hosts: edge_proxy_cluster
   gather_facts: true
