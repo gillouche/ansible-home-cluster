@@ -24,3 +24,4 @@ reverse_proxy_domains: []
 # Vault ACME directory URL consumed by Caddy.
 # Defaults to localhost since Caddy runs in host network mode to reach the local Vault.
 reverse_proxy_acme_ca_url: "https://127.0.0.1:{{ vault_api_port | default(18200) }}/v1/pki_int/acme/directory"
+reverse_proxy_data_dir: "/home/reverse_proxy/data"

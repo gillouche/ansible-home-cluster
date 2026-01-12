@@ -11,6 +11,8 @@ reverse_proxy_resolver_ip: 192.168.0.251
 # Bind Caddy to the VIP to avoid port conflicts with HAProxy (which binds to its own VIP on port 80)
 reverse_proxy_bind_ip: "{{ reverse_proxy_virtual_ip }}"
 
+reverse_proxy_data_dir: "/home/reverse_proxy/data"
+
 # Domains Caddy should request certificates for.
 # Using wildcards allows scaling without reconfiguring Caddy for every sub-service.
 reverse_proxy_domains: "{{ wildcard_domains }}"
