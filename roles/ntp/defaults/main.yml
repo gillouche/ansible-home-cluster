@@ -1,2 +1,10 @@
 ---
 # defaults for ntp role
+ntp_chrony_pools:
+  - 0.pool.ntp.org
+  - 1.pool.ntp.org
+  - 2.pool.ntp.org
+  - 3.pool.ntp.org
+
+ntp_chrony_makestep_threshold: 1.0
+ntp_chrony_makestep_limit: 3

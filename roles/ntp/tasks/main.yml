@@ -1,119 +1,77 @@
 ---
-# tasks for ntp role (Arch Linux NTP daemon)
+# tasks for ntp role (Refactored to use chrony)
 - name: Gather minimal facts (role safeguard when running with tags)
   ansible.builtin.setup:
     gather_subset:
       - min
   when: ansible_distribution is not defined
 
-- name: Install ntp package
-  ansible.builtin.package:
-    name: ntp
-    state: present
-  become: true
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+- name: Set distribution fact if not defined
+  ansible.builtin.set_fact:
+    is_arch: "{{ (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux'] }}"
 
-- name: Disable and stop systemd-timesyncd (conflicts with ntpd)
+- name: Disable and stop legacy ntp services
   ansible.builtin.systemd:
-    name: systemd-timesyncd
+    name: "{{ item }}"
     enabled: false
     state: stopped
   become: true
   failed_when: false
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+  with_items:
+    - ntpd
+    - force-time-sync.timer
+    - force-time-sync.service
+    - systemd-timesyncd
+  when: is_arch
 
-- name: Deploy ntp.conf template
-  ansible.builtin.template:
-    src: ntp.conf.j2
-    dest: /etc/ntp.conf
-    owner: root
-    group: root
-    mode: '0644'
+- name: Remove legacy ntp package
+  ansible.builtin.package:
+    name: ntp
+    state: absent
   become: true
-  notify: Restart ntpd
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+  when: is_arch
 
-- name: Deploy forced time sync script
-  ansible.builtin.template:
-    src: force-time-sync.sh.j2
-    dest: /usr/local/bin/force-time-sync.sh
-    owner: root
-    group: root
-    mode: '0755'
+- name: Install chrony package
+  ansible.builtin.package:
+    name: chrony
+    state: present
   become: true
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+  when: is_arch
 
-- name: Deploy force-time-sync.service unit
-  ansible.builtin.template:
-    src: force-time-sync.service.j2
-    dest: /etc/systemd/system/force-time-sync.service
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
-  notify: Reload systemd
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
-
-- name: Ensure systemd drop-in directory for ntpd exists
+- name: Remove legacy ntp and force-sync files
   ansible.builtin.file:
-    path: /etc/systemd/system/ntpd.service.d
-    state: directory
-    owner: root
-    group: root
-    mode: '0755'
+    path: "{{ item }}"
+    state: absent
   become: true
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+  with_items:
+    - /etc/ntp.conf
+    - /usr/local/bin/force-time-sync.sh
+    - /etc/systemd/system/force-time-sync.service
+    - /etc/systemd/system/force-time-sync.timer
+    - /etc/systemd/system/ntpd.service.d/override.conf
+    - /etc/systemd/system/ntpd.service.d
+  when: is_arch
 
-- name: Deploy ntpd systemd drop-in to wait for force-time-sync
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/ntpd.service.d/override.conf
-    content: |
-      [Unit]
-      After=force-time-sync.service
-      Wants=force-time-sync.service
+- name: Deploy chrony.conf template
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony.conf
     owner: root
     group: root
     mode: '0644'
   become: true
-  notify: Reload systemd
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+  notify: Restart chronyd
+  when: is_arch
 
-- name: Enable and start force-time-sync.service
+- name: Enable and start chronyd
   ansible.builtin.systemd:
-    name: force-time-sync.service
-    enabled: true
+    name: chronyd
     state: started
+    enabled: true
     daemon_reload: true
   become: true
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
-
-- name: Deploy force-time-sync.timer unit
-  ansible.builtin.template:
-    src: force-time-sync.timer.j2
-    dest: /etc/systemd/system/force-time-sync.timer
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
-  notify: Reload systemd
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
-
-- name: Enable and start force-time-sync.timer
-  ansible.builtin.systemd:
-    name: force-time-sync.timer
-    enabled: true
-    state: started
-  become: true
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
-
-- name: Start and enable ntpd
-  ansible.builtin.systemd:
-    name: ntpd
-    state: started
-    enabled: true
-  become: true
-  register: _ntp_start
-  until: _ntp_start is success
+  register: _chrony_start
+  until: _chrony_start is success
   retries: 5
   delay: 5
-  when: (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux']
+  when: is_arch

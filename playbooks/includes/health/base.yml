@@ -52,12 +52,26 @@
       register: _device_time
       changed_when: false
 
+    - name: Check Chrony Tracking Status
+      ansible.builtin.command: chronyc tracking
+      register: _chrony_tracking
+      changed_when: false
+      failed_when: false
+
     - name: Verify Clock Sync
       ansible.builtin.assert:
         that:
           - _device_time.stdout | int >= hostvars['localhost']['_controller_time'].stdout | int
         fail_msg: "Clock Drift Detected! Device time ({{ _device_time.stdout }}) is behind Controller time ({{ hostvars['localhost']['_controller_time'].stdout }})."
         success_msg: "Clock is synchronized."
+
+    - name: Verify Chrony is Synced
+      ansible.builtin.assert:
+        that:
+          - "'Leap status     : Normal' in _chrony_tracking.stdout"
+        fail_msg: "Chrony is not synchronized or in an unstable state!"
+        success_msg: "Chrony tracking is normal."
+      when: _chrony_tracking.rc == 0
 
 - name: "Vault Cluster Health Check"
   hosts: vault_cluster

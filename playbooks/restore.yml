@@ -11,23 +11,23 @@
 #   ansible-playbook playbooks/restore.yml -t k3s
 # ==============================================================================
 
-# 0. Force Time Sync (CRITICAL: RPi lacks RTC, ntpd often fails to jump large offsets)
+# 0. Force Time Sync (CRITICAL: RPi lacks RTC, TLS depends on correct time)
 - name: "Force Time Sync (All Nodes)"
   hosts: all
   gather_facts: true
   become: true
   tags: [always, base, ntp, time]
   tasks:
-    - name: Stop ntpd service to free port 123
+    - name: Ensure chronyd is started
       ansible.builtin.systemd:
-        name: ntpd
-        state: stopped
-      failed_when: false
+        name: chronyd
+        state: started
+        enabled: true
 
-    - name: Force immediate time sync (SNTP)
-      ansible.builtin.command: timeout 20s sntp -S pool.ntp.org
-      register: _sntp_sync
-      changed_when: _sntp_sync.rc == 0
+    - name: Force immediate time sync (chrony makestep)
+      ansible.builtin.command: chronyc -a makestep
+      register: _chrony_makestep
+      changed_when: _chrony_makestep.rc == 0
       failed_when: false
 
     - name: Force immediate time sync (HTTP fallback via Google)
@@ -38,16 +38,16 @@
         else
           exit 1
         fi
-      when: _sntp_sync.rc != 0
+      # Only fallback if chrony hasn't synced yet (e.g. DNS issues or first boot)
+      # We check if the year is 1970 or similar
+      when: ansible_date_time.year | int < 2024
       register: _http_sync
       changed_when: _http_sync.rc == 0
       failed_when: false
 
-    - name: Restart ntpd service
-      ansible.builtin.systemd:
-        name: ntpd
-        state: started
-        enabled: true
+    - name: Trigger another chrony sync if HTTP was used
+      ansible.builtin.command: chronyc -a makestep
+      when: _http_sync is changed
       failed_when: false
 
 # 1. Vault Transit (CRITICAL: Must be first to allow auto-unseal)

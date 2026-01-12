@@ -1,15 +1,9 @@
 ---
 # handlers for ntp role
 
-- name: Restart ntpd
+- name: Restart chronyd
   ansible.builtin.systemd:
-    name: ntpd.service
-    state: restarted
-  become: true
-
-- name: Restart systemd-timesyncd
-  ansible.builtin.systemd:
-    name: systemd-timesyncd
+    name: chronyd
     state: restarted
   become: true
 

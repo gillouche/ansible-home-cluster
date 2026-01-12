@@ -1,0 +1,26 @@
+# Managed by Ansible
+# chrony.conf
+
+# Use public NTP pools
+{% for pool in ntp_chrony_pools %}
+pool {{ pool }} iburst
+{% endfor %}
+
+# Record the rate at which the system clock gains/losses time.
+driftfile /var/lib/chrony/drift
+
+# In the first three updates of the clock, allow it to step the system clock
+# if the adjustment is larger than 1 second.
+makestep {{ ntp_chrony_makestep_threshold }} {{ ntp_chrony_makestep_limit }}
+
+# Enable kernel synchronization of the real-time clock (RTC).
+rtcsync
+
+# Specify the directory of the key file.
+keyfile /etc/chrony.keys
+
+# Get TAI-UTC offset and leap seconds from the system tz database.
+leapsectz right/UTC
+
+# Log files
+logdir /var/log/chrony
