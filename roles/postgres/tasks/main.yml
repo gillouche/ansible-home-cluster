@@ -349,6 +349,49 @@
       register: _create_db
       changed_when: "'CREATE DATABASE' in _create_db.stdout"
 
+    - name: Ensure Authelia database user has the correct password
+      ansible.builtin.command:
+        cmd: >
+          podman exec {{ postgres_container_name }}
+          psql -U postgres -d postgres -c "ALTER USER {{ postgres_authelia_db_user }} WITH PASSWORD '{{ postgres_authelia_db_password }}';"
+      register: _alter_authelia_user
+      failed_when:
+        - _alter_authelia_user.rc != 0
+        - '"role \"" + postgres_authelia_db_user + "\" does not exist" not in _alter_authelia_user.stderr'
+      changed_when: "'ALTER ROLE' in _alter_authelia_user.stdout"
+      retries: 5
+      delay: 5
+      until: _alter_authelia_user.rc == 0 or ("role \"" + postgres_authelia_db_user + "\" does not exist") in _alter_authelia_user.stderr
+
+    - name: Create Authelia database user if it does not exist
+      ansible.builtin.command:
+        cmd: >
+          podman exec {{ postgres_container_name }}
+          psql -U postgres -d postgres -c "CREATE USER {{ postgres_authelia_db_user }} WITH PASSWORD '{{ postgres_authelia_db_password }}';"
+      when: '("role \"" + postgres_authelia_db_user + "\" does not exist") in _alter_authelia_user.stderr'
+      register: _create_authelia_user
+      changed_when: "'CREATE ROLE' in _create_authelia_user.stdout"
+
+    - name: Ensure Authelia database exists
+      ansible.builtin.command:
+        cmd: >
+          podman exec {{ postgres_container_name }}
+          psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '{{ postgres_authelia_db_name }}';"
+      register: _authelia_db_exists
+      changed_when: false
+      retries: 5
+      delay: 5
+      until: _authelia_db_exists.rc == 0
+
+    - name: Create Authelia database if it does not exist
+      ansible.builtin.command:
+        cmd: >
+          podman exec {{ postgres_container_name }}
+          psql -U postgres -d postgres -c "CREATE DATABASE {{ postgres_authelia_db_name }} OWNER {{ postgres_authelia_db_user }};"
+      when: _authelia_db_exists.stdout != "1"
+      register: _create_authelia_db
+      changed_when: "'CREATE DATABASE' in _create_authelia_db.stdout"
+
     - name: Ensure postgres superuser has the correct password
       ansible.builtin.command:
         cmd: >

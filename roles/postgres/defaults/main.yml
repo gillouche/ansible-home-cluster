@@ -26,4 +26,10 @@ postgres_cluster_name: k3scluster
 postgres_db_user: "{{ global_k3s_db_user | default('k3s') }}"
 postgres_db_password: changeme
 postgres_db_name: "{{ global_k3s_db_name | default('kubernetes') }}"
+
+# Authelia Database Configuration
+postgres_authelia_db_user: authelia
+postgres_authelia_db_password: changeme
+postgres_authelia_db_name: authelia
+
 postgres_timezone: "Europe/Brussels"

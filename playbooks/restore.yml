@@ -276,6 +276,29 @@
       run_once: true
       when: inventory_hostname == groups['postgres'][0]
 
+    - name: Ensure Authelia database exists (Postgres Leader)
+      ansible.builtin.shell: |
+        # Check if database exists
+        DB_EXISTS=$(podman exec postgres psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '{{ postgres_authelia_db_name | default('authelia') }}';")
+        if [ "$DB_EXISTS" != "1" ]; then
+          # Ensure user exists (ignore error if already exists)
+          podman exec postgres psql -U postgres -d postgres -c "CREATE USER {{ postgres_authelia_db_user | default('authelia') }} WITH PASSWORD '{{ postgres_authelia_db_password | default('changeme') }}';" || true
+          # Create database
+          podman exec postgres psql -U postgres -d postgres -c "CREATE DATABASE {{ postgres_authelia_db_name | default('authelia') }} OWNER {{ postgres_authelia_db_user | default('authelia') }};"
+          echo "Database {{ postgres_authelia_db_name | default('authelia') }} created"
+        else
+          # Ensure password is correct even if DB exists
+          podman exec postgres psql -U postgres -d postgres -c "ALTER USER {{ postgres_authelia_db_user | default('authelia') }} WITH PASSWORD '{{ postgres_authelia_db_password | default('changeme') }}';"
+          echo "Database {{ postgres_authelia_db_name | default('authelia') }} already exists, password updated"
+        fi
+      args:
+        executable: /bin/bash
+      register: _authelia_restore_cmd
+      changed_when: "'created' in _authelia_restore_cmd.stdout or 'updated' in _authelia_restore_cmd.stdout"
+      run_once: true
+      when: inventory_hostname == groups['postgres'][0]
+      no_log: true
+
 - name: "Restore Nexus"
   hosts: artifactory
   gather_facts: false
