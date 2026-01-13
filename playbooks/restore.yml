@@ -39,8 +39,12 @@
           exit 1
         fi
       # Only fallback if chrony hasn't synced yet (e.g. DNS issues or first boot)
-      # We check if the year is 1970 or similar
-      when: ansible_date_time.year | int < 2024
+      # Check if the year is behind 2026 (current year)
+      # Or if it's already 2026 but we are at the beginning of the year (January) and the date is significantly off
+      # The user reported Jan 07 when it is Jan 13.
+      when: >
+        ansible_date_time.year | int < 2026 or
+        (ansible_date_time.year | int == 2026 and ansible_date_time.month | int == 1 and ansible_date_time.day | int < 13)
       register: _http_sync
       changed_when: _http_sync.rc == 0
       failed_when: false
@@ -262,25 +266,54 @@
       changed_when: false
 
     - name: Fix Kine sequence
-      ansible.builtin.shell: >-
-        podman exec -e PGPASSWORD='{{ global_k3s_db_password }}' postgres
-        psql -h {{ global_k3s_db_host }} -p {{ global_k3s_db_port | default(15432) }} -U {{ global_k3s_db_user | default('k3s') }}
-        -d {{ global_k3s_db_name | default('kubernetes') }}
+      ansible.builtin.shell: |
+        set -e
+        # Identify the Patroni leader
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "jq is missing, attempting to install it..."
+          sudo pacman -Sy --noconfirm jq
+        fi
+
+        LEADER_NAME=$(podman exec postgres patronictl list -f json | jq -r '.[] | select(.role == "Leader") | .Member')
+        if [ "$LEADER_NAME" != "{{ inventory_hostname }}" ]; then
+          echo "Current host is not the Patroni leader ($LEADER_NAME). Skipping Kine fix."
+          exit 0
+        fi
+
+        podman exec -e PGPASSWORD='{{ global_k3s_db_password }}' postgres \
+        psql -h {{ postgres_virtual_ip | default('192.168.0.247') }} -p {{ postgres_proxy_port | default(15432) }} -U {{ global_k3s_db_user | default('k3s') }} \
+        -d {{ global_k3s_db_name | default('kubernetes') }} \
         -c "SELECT setval('kine_id_seq', (SELECT MAX(id) FROM kine));"
-      register: _kine_fix
-      until: _kine_fix.rc == 0
-      retries: 5
-      delay: 5
-      changed_when: true
+      when: inventory_hostname in groups['postgres']
       no_log: true
-      run_once: true
-      when: inventory_hostname == groups['postgres'][0]
+      register: _kine_fix
 
     - name: Ensure Authelia database exists (Postgres Leader)
       ansible.builtin.shell: |
+        set -e
+        # Identify the Patroni leader
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "jq is missing, attempting to install it..."
+          sudo pacman -Sy --noconfirm jq
+        fi
+
+        LEADER_NAME=$(podman exec postgres patronictl list -f json | jq -r '.[] | select(.role == "Leader") | .Member')
+
+        if [ -z "$LEADER_NAME" ] || [ "$LEADER_NAME" = "null" ]; then
+          echo "Could not identify Patroni leader. Full output of patronictl list:"
+          podman exec postgres patronictl list
+          exit 1
+        fi
+
+        if [ "$LEADER_NAME" != "{{ inventory_hostname }}" ]; then
+          echo "Current host is not the Patroni leader ($LEADER_NAME). Skipping administrative tasks."
+          exit 0
+        fi
+
         # Check if database exists
         DB_EXISTS=$(podman exec postgres psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '{{ postgres_authelia_db_name | default('authelia') }}';")
         if [ "$DB_EXISTS" != "1" ]; then
+          echo "Creating Authelia database and user..."
           # Ensure user exists (ignore error if already exists)
           podman exec postgres psql -U postgres -d postgres -c "CREATE USER {{ postgres_authelia_db_user | default('authelia') }} WITH PASSWORD '{{ postgres_authelia_db_password | default('changeme') }}';" || true
           # Create database
@@ -293,13 +326,14 @@
         fi
 
         # Update Patroni DCS with pg_hba rules
-        podman exec postgres patronictl edit-config --force --set "postgresql.pg_hba=['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'host replication replicator {{ lan_subnet | default(\'192.168.0.0/24\') }} md5', 'host {{ postgres_db_name | default(\'kubernetes\') }} {{ postgres_db_user | default(\'k3s\') }} {{ lan_subnet | default(\'192.168.0.0/24\') }} md5', 'host {{ postgres_db_name | default(\'kubernetes\') }} {{ postgres_db_user | default(\'k3s\') }} {{ k3s_cluster_cidr | default(\'10.42.0.0/16\') }} md5', 'host {{ postgres_authelia_db_name | default(\'authelia\') }} {{ postgres_authelia_db_user | default(\'authelia\') }} {{ lan_subnet | default(\'192.168.0.0/24\') }} md5', 'host {{ postgres_authelia_db_name | default(\'authelia\') }} {{ postgres_authelia_db_user | default(\'authelia\') }} {{ k3s_cluster_cidr | default(\'10.42.0.0/16\') }} md5', 'host all postgres {{ lan_subnet | default(\'192.168.0.0/24\') }} md5']"
+        podman exec postgres patronictl edit-config --force --set "postgresql.pg_hba=['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'local replication replicator trust', 'host replication replicator {{ lan_subnet | default("192.168.0.0/24") }} md5', 'host {{ postgres_db_name | default("kubernetes") }} {{ postgres_db_user | default("k3s") }} {{ lan_subnet | default("192.168.0.0/24") }} md5', 'host {{ postgres_db_name | default("kubernetes") }} {{ postgres_db_user | default("k3s") }} {{ k3s_cluster_cidr | default("10.42.0.0/16") }} md5', 'host {{ postgres_authelia_db_name | default("authelia") }} {{ postgres_authelia_db_user | default("authelia") }} {{ lan_subnet | default("192.168.0.0/24") }} md5', 'host {{ postgres_authelia_db_name | default("authelia") }} {{ postgres_authelia_db_user | default("authelia") }} {{ k3s_cluster_cidr | default("10.42.0.0/16") }} md5', 'local all postgres trust', 'host all postgres {{ lan_subnet | default("192.168.0.0/24") }} md5']"
+        # Force Patroni to reload the config and apply HBA changes
+        podman exec postgres patronictl reload {{ postgres_cluster_name | default('k3scluster') }} --force
       args:
         executable: /bin/bash
       register: _authelia_restore_cmd
-      changed_when: "'created' in _authelia_restore_cmd.stdout or 'updated' in _authelia_restore_cmd.stdout"
-      run_once: true
-      when: inventory_hostname == groups['postgres'][0]
+      changed_when: "'created' in _authelia_restore_cmd.stdout or 'updated' in _authelia_restore_cmd.stdout or 'Creating' in _authelia_restore_cmd.stdout"
+      when: inventory_hostname in groups['postgres']
       no_log: true
 
 - name: "Restore Nexus"

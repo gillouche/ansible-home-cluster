@@ -27,11 +27,13 @@ bootstrap:
         - local   all             all                                   trust
         - host    all             all             127.0.0.1/32            md5
         - host    all             all             ::1/128                 md5
+        - local   replication     replicator                              trust
         - host    replication     replicator      {{ lan_subnet }}        md5
         - host    {{ postgres_db_name }} {{ postgres_db_user }} {{ lan_subnet }} md5
         - host    {{ postgres_db_name }} {{ postgres_db_user }} {{ k3s_cluster_cidr }} md5
         - host    {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ lan_subnet }} md5
         - host    {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ k3s_cluster_cidr }} md5
+        - local   all             postgres                                trust
         - host    all             postgres        {{ lan_subnet }}        md5
       parameters:
         archive_mode: "on"
@@ -58,6 +60,18 @@ postgresql:
   data_dir: /home/postgres/pgdata/pgdata
   bin_dir: /usr/lib/postgresql/{{ postgres_version }}/bin
   pgpass: /home/postgres/.pgpass
+  pg_hba:
+    - local   all             all                                   trust
+    - host    all             all             127.0.0.1/32            md5
+    - host    all             all             ::1/128                 md5
+    - local   replication     replicator                              trust
+    - host    replication     replicator      {{ lan_subnet }}        md5
+    - host    {{ postgres_db_name }} {{ postgres_db_user }} {{ lan_subnet }} md5
+    - host    {{ postgres_db_name }} {{ postgres_db_user }} {{ k3s_cluster_cidr }} md5
+    - host    {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ lan_subnet }} md5
+    - host    {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ k3s_cluster_cidr }} md5
+    - local   all             postgres                                trust
+    - host    all             postgres        {{ lan_subnet }}        md5
   authentication:
     superuser:
       username: postgres
