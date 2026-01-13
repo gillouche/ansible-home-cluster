@@ -145,30 +145,21 @@ all:
                 reliability: stable
                 storage: ssd
                 gpu: false
-                node.longhorn.io/create-default-disk: "true"
                 topology.kubernetes.io/zone: rpi
-              k3s_node_taints:
-                - "CriticalAddonsOnly=true:PreferNoSchedule"
             rpi5b16g2ssd:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: stable
                 storage: ssd
                 gpu: false
-                node.longhorn.io/create-default-disk: "true"
                 topology.kubernetes.io/zone: rpi
-              k3s_node_taints:
-                - "CriticalAddonsOnly=true:PreferNoSchedule"
             rpi5b16g3ssd:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: stable
                 storage: ssd
                 gpu: false
-                node.longhorn.io/create-default-disk: "true"
                 topology.kubernetes.io/zone: rpi
-              k3s_node_taints:
-                - "CriticalAddonsOnly=true:PreferNoSchedule"
         agent:
           hosts:
             rpi4b8g1:
@@ -229,7 +220,4 @@ all:
                 topology.kubernetes.io/zone: stable
         agent_storage:
           hosts:
-            rpi5b16g1ssd:
-            rpi5b16g2ssd:
-            rpi5b16g3ssd:
             homeserver:
