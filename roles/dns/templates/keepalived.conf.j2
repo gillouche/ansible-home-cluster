@@ -1,7 +1,7 @@
 vrrp_script check_pihole {
   script "/usr/bin/podman healthcheck run pihole || /usr/bin/pgrep -f pihole"
   interval 3
-  weight -60
+  weight 20
   rise 2
   fall 3
 }

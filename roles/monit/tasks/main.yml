@@ -1,0 +1,45 @@
+---
+- name: Install Monit and dependencies
+  pacman:
+    name:
+      - monit
+      - networkmanager
+      - openssh
+    state: present
+    update_cache: true
+  become: true
+
+- name: Ensure /etc/monit.d directory exists
+  ansible.builtin.file:
+    path: /etc/monit.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Ensure /etc/monit.d is not empty (fix include wildcard error)
+  ansible.builtin.copy:
+    content: "# Place custom monit config files here"
+    dest: /etc/monit.d/README
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Configure Monit
+  template:
+    src: monitrc.j2
+    dest: /etc/monitrc
+    mode: '0700'
+    owner: root
+    group: root
+  notify: restart monit
+  become: true
+
+- name: Ensure Monit service is enabled and started
+  systemd:
+    name: monit
+    enabled: true
+    state: started
+  become: true

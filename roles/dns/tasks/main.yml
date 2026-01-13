@@ -178,7 +178,7 @@
          | default((ansible_facts['interfaces'] | select('match', '^(e|en|eth)')
          | list | first) | default('end0')))) }}
     vrrp_state: "{{ 'MASTER' if pihole_is_primary | bool else 'BACKUP' }}"
-    vrrp_priority: "{{ 150 if pihole_is_primary | bool else 100 }}"
+    vrrp_priority: "{{ 100 if pihole_is_primary | bool else 90 }}"
     vrrp_auth_pass: "{{ pihole_vrrp_auth_pass | default('p1h0l3') }}"
   notify: Restart keepalived
   become: true

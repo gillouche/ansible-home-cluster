@@ -51,7 +51,7 @@
     vip_address: "{{ reverse_proxy_virtual_ip }}"
     vrrp_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
     vrrp_state: "{{ 'MASTER' if reverse_proxy_is_primary | bool else 'BACKUP' }}"
-    vrrp_priority: "{{ 150 if reverse_proxy_is_primary | bool else 100 }}"
+    vrrp_priority: "{{ 100 if reverse_proxy_is_primary | bool else 90 }}"
     vrrp_auth_pass: "{{ reverse_proxy_vrrp_auth_pass }}"
   notify: Restart keepalived
   become: true
@@ -152,6 +152,7 @@
     volumes:
       - "{{ reverse_proxy_config_dir }}/Caddyfile:/etc/caddy/Caddyfile"
       - "{{ reverse_proxy_data_dir }}:/data"
+      - "{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard:/data/caddy/certificates/wildcard:ro"
       - "{{ reverse_proxy_certs_dir }}/ca-bundle.pem:/etc/ssl/certs/internal-ca-bundle.pem"
     generate_systemd:
       path: /etc/systemd/system/
@@ -175,20 +176,3 @@
     state: restarted
   become: true
   when: tls_wildcard_certs_updated | default(false) | bool
-
-- name: Cleanup legacy certificate management components
-  become: true
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /usr/local/bin/caddy-sync-certs.sh
-    - /etc/sudoers.d/reverse-proxy-sync
-    - /etc/systemd/system/caddy-push-certs.service
-    - /etc/systemd/system/caddy-watch-certs.path
-    - /etc/systemd/system/caddy-renew-certs.service
-    - /etc/systemd/system/caddy-renew-certs.timer
-    - /etc/sudoers.d/alarm-rsync
-    - /usr/local/bin/caddy-rsync-data.sh
-    - /etc/systemd/system/caddy-rsync.service
-    - /etc/systemd/system/caddy-rsync.timer

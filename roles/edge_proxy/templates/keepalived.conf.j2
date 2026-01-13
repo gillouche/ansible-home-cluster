@@ -1,7 +1,7 @@
 vrrp_script check_caddy_proxy {
-  script "/usr/bin/killall -0 caddy"
-  interval 2
-  weight 2
+  script "/usr/bin/curl -k -s -o /dev/null -w '%{http_code}' https://127.0.0.1 | grep -E '(200|404|403|301|302)'"
+  interval 5
+  weight 20
   rise 2
   fall 2
 }

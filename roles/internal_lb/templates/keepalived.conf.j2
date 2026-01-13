@@ -1,7 +1,7 @@
 vrrp_script check_haproxy_lb {
   script "/usr/bin/curl --silent --fail http://127.0.0.1:8404/stats"
   interval 2
-  weight -60
+  weight 20
   rise 2
   fall 2
 }

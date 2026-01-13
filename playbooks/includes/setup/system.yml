@@ -19,3 +19,5 @@
       tags: firewall
     - role: containers
       tags: containers
+    - role: monit
+      tags: monit

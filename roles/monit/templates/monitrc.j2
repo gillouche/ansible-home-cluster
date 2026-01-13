@@ -1,0 +1,47 @@
+###############################################################################
+## Monit control file
+###############################################################################
+
+set daemon {{ monit_cycle }}            # check services at {{ monit_cycle }}-second intervals
+    with start delay {{ monit_start_delay }}
+
+set logfile syslog
+
+set httpd port 2812 and
+    use address 0.0.0.0      # only accept connection from localhost
+    allow 0.0.0.0/0
+    allow {{ monit_admin_user }}:{{ monit_admin_password }}
+
+###############################################################################
+## Services
+###############################################################################
+
+# System
+check system $HOST
+    if loadavg (1min) > 4 then alert
+    if loadavg (5min) > 2 then alert
+    if memory usage > 85% then alert
+    if swap usage > 25% then alert
+    if cpu usage (user) > 70% then alert
+    if cpu usage (system) > 30% then alert
+    if cpu usage (wait) > 20% then alert
+
+# SSH
+check process sshd with pidfile /run/sshd.pid
+    start program "/usr/bin/systemctl start sshd"
+    stop program "/usr/bin/systemctl stop sshd"
+    if failed port 22 protocol ssh then restart
+
+# Network Interface
+check network {{ monit_network_interface }} with interface {{ monit_network_interface }}
+    if failed link then exec "/usr/bin/systemctl restart NetworkManager"
+
+# Connectivity Check 1
+check host connectivity_primary with address {{ monit_check_host }}
+    if failed port 53 type udp protocol dns with timeout 10 seconds then exec "/usr/bin/systemctl restart NetworkManager"
+
+# Connectivity Check 2
+check host connectivity_secondary with address {{ monit_check_host_fallback }}
+    if failed port 53 type udp protocol dns with timeout 10 seconds then exec "/usr/bin/systemctl restart NetworkManager"
+
+include /etc/monit.d/*

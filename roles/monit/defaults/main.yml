@@ -1,0 +1,8 @@
+---
+monit_network_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('end0') }}"
+monit_check_host: "1.1.1.1"
+monit_check_host_fallback: "8.8.8.8"
+monit_admin_user: "admin"
+monit_admin_password: "password"
+monit_cycle: 60
+monit_start_delay: 30

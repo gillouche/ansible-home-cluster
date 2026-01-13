@@ -48,7 +48,7 @@
     vip_prefixlen: "{{ load_balancer_vip_prefixlen }}"
     vrrp_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
     vrrp_state: "{{ 'MASTER' if load_balancer_is_primary | bool else 'BACKUP' }}"
-    vrrp_priority: "{{ 150 if load_balancer_is_primary | bool else 100 }}"
+    vrrp_priority: "{{ 100 if load_balancer_is_primary | bool else 90 }}"
     vrrp_auth_pass: "{{ load_balancer_vrrp_auth_pass }}"
     virtual_router_id: "{{ load_balancer_virtual_router_id }}"
   notify: Restart keepalived

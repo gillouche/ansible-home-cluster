@@ -18,7 +18,7 @@ vault.{{ base_domain }} {
         header_up X-Forwarded-Proto https
         header_up X-Forwarded-For {remote}
         transport http {
-            tls_trusted_ca_certs /etc/ssl/certs/internal-ca-bundle.pem
+            tls_trust_pool file /etc/ssl/certs/internal-ca-bundle.pem
         }
     }
 }
