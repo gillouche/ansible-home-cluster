@@ -291,6 +291,9 @@
           podman exec postgres psql -U postgres -d postgres -c "ALTER USER {{ postgres_authelia_db_user | default('authelia') }} WITH PASSWORD '{{ postgres_authelia_db_password | default('changeme') }}';"
           echo "Database {{ postgres_authelia_db_name | default('authelia') }} already exists, password updated"
         fi
+
+        # Update Patroni DCS with pg_hba rules
+        podman exec postgres patronictl edit-config --force --set "postgresql.pg_hba=['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'host replication replicator {{ lan_subnet | default(\'192.168.0.0/24\') }} md5', 'host {{ postgres_db_name | default(\'kubernetes\') }} {{ postgres_db_user | default(\'k3s\') }} {{ lan_subnet | default(\'192.168.0.0/24\') }} md5', 'host {{ postgres_db_name | default(\'kubernetes\') }} {{ postgres_db_user | default(\'k3s\') }} {{ k3s_cluster_cidr | default(\'10.42.0.0/16\') }} md5', 'host {{ postgres_authelia_db_name | default(\'authelia\') }} {{ postgres_authelia_db_user | default(\'authelia\') }} {{ lan_subnet | default(\'192.168.0.0/24\') }} md5', 'host {{ postgres_authelia_db_name | default(\'authelia\') }} {{ postgres_authelia_db_user | default(\'authelia\') }} {{ k3s_cluster_cidr | default(\'10.42.0.0/16\') }} md5', 'host all postgres {{ lan_subnet | default(\'192.168.0.0/24\') }} md5']"
       args:
         executable: /bin/bash
       register: _authelia_restore_cmd

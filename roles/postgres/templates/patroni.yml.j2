@@ -23,6 +23,16 @@ bootstrap:
     maximum_lag_on_failover: 1048576
     postgresql:
       use_pg_rewind: true
+      pg_hba:
+        - local   all             all                                   trust
+        - host    all             all             127.0.0.1/32            md5
+        - host    all             all             ::1/128                 md5
+        - host    replication     replicator      {{ lan_subnet }}        md5
+        - host    {{ postgres_db_name }} {{ postgres_db_user }} {{ lan_subnet }} md5
+        - host    {{ postgres_db_name }} {{ postgres_db_user }} {{ k3s_cluster_cidr }} md5
+        - host    {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ lan_subnet }} md5
+        - host    {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ k3s_cluster_cidr }} md5
+        - host    all             postgres        {{ lan_subnet }}        md5
       parameters:
         archive_mode: "on"
         archive_command: mkdir -p /home/postgres/pgdata/archives && test ! -f /home/postgres/pgdata/archives/%f && cp %p /home/postgres/pgdata/archives/%f

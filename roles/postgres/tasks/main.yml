@@ -181,10 +181,18 @@
         parameters:
           unix_socket_directories: "/var/run/postgresql, /tmp"
           port: "{{ postgres_port | int }}"
-      restapi:
-        listen: "0.0.0.0:{{ postgres_patroni_port }}"
-        connect_address: "{{ hostvars[inventory_hostname].ansible_host }}:{{ postgres_patroni_port }}"
       bootstrap:
+        dcs:
+          postgresql:
+            pg_hba:
+              - host    all             all             127.0.0.1/32            md5
+              - host    all             all             ::1/128                 md5
+              - host    replication     replicator      {{ lan_subnet }}        md5
+              - host    {{ postgres_db_name }} {{ postgres_db_user }} {{ lan_subnet }} md5
+              - host    {{ postgres_db_name }} {{ postgres_db_user }} {{ k3s_cluster_cidr }} md5
+              - host    {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ lan_subnet }} md5
+              - host    {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ k3s_cluster_cidr }} md5
+              - host    all             postgres        {{ lan_subnet }}        md5
         init:
           postgresql:
             auth:
@@ -303,6 +311,16 @@
 - name: Set leader status fact
   ansible.builtin.set_fact:
     is_postgres_leader: "{{ _patroni_leader_check.status == 200 }}"
+
+- name: Update Patroni DCS configuration with new pg_hba rules (Leader only)
+  ansible.builtin.shell:
+    cmd: >
+      podman exec {{ postgres_container_name }}
+      patronictl edit-config --force --set "postgresql.pg_hba=['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'host replication replicator {{ lan_subnet }} md5', 'host {{ postgres_db_name }} {{ postgres_db_user }} {{ lan_subnet }} md5', 'host {{ postgres_db_name }} {{ postgres_db_user }} {{ k3s_cluster_cidr }} md5', 'host {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ lan_subnet }} md5', 'host {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ k3s_cluster_cidr }} md5', 'host all postgres {{ lan_subnet }} md5']"
+  become: true
+  when: is_postgres_leader
+  changed_when: true
+  register: _patroni_config_update
 
 - name: Administrative tasks (Leader only)
   block:
