@@ -274,7 +274,7 @@
           sudo pacman -Sy --noconfirm jq
         fi
 
-        LEADER_NAME=$(podman exec postgres patronictl list -f json | jq -r '.[] | select(.role == "Leader") | .Member')
+        LEADER_NAME=$(podman exec postgres patronictl list -f json | jq -r '.[] | select(.Role == "Leader") | .Member')
         if [ "$LEADER_NAME" != "{{ inventory_hostname }}" ]; then
           echo "Current host is not the Patroni leader ($LEADER_NAME). Skipping Kine fix."
           exit 0
@@ -297,11 +297,13 @@
           sudo pacman -Sy --noconfirm jq
         fi
 
-        LEADER_NAME=$(podman exec postgres patronictl list -f json | jq -r '.[] | select(.role == "Leader") | .Member')
+        # Get patronictl list output once to avoid multiple execs
+        PATRONI_LIST=$(podman exec postgres patronictl list -f json)
+        LEADER_NAME=$(echo "$PATRONI_LIST" | jq -r '.[] | select(.Role == "Leader") | .Member')
 
         if [ -z "$LEADER_NAME" ] || [ "$LEADER_NAME" = "null" ]; then
           echo "Could not identify Patroni leader. Full output of patronictl list:"
-          podman exec postgres patronictl list
+          echo "$PATRONI_LIST"
           exit 1
         fi
 
@@ -326,9 +328,31 @@
         fi
 
         # Update Patroni DCS with pg_hba rules
-        podman exec postgres patronictl edit-config --force --set "postgresql.pg_hba=['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'local replication replicator trust', 'host replication replicator {{ lan_subnet | default("192.168.0.0/24") }} md5', 'host {{ postgres_db_name | default("kubernetes") }} {{ postgres_db_user | default("k3s") }} {{ lan_subnet | default("192.168.0.0/24") }} md5', 'host {{ postgres_db_name | default("kubernetes") }} {{ postgres_db_user | default("k3s") }} {{ k3s_cluster_cidr | default("10.42.0.0/16") }} md5', 'host {{ postgres_authelia_db_name | default("authelia") }} {{ postgres_authelia_db_user | default("authelia") }} {{ lan_subnet | default("192.168.0.0/24") }} md5', 'host {{ postgres_authelia_db_name | default("authelia") }} {{ postgres_authelia_db_user | default("authelia") }} {{ k3s_cluster_cidr | default("10.42.0.0/16") }} md5', 'local all postgres trust', 'host all postgres {{ lan_subnet | default("192.168.0.0/24") }} md5']"
+        # Using variables with defaults for better robustness
+        K3S_DB_NAME="{{ global_k3s_db_name | default('kubernetes') }}"
+        K3S_DB_USER="{{ global_k3s_db_user | default('k3s') }}"
+        AUTHELIA_DB_NAME="{{ postgres_authelia_db_name | default('authelia') }}"
+        AUTHELIA_DB_USER="{{ postgres_authelia_db_user | default('authelia') }}"
+        LAN_SUBNET="{{ lan_subnet | default('192.168.0.0/24') }}"
+        K3S_CLUSTER_CIDR="{{ k3s_cluster_cidr | default('10.42.0.0/16') }}"
+
+        PG_HBA="['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'local replication replicator trust', 'host replication replicator $LAN_SUBNET md5', 'host $K3S_DB_NAME $K3S_DB_USER $LAN_SUBNET md5', 'host $K3S_DB_NAME $K3S_DB_USER $K3S_CLUSTER_CIDR md5', 'host $AUTHELIA_DB_NAME $AUTHELIA_DB_USER $LAN_SUBNET md5', 'host $AUTHELIA_DB_NAME $AUTHELIA_DB_USER $K3S_CLUSTER_CIDR md5', 'local all postgres trust', 'host all postgres $LAN_SUBNET md5']"
+
+        podman exec postgres patronictl edit-config --force --set "postgresql.pg_hba=$PG_HBA"
         # Force Patroni to reload the config and apply HBA changes
-        podman exec postgres patronictl reload {{ postgres_cluster_name | default('k3scluster') }} --force
+        # Added retries because networking might be unstable during restore (No route to host errors)
+        for i in {1..5}; do
+          if podman exec postgres patronictl reload {{ postgres_cluster_name | default('k3scluster') }} --force; then
+            echo "Patroni cluster reloaded successfully"
+            break
+          else
+            echo "Patroni reload failed (attempt $i), retrying in 5s..."
+            sleep 5
+          fi
+          if [ $i -eq 5 ]; then
+            echo "Failed to reload Patroni cluster after 5 attempts. Continuing anyway as DCS is updated."
+          fi
+        done
       args:
         executable: /bin/bash
       register: _authelia_restore_cmd

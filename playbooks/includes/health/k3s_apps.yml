@@ -237,6 +237,20 @@
         _external_homepage_ready:
           status: "{{ _external_homepage_ready_cmd.stdout | int if _external_homepage_ready_cmd.stdout | length > 0 else 0 }}"
 
+    - name: Verify Authelia via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k -L --silent --output /dev/null --write-out "%{http_code}"
+        --resolve auth.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://auth.{{ base_domain }}/api/health
+      register: _external_authelia_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Authelia status fact
+      ansible.builtin.set_fact:
+        _external_authelia_ready:
+          status: "{{ _external_authelia_ready_cmd.stdout | int if _external_authelia_ready_cmd.stdout | length > 0 else 0 }}"
+
     - name: Verify SeaweedFS Filer via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
         curl -k -L --silent --output /dev/null --write-out "%{http_code}"

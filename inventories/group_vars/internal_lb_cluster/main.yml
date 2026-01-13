@@ -62,6 +62,9 @@ load_balancer_haproxy_frontends:
       # ACLs for Homepage
       - "acl is_homepage hdr(host) -i homepage.k3s.{{ base_domain }}"
 
+      # ACLs for Authelia
+      - "acl is_authelia hdr(host) -i auth.k3s.{{ base_domain }}"
+
       # ACLs for SeaweedFS
       - "acl is_seaweedfs_filer hdr(host) -i seaweedfs-filer.k3s.{{ base_domain }}"
       - "acl is_seaweedfs_s3 hdr(host) -i seaweedfs-s3.k3s.{{ base_domain }}"
@@ -109,6 +112,9 @@ load_balancer_haproxy_frontends:
 
       # Routing Logic for Homepage
       - "use_backend homepage_backend if is_homepage"
+
+      # Routing Logic for Authelia
+      - "use_backend authelia_backend if is_authelia"
 
       # Routing Logic for SeaweedFS
       - "use_backend seaweedfs_filer_backend if is_seaweedfs_filer"
@@ -389,6 +395,21 @@ load_balancer_haproxy_backends:
 
   # Homepage Backend
   - name: homepage_backend
+    mode: http
+    balance: roundrobin
+    servers:
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        port: 9000
+
+  # Authelia Backend
+  - name: authelia_backend
     mode: http
     balance: roundrobin
     servers:

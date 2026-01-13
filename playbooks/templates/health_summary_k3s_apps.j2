@@ -56,6 +56,7 @@
   Longhorn (HTTPS):     {{ macros.ok('UP') if (_external_longhorn_ui_ready.status | default(-1)) in [200, 301, 302, 401] else macros.bad('DOWN') }}
   Dashboard (HTTPS):    {{ macros.ok('UP') if (_external_dashboard_ready.status | default(-1)) in [200, 301, 302, 401] else macros.bad('DOWN') }}
   Homepage (HTTPS):     {{ macros.ok('UP') if (_external_homepage_ready.status | default(-1)) in [200, 301, 302, 401] else macros.bad('DOWN') }}
+  Authelia (HTTPS):     {{ macros.ok('UP') if (_external_authelia_ready.status | default(-1)) in [200, 301, 302, 401, 404] else macros.bad('DOWN') }}
   Seaweed Filer (HTTPS): {{ macros.ok('UP') if (_external_seaweed_filer_ready.status | default(-1)) in [200, 301, 302, 401] else macros.bad('DOWN') }}
   Seaweed S3 (HTTPS):    {{ macros.ok('UP') if (_external_seaweed_s3_ready.status | default(-1)) in [200, 403, 301, 302, 401] else macros.bad('DOWN') }}
 
