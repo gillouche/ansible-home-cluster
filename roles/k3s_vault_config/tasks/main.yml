@@ -19,6 +19,9 @@
       delegate_to: localhost
       become: false
       register: _vault_auth_methods
+      until: _vault_auth_methods.status == 200
+      retries: 30
+      delay: 5
       changed_when: false
 
     - name: Enable Kubernetes Auth Method in Vault
