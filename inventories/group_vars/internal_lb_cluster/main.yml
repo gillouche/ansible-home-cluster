@@ -25,50 +25,16 @@ load_balancer_haproxy_frontends:
       # ACLs for Nexus
       - "acl is_nexus hdr(host) -i nexus.{{ base_domain }}"
 
-      # ACLs for Prometheus
-      - "acl is_prometheus hdr(host) -i prometheus.k3s.{{ base_domain }}"
-
-      # ACLs for Alertmanager
-      - "acl is_alertmanager hdr(host) -i alertmanager.k3s.{{ base_domain }}"
-
-      # ACLs for Grafana
-      - "acl is_grafana hdr(host) -i grafana.k3s.{{ base_domain }}"
-
-      # ACLs for Loki
-      - "acl is_loki hdr(host) -i loki.k3s.{{ base_domain }}"
-      - "acl is_loki_path path_beg /loki/"
-
       # ACLs for Firefly
       - "acl is_firefly hdr(host) -i firefly.{{ base_domain }}"
 
-      # ACLs for K3s API (HTTP/HTTPS via Ingress)
-      - "acl is_k3s_api hdr(host) -i api.k3s.{{ base_domain }}"
+      # ACLs for Loki
+      - "acl is_loki hdr(host) -i loki.{{ base_domain }}"
 
-      # ACLs for Longhorn UI
-      - "acl is_longhorn hdr(host) -i longhorn.k3s.{{ base_domain }}"
+      # ACLs for K3s Services (Wildcard)
+      - "acl is_k3s_domain hdr_end(host) -i .k3s.{{ base_domain }}"
 
-      # ACLs for Kubernetes Dashboard
-      - "acl is_dashboard hdr(host) -i dashboard.k3s.{{ base_domain }}"
-
-      # ACLs for ArgoCD
-      - "acl is_argocd hdr(host) -i argocd.k3s.{{ base_domain }}"
-
-      # ACLs for Kube State Metrics
-      - "acl is_ksm hdr(host) -i ksm.k3s.{{ base_domain }}"
-
-      # ACLs for Goldilocks
-      - "acl is_goldilocks hdr(host) -i goldilocks.k3s.{{ base_domain }}"
-
-      # ACLs for Homepage
-      - "acl is_homepage hdr(host) -i homepage.k3s.{{ base_domain }}"
-
-      # ACLs for Authelia
-      - "acl is_authelia hdr(host) -i auth.k3s.{{ base_domain }}"
-
-      # ACLs for SeaweedFS
-      - "acl is_seaweedfs_filer hdr(host) -i seaweedfs-filer.k3s.{{ base_domain }}"
-      - "acl is_seaweedfs_s3 hdr(host) -i seaweedfs-s3.k3s.{{ base_domain }}"
-
+      # Specific routing for Pi-hole
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
       - "use_backend pihole_replica2 if is_pihole_replica2"
@@ -77,48 +43,14 @@ load_balancer_haproxy_frontends:
       # Routing Logic for Nexus
       - "use_backend nexus_backend if is_nexus"
 
-      # Routing Logic for Prometheus
-      - "use_backend prometheus_backend if is_prometheus"
-
-      # Routing Logic for Alertmanager
-      - "use_backend alertmanager_backend if is_alertmanager"
-
-      # Routing Logic for Grafana
-      - "use_backend grafana_backend if is_grafana"
-
-      # Routing Logic for Loki
-      - "use_backend loki_backend if is_loki || is_loki_path"
-
       # Routing Logic for Firefly
       - "use_backend firefly_backend if is_firefly"
 
-      # Routing Logic for K3s API
-      - "use_backend k3s_api_backend_https if is_k3s_api"
+      # Loki Root Redirect (Loki has no UI, redirect / to /loki/ready)
+      - "http-request redirect location /loki/ready code 301 if is_loki { path / }"
 
-      # Routing Logic for Longhorn
-      - "use_backend longhorn_backend if is_longhorn"
-
-      # Routing Logic for Kubernetes Dashboard
-      - "use_backend dashboard_backend if is_dashboard"
-
-      # Routing Logic for ArgoCD
-      - "use_backend argocd_backend if is_argocd"
-
-      # Routing Logic for Kube State Metrics
-      - "use_backend kube_state_metrics_back if is_ksm"
-
-      # Routing Logic for Goldilocks
-      - "use_backend goldilocks_backend if is_goldilocks"
-
-      # Routing Logic for Homepage
-      - "use_backend homepage_backend if is_homepage"
-
-      # Routing Logic for Authelia
-      - "use_backend authelia_backend if is_authelia"
-
-      # Routing Logic for SeaweedFS
-      - "use_backend seaweedfs_filer_backend if is_seaweedfs_filer"
-      - "use_backend seaweedfs_s3_backend if is_seaweedfs_s3"
+      # Fallback for all other *.k3s.gillouche.homelab domains
+      - "use_backend traefik_http_back if is_k3s_domain"
 
       # Redirect / to /admin for convenience
       # IMPORTANT: Exclude /api and /remote.php to avoid breaking Pi-hole background calls
@@ -126,8 +58,14 @@ load_balancer_haproxy_frontends:
         http-request redirect location /admin code 301 if is_pihole_cluster
         !{ path_beg /admin } !{ path_beg /api } !{ path_beg /remote.php }
 
-      # Loki Root Redirect (Loki has no UI, redirect / to /loki/ready)
-      - "http-request redirect location /loki/ready code 301 if is_loki { path / }"
+    default_backend: traefik_http_back
+
+  - name: https_in
+    bind: "{{ load_balancer_virtual_ip }}:443"
+    mode: tcp
+    extra:
+      - "option tcplog"
+    default_backend: traefik_https_back
 
 load_balancer_haproxy_backends:
   - name: vault_back
@@ -159,6 +97,54 @@ load_balancer_haproxy_backends:
         addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
         opts: "check check-ssl verify none"
+
+  - name: traefik_http_back
+    mode: http
+    balance: roundrobin
+    default_server: "check inter 5s fall 2 rise 1"
+    servers:
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        port: 9000
+
+  - name: traefik_https_back
+    mode: tcp
+    balance: roundrobin
+    default_server: "check inter 5s fall 2 rise 1"
+    servers:
+      - name: k3s_server1
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: 9443
+      - name: k3s_server2
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        port: 9443
+      - name: k3s_server3
+        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        port: 9443
+
+  # Nexus Backend
+  - name: nexus_backend
+    mode: http
+    servers:
+      - name: nexus
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        port: "{{ global_nexus_port }}"
+        opts: "check"
+
+  # Firefly Backend
+  - name: firefly_backend
+    mode: http
+    servers:
+      - name: firefly
+        addr: "{{ hostvars['rpi5b8g1'].ansible_host }}"
+        port: "{{ global_firefly_port }}"
+        opts: "check"
 
   # K3s API Backend (HTTPS via Ingress)
   - name: k3s_api_backend_https
@@ -221,233 +207,3 @@ load_balancer_haproxy_backends:
         addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"
-
-  # Nexus Backend
-  - name: nexus_backend
-    mode: http
-    servers:
-      - name: nexus
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: "{{ global_nexus_port }}"
-        opts: "check"
-
-  # Prometheus Backend
-  - name: prometheus_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # Alertmanager Backend
-  - name: alertmanager_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # Grafana Backend
-  - name: grafana_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # Loki Backend
-  - name: loki_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # Firefly Backend
-  - name: firefly_backend
-    mode: http
-    servers:
-      - name: firefly
-        addr: "{{ hostvars['rpi5b8g1'].ansible_host }}"
-        port: "{{ global_firefly_port }}"
-        opts: "check"
-
-  # Longhorn UI Backend
-  - name: longhorn_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # Kube State Metrics Backend
-  - name: kube_state_metrics_back
-    mode: http
-    balance: roundrobin
-    default_server: "check inter 5s fall 2 rise 1"
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  - name: k3s_traefik_back
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-        opts: "check"
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-        opts: "check"
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-        opts: "check"
-
-  # Kubernetes Dashboard Backend
-  - name: dashboard_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # ArgoCD Backend
-  - name: argocd_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # Goldilocks Backend
-  - name: goldilocks_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # Homepage Backend
-  - name: homepage_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # Authelia Backend
-  - name: authelia_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  # SeaweedFS Backends
-  - name: seaweedfs_filer_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000
-
-  - name: seaweedfs_s3_backend
-    mode: http
-    balance: roundrobin
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9000

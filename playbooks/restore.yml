@@ -374,6 +374,20 @@
         - _nexus_start.rc != 0
         - "'already' not in _nexus_start.stderr"
 
+- name: "Restore Firefly III"
+  hosts: firefly
+  gather_facts: false
+  become: true
+  tags: [never, base, infra, firefly]
+  tasks:
+    - name: Start Firefly III container
+      ansible.builtin.command: podman start firefly
+      register: _firefly_start
+      changed_when: _firefly_start.rc == 0
+      failed_when:
+        - _firefly_start.rc != 0
+        - "'already' not in _firefly_start.stderr"
+
 - name: "Restore K3s Cluster"
   hosts: server
   gather_facts: false
