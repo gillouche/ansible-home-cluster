@@ -19,4 +19,4 @@ collections:
   - name: k3s
     type: git
     source: https://github.com/gillouche/k3s-ansible.git
-    version: fix-archlinux-arm-rpi5
+    version: main
