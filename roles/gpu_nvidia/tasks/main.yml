@@ -1,0 +1,16 @@
+---
+- name: Install NVIDIA drivers and utilities
+  community.general.pacman:
+    name:
+      - nvidia
+      - nvidia-utils
+      - nvidia-container-toolkit
+    state: present
+  become: true
+
+- name: Configure NVIDIA Container Toolkit
+  ansible.builtin.shell:
+    cmd: nvidia-ctk runtime configure --runtime=containerd
+  register: nvidia_ctk_config
+  changed_when: nvidia_ctk_config.rc == 0
+  become: true

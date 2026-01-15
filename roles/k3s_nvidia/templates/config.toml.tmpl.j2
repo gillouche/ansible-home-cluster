@@ -1,0 +1,51 @@
+# /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
+
+[plugins.opt]
+  path = "{{ .NodeConfig.Containerd.Opt }}"
+  [plugins.opt.containerd]
+    snapshotter = "{{ .NodeConfig.Containerd.Snapshotter }}"
+    disable_snapshot_annotations = {{ .NodeConfig.Containerd.DisableSnapshotAnnotations }}
+    discard_unpacked_layers = {{ .NodeConfig.Containerd.DiscardUnpackedLayers }}
+
+[plugins.cri]
+  stream_server_address = "127.0.0.1"
+  stream_server_port = "10010"
+  enable_selinux = {{ .NodeConfig.SELinux }}
+  enable_unprivileged_ports = {{ .NodeConfig.Containerd.EnableUnprivilegedPorts }}
+  enable_unprivileged_icmp = {{ .NodeConfig.Containerd.EnableUnprivilegedICMP }}
+  sandbox_image = "{{ .NodeConfig.AgentConfig.PauseImage }}"
+
+[plugins.cri.containerd]
+  snapshotter = "{{ .NodeConfig.Containerd.Snapshotter }}"
+  disable_snapshot_annotations = {{ .NodeConfig.Containerd.DisableSnapshotAnnotations }}
+  discard_unpacked_layers = {{ .NodeConfig.Containerd.DiscardUnpackedLayers }}
+
+[plugins.cri.containerd.runtimes.runc]
+  runtime_type = "io.containerd.runc.v2"
+
+[plugins.cri.containerd.runtimes.runc.options]
+  SystemdCgroup = true
+
+# NVIDIA Runtime Configuration
+[plugins.cri.containerd.runtimes."nvidia"]
+  runtime_type = "io.containerd.runc.v2"
+[plugins.cri.containerd.runtimes."nvidia".options]
+  BinaryName = "/usr/bin/nvidia-container-runtime"
+  SystemdCgroup = true
+
+[plugins.cri.registry]
+  {{ if .PrivateRegistryConfig }}
+  {{ range $k, $v := .PrivateRegistryConfig.Configs }}
+  [plugins.cri.registry.configs."{{$k}}".auth]
+    {{ if $v.Auth }}
+    username = {{ printf "%q" $v.Auth.Username }}
+    password = {{ printf "%q" $v.Auth.Password }}
+    auth = {{ printf "%q" $v.Auth.Auth }}
+    identitytoken = {{ printf "%q" $v.Auth.IdentityToken }}
+    {{ end }}
+  {{ end }}
+  {{ range $k, $v := .PrivateRegistryConfig.Mirrors }}
+  [plugins.cri.registry.mirrors."{{$k}}"]
+    endpoint = [{{ range $i, $j := $v.Endpoints }}{{if $i}}, {{end}}{{printf "%q" $j}}{{end}}]
+  {{ end }}
+  {{ end }}

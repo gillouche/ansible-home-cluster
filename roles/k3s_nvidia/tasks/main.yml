@@ -1,0 +1,16 @@
+---
+- name: Create K3s Agent config directory
+  ansible.builtin.file:
+    path: /var/lib/rancher/k3s/agent/etc/containerd
+    state: directory
+    mode: '0755'
+    recurse: true
+  become: true
+
+- name: Deploy K3s Containerd config template
+  ansible.builtin.template:
+    src: config.toml.tmpl.j2
+    dest: /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
+    mode: '0644'
+  notify: Restart K3s Agent
+  become: true
