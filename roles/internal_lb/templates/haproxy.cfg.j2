@@ -6,8 +6,8 @@ global
 
 defaults
   log     global
-  mode    tcp
-  option  tcplog
+  mode    {{ haproxy_default_mode | default('http') }}
+  option  {{ 'httplog' if (haproxy_default_mode | default('http') == 'http') else 'tcplog' }}
   timeout connect 5s
   timeout client  1m
   timeout server  1m

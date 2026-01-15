@@ -15,6 +15,7 @@ load_balancer_haproxy_frontends:
     extra:
       - "option httplog"
       - "option forwardfor" # Ensure client IP is passed to backends
+      - "option http-buffer-request"
 
       # ACLs for Pi-hole Routing
       - "acl is_pihole_primary hdr(host) -i primary.pihole.{{ base_domain }}"
@@ -62,10 +63,12 @@ load_balancer_haproxy_frontends:
 
   - name: https_in
     bind: "{{ load_balancer_virtual_ip }}:443"
-    mode: tcp
+    mode: http
     extra:
-      - "option tcplog"
-    default_backend: traefik_https_back
+      - "option httplog"
+      - "option forwardfor"
+      - "option http-buffer-request"
+    default_backend: traefik_http_back
 
 load_balancer_haproxy_backends:
   - name: vault_back
@@ -112,21 +115,6 @@ load_balancer_haproxy_backends:
       - name: k3s_server3
         addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
         port: 9000
-
-  - name: traefik_https_back
-    mode: tcp
-    balance: roundrobin
-    default_server: "check inter 5s fall 2 rise 1"
-    servers:
-      - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
-        port: 9443
-      - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9443
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
-        port: 9443
 
   # Nexus Backend
   - name: nexus_backend
