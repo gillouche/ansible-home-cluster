@@ -160,7 +160,7 @@
         vault_root_token: "{{ (_cluster_init_content.content | b64decode | from_json).root_token }}"
       when:
         - _cluster_init_content.content is defined
-        - (_cluster_init_content.content | b64decode | regex_search('^\\s*[{\\[]'))
+        - (_cluster_init_content.content | b64decode | regex_search('^\\s*[{\\[]')) | length > 0
   roles:
     - role: k3s_vault_config
 

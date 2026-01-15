@@ -68,6 +68,7 @@ load_balancer_haproxy_frontends:
       - "option httplog"
       - "option forwardfor"
       - "option http-buffer-request"
+      - "http-request set-header X-Forwarded-Proto https"
     default_backend: traefik_http_back
 
 load_balancer_haproxy_backends:
