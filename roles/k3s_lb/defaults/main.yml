@@ -1,2 +1,9 @@
 ---
 load_balancer_haproxy_service: haproxy
+
+# Variables for unified haproxy.cfg.j2
+load_balancer_haproxy_frontends: []
+load_balancer_haproxy_backends: []
+load_balancer_haproxy_peers_enabled: false
+load_balancer_haproxy_peers: []
+haproxy_default_mode: tcp

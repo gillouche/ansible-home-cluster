@@ -6,8 +6,8 @@ global
 
 defaults
   log     global
-  mode    {{ haproxy_default_mode | default('http') }}
-  option  {{ 'httplog' if (haproxy_default_mode | default('http') == 'http') else 'tcplog' }}
+  mode    {{ haproxy_default_mode | default('tcp') }}
+  option  {{ 'httplog' if (haproxy_default_mode | default('tcp') == 'http') else 'tcplog' }}
   timeout connect 5s
   timeout client  1m
   timeout server  1m
@@ -29,6 +29,7 @@ listen stats
 # Include all .cfg files from conf.d
 # Note: HAProxy 2.1+ supports passing a directory with -f
 # This is currently disabled in systemd ExecStart to avoid failure if empty.
+# Actually we ENABLED it in systemd drop-in, so this if block is just for documentation
 {% endif %}
 
 {% if load_balancer_haproxy_peers_enabled | default(false) %}

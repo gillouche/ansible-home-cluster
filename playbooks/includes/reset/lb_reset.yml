@@ -1,6 +1,6 @@
 ---
-- name: Reset Internal Load Balancer
-  hosts: internal_lb_cluster
+- name: Reset Load Balancers
+  hosts: internal_lb_cluster:server
   gather_facts: true
   become: true
   tags:
@@ -34,11 +34,21 @@
         path: /etc/haproxy
         state: absent
 
-    - name: Remove Load Balancer keepalived config
+    - name: Remove Load Balancer keepalived configs
       ansible.builtin.file:
-        path: /etc/keepalived/conf.d/load-balancer.conf
+        path: "/etc/keepalived/conf.d/{{ item }}"
         state: absent
+      loop:
+        - load-balancer.conf
+        - k3s-api.conf
+        - k3s-lb.conf
+        - postgres.conf
       notify: Restart keepalived
+
+    - name: Remove HAProxy placeholder config
+      ansible.builtin.file:
+        path: /etc/haproxy/conf.d/00-placeholder.cfg
+        state: absent
 
     - name: Uninstall HAProxy package
       ansible.builtin.package:

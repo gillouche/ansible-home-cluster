@@ -6,6 +6,49 @@
       - min
   when: ansible_distribution is not defined
 
+- name: Check if NetworkManager is installed
+  ansible.builtin.command: systemctl is-active NetworkManager
+  register: nm_check
+  failed_when: false
+  changed_when: false
+  become: true
+
+- name: Disable NetworkManager management of resolv.conf (NTP safeguard)
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/99-no-resolv-conf.conf
+    content: |
+      [main]
+      rc-manager=unmanaged
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: nm_check.rc == 0
+  notify: Restart NetworkManager
+
+- name: Check if /etc/resolv.conf is a symlink
+  ansible.builtin.stat:
+    path: /etc/resolv.conf
+  register: ntp_resolvconf_stat
+
+- name: Remove /etc/resolv.conf symlink if present
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: ntp_resolvconf_stat.stat.islnk | default(false)
+  become: true
+
+- name: Ensure /etc/resolv.conf uses Pi-hole with public fallback (NTP safeguard)
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ pihole_virtual_ip | default('192.168.0.251') }}
+      nameserver 1.1.1.1
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
 - name: Set distribution fact if not defined
   ansible.builtin.set_fact:
     is_arch: "{{ (ansible_facts['distribution'] | lower) in ['archlinux', 'arch linux'] }}"
@@ -75,3 +118,36 @@
   retries: 5
   delay: 5
   when: is_arch
+
+- name: Force immediate time sync (chrony makestep)
+  ansible.builtin.command: chronyc -a makestep
+  become: true
+  changed_when: true
+  failed_when: false
+  when: is_arch
+
+- name: Force immediate time sync (HTTP fallback via Google)
+  ansible.builtin.shell: |
+    HTTP_DATE=$(curl -s --head --connect-timeout 5 http://google.com | grep ^Date: | sed 's/Date: //g')
+    if [ -n "$HTTP_DATE" ]; then
+      date -s "$HTTP_DATE"
+    else
+      exit 1
+    fi
+  become: true
+  # Only fallback if the year is behind 2026 (current year)
+  # Or if it's already 2026 but we are at the beginning of the year (January) and the date is significantly off
+  when: >
+    is_arch and (
+    ansible_date_time.year | int < 2026 or
+    (ansible_date_time.year | int == 2026 and ansible_date_time.month | int == 1 and ansible_date_time.day | int < 13)
+    )
+  register: _http_sync
+  changed_when: _http_sync.rc == 0
+  failed_when: false
+
+- name: Trigger another chrony sync if HTTP was used
+  ansible.builtin.command: chronyc -a makestep
+  become: true
+  when: is_arch and _http_sync is changed
+  failed_when: false

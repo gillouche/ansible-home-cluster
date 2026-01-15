@@ -145,9 +145,14 @@
         name: keepalived
         state: started
       register: _keepalived_start
-      until: _keepalived_start.status.ActiveState | default('') == "active"
+
+    - name: Verify Keepalived is active
+      ansible.builtin.command: systemctl is-active keepalived
+      register: _keepalived_status
       retries: 5
-      delay: 5
+      delay: 2
+      until: _keepalived_status.rc == 0
+      changed_when: false
 
 - name: "Restore Internal Load Balancer"
   hosts: internal_lb_cluster
@@ -160,18 +165,28 @@
         name: haproxy
         state: started
       register: _haproxy_start
-      until: _haproxy_start.status.ActiveState | default('') == "active"
+
+    - name: Verify HAProxy is active
+      ansible.builtin.command: systemctl is-active haproxy
+      register: _haproxy_status
       retries: 5
-      delay: 5
+      delay: 2
+      until: _haproxy_status.rc == 0
+      changed_when: false
 
     - name: Start Keepalived
       ansible.builtin.systemd:
         name: keepalived
         state: started
       register: _keepalived_start
-      until: _keepalived_start.status.ActiveState | default('') == "active"
+
+    - name: Verify Keepalived is active
+      ansible.builtin.command: systemctl is-active keepalived
+      register: _keepalived_status
       retries: 5
-      delay: 5
+      delay: 2
+      until: _keepalived_status.rc == 0
+      changed_when: false
 
 - name: "Restore Edge Proxy (Caddy)"
   hosts: edge_proxy_cluster
@@ -192,9 +207,14 @@
         name: keepalived
         state: started
       register: _keepalived_start
-      until: _keepalived_start.status.ActiveState | default('') == "active"
+
+    - name: Verify Keepalived is active
+      ansible.builtin.command: systemctl is-active keepalived
+      register: _keepalived_status
       retries: 5
-      delay: 5
+      delay: 2
+      until: _keepalived_status.rc == 0
+      changed_when: false
 
 - name: "Restore Etcd (Postgres coordination)"
   hosts: postgres
@@ -209,6 +229,14 @@
       failed_when:
         - _etcd_start.rc != 0
         - "'already' not in _etcd_start.stderr"
+
+    - name: Ensure Etcd container is running
+      ansible.builtin.command: podman inspect etcd --format '{{"{{"}}.State.Running{{"}}"}}'
+      register: _etcd_running
+      until: _etcd_running.stdout == 'true'
+      retries: 10
+      delay: 2
+      changed_when: false
 
     - name: Wait for Etcd port to be open
       ansible.builtin.wait_for:
@@ -236,18 +264,28 @@
         name: "{{ postgres_haproxy_service | default('haproxy') }}"
         state: started
       register: _haproxy_start
-      until: _haproxy_start.status.ActiveState | default('') == "active"
+
+    - name: Verify HAProxy is active
+      ansible.builtin.command: "systemctl is-active {{ postgres_haproxy_service | default('haproxy') }}"
+      register: _haproxy_status
       retries: 5
-      delay: 5
+      delay: 2
+      until: _haproxy_status.rc == 0
+      changed_when: false
 
     - name: Start Keepalived
       ansible.builtin.systemd:
         name: keepalived
         state: started
       register: _keepalived_start
-      until: _keepalived_start.status.ActiveState | default('') == "active"
-      retries: 10
-      delay: 5
+
+    - name: Verify Keepalived is active
+      ansible.builtin.command: systemctl is-active keepalived
+      register: _keepalived_status
+      retries: 5
+      delay: 2
+      until: _keepalived_status.rc == 0
+      changed_when: false
 
     - name: Start Postgres container
       ansible.builtin.command: podman start postgres
@@ -256,6 +294,14 @@
       failed_when:
         - _postgres_start.rc != 0
         - "'already' not in _postgres_start.stderr"
+
+    - name: Ensure Postgres container is running
+      ansible.builtin.command: podman inspect postgres --format '{{"{{"}}.State.Running{{"}}"}}'
+      register: _pg_running
+      until: _pg_running.stdout == 'true'
+      retries: 10
+      delay: 2
+      changed_when: false
 
     - name: Wait for Postgres to be ready
       ansible.builtin.command: podman exec postgres pg_isready -p {{ postgres_port | default(5432) }}
@@ -407,7 +453,7 @@
         state: started
       register: _k3s_service
       until: _k3s_service.status.ActiveState == "active"
-      retries: 30
+      retries: 60
       delay: 5
 
     - name: Wait for All Nodes to be Ready
@@ -443,7 +489,7 @@
         state: started
       register: _k3s_agent_service
       until: _k3s_agent_service.status.ActiveState == "active"
-      retries: 30
+      retries: 60
       delay: 5
 
     - name: Wait for Agent Nodes to be Ready # noqa: run-once

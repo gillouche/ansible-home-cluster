@@ -258,7 +258,7 @@
     dest: /etc/resolv.conf
     content: |
       nameserver {{ pihole_virtual_ip }}
-      nameserver {{ pihole_static_dns | default('1.1.1.1') }}
+      nameserver 1.1.1.1
     owner: root
     group: root
     mode: '0644'

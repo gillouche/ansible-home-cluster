@@ -1,5 +1,10 @@
 ---
 
+- name: Skip role on non-cluster hosts
+  ansible.builtin.meta: end_role
+  when: inventory_hostname not in (groups['internal_lb_cluster'] | default([]))
+  become: false
+
 # Ensure HAProxy is installed and configured; keepalived is assumed present and managed by its own role
 
 - name: Gather minimal facts (role safeguard when running with tags)
@@ -82,6 +87,15 @@
     mode: '0755'
   become: true
 
+- name: Create HAProxy conf.d placeholder to prevent startup failure if empty
+  ansible.builtin.copy:
+    dest: /etc/haproxy/conf.d/00-placeholder.cfg
+    content: "# Managed by Ansible - prevents HAProxy failure if conf.d is empty\n"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
 - name: Render HAProxy configuration
   ansible.builtin.template:
     src: haproxy.cfg.j2
@@ -121,6 +135,17 @@
     enabled: true
     daemon_reload: true
   become: true
+  register: _haproxy_start
+
+- name: Verify HAProxy is actually running
+  ansible.builtin.command: "systemctl is-active {{ load_balancer_haproxy_service }}"
+  register: _haproxy_status
+  retries: 5
+  delay: 2
+  until: _haproxy_status.rc == 0
+  changed_when: false
+  become: true
+  when: _haproxy_start.changed
 
 - name: Install HAProxy CA watch service
   ansible.builtin.template:

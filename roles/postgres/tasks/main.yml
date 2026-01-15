@@ -79,6 +79,15 @@
     mode: '0755'
   become: true
 
+- name: Create HAProxy conf.d placeholder to prevent startup failure if empty
+  ansible.builtin.copy:
+    dest: /etc/haproxy/conf.d/00-placeholder.cfg
+    content: "# Managed by Ansible - prevents HAProxy failure if conf.d is empty\n"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
 - name: Ensure HAProxy systemd drop-in directory exists
   ansible.builtin.file:
     path: /etc/systemd/system/{{ postgres_haproxy_service }}.service.d
@@ -109,20 +118,9 @@
   when: _haproxy_dropin.changed
 
 - name: Render HAProxy main configuration
-  ansible.builtin.copy:
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
     dest: /etc/haproxy/haproxy.cfg
-    content: |
-      global
-          log /dev/log local0
-          log /dev/log local1 notice
-          daemon
-      defaults
-          log     global
-          mode    tcp
-          option  tcplog
-          timeout connect 5s
-          timeout client  1m
-          timeout server  1m
     owner: root
     group: root
     mode: '0644'
@@ -146,6 +144,17 @@
     enabled: true
     daemon_reload: true
   become: true
+  register: _haproxy_start
+
+- name: Verify HAProxy is actually running
+  ansible.builtin.command: "systemctl is-active {{ postgres_haproxy_service }}"
+  register: _haproxy_status
+  retries: 5
+  delay: 2
+  until: _haproxy_status.rc == 0
+  changed_when: false
+  become: true
+  when: _haproxy_start.changed
 
 - name: Render Keepalived configuration for Postgres VIP
   ansible.builtin.template:
@@ -338,10 +347,19 @@
   register: _patroni_config_update
 
 - name: Force Patroni reload to apply HBA changes (Leader only)
-  ansible.builtin.command:
-    cmd: podman exec {{ postgres_container_name }} patronictl reload {{ postgres_cluster_name }} --force
+  ansible.builtin.shell: |
+    # Use the local API directly via curl to bypass DCS discovery and config file issues
+    for i in {1..5}; do
+      if podman exec {{ postgres_container_name }} curl -s -XPOST http://localhost:{{ postgres_patroni_port }}/reload; then
+        exit 0
+      fi
+      sleep 5
+    done
+    exit 1
   become: true
   when: is_postgres_leader and _patroni_config_update.changed
+  register: _patroni_reload_res
+  changed_when: _patroni_reload_res.rc == 0
 
 - name: Administrative tasks (Leader only)
   block:

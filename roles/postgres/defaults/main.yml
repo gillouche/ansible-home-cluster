@@ -10,6 +10,13 @@ postgres_version: "16"
 postgres_haproxy_package: haproxy
 postgres_haproxy_service: haproxy
 
+# Variables for unified haproxy.cfg.j2
+load_balancer_haproxy_frontends: []
+load_balancer_haproxy_backends: []
+load_balancer_haproxy_peers_enabled: false
+load_balancer_haproxy_peers: []
+haproxy_default_mode: tcp
+
 # System User
 postgres_user: postgres
 postgres_group: postgres

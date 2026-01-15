@@ -36,7 +36,7 @@
 # 7. Reset Load Balancer (HAProxy, keepalived)
 - name: Reset Load Balancer
   import_playbook: includes/reset/lb_reset.yml
-  tags: [lb_reset]
+  tags: [lb_reset, reset_lb]
 
 # 8. Reset K3s Cluster (Nodes, DB, Storage)
 - name: Reset K3s

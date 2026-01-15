@@ -1,4 +1,47 @@
 ---
+- name: Check if NetworkManager is installed
+  ansible.builtin.command: systemctl is-active NetworkManager
+  register: nm_check
+  failed_when: false
+  changed_when: false
+  become: true
+
+- name: Disable NetworkManager management of resolv.conf
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/99-no-resolv-conf.conf
+    content: |
+      [main]
+      rc-manager=unmanaged
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: nm_check.rc == 0
+  notify: restart NetworkManager
+
+- name: Check if /etc/resolv.conf is a symlink
+  ansible.builtin.stat:
+    path: /etc/resolv.conf
+  register: monit_resolvconf_stat
+
+- name: Remove /etc/resolv.conf symlink if present
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    state: absent
+  when: monit_resolvconf_stat.stat.islnk | default(false)
+  become: true
+
+- name: Ensure /etc/resolv.conf points to Pi-hole VIP
+  ansible.builtin.copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver {{ pihole_virtual_ip | default('192.168.0.251') }}
+      nameserver 1.1.1.1
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
 - name: Install Monit and dependencies
   pacman:
     name:
@@ -27,35 +70,11 @@
     mode: '0644'
   become: true
 
-- name: Check if NetworkManager is installed
-  ansible.builtin.command: systemctl is-active NetworkManager
-  register: nm_check
-  failed_when: false
-  changed_when: false
-  become: true
-
-- name: Disable NetworkManager management of resolv.conf
-  ansible.builtin.copy:
-    dest: /etc/NetworkManager/conf.d/99-no-resolv-conf.conf
-    content: |
-      [main]
-      rc-manager=unmanaged
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
-  when: nm_check.rc == 0
-  notify: restart NetworkManager
-
-- name: Ensure /etc/resolv.conf points to Pi-hole VIP
-  ansible.builtin.copy:
-    dest: /etc/resolv.conf
-    content: |
-      nameserver {{ pihole_virtual_ip | default('192.168.0.251') }}
-      nameserver 1.1.1.1
-    owner: root
-    group: root
-    mode: '0644'
+- name: Ensure Monit service is enabled and started
+  systemd:
+    name: monit
+    enabled: true
+    state: started
   become: true
 
 - name: Configure Monit
@@ -66,11 +85,4 @@
     owner: root
     group: root
   notify: restart monit
-  become: true
-
-- name: Ensure Monit service is enabled and started
-  systemd:
-    name: monit
-    enabled: true
-    state: started
   become: true

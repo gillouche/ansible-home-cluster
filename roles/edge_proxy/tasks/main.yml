@@ -74,8 +74,8 @@
 
     - name: Check if /etc/resolv.conf already has the desired nameservers (reverse proxy)
       ansible.builtin.shell: >
-        grep -q "nameserver {{ reverse_proxy_resolver_ip }}" /etc/resolv.conf &&
-        grep -q "nameserver {{ reverse_proxy_public_resolver }}" /etc/resolv.conf
+        grep -q "nameserver {{ pihole_virtual_ip | default('192.168.0.251') }}" /etc/resolv.conf &&
+        grep -q "nameserver 1.1.1.1" /etc/resolv.conf
       register: _edge_proxy_resolv_conf_check
       failed_when: false
       changed_when: false
@@ -84,8 +84,8 @@
       ansible.builtin.copy:
         dest: /etc/resolv.conf
         content: |
-          nameserver {{ reverse_proxy_resolver_ip }}
-          nameserver {{ reverse_proxy_public_resolver }}
+          nameserver {{ pihole_virtual_ip | default('192.168.0.251') }}
+          nameserver 1.1.1.1
         owner: root
         group: root
         mode: '0644'
