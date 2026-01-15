@@ -1,0 +1,97 @@
+---
+- name: Reset DNS to public resolver on all devices
+  hosts: all
+  gather_facts: true
+  become: true
+  tags:
+    - never
+    - dns_reset
+
+  tasks:
+    - name: Ensure resolv.conf points to public DNS (1.1.1.1)
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: |
+          nameserver 1.1.1.1
+          nameserver 8.8.8.8
+        owner: root
+        group: root
+        mode: '0644'
+
+- name: Reset Pi-hole cluster
+  hosts: dns_cluster
+  gather_facts: true
+  become: true
+  tags:
+    - never
+    - dns_reset
+
+  tasks:
+    - name: Stop and remove Pi-hole container
+      containers.podman.podman_container:
+        name: pihole
+        state: absent
+
+    - name: Remove Pi-hole systemd service
+      ansible.builtin.file:
+        path: /etc/systemd/system/container-pihole.service
+        state: absent
+      notify: Reload systemd
+
+    - name: Remove Pi-hole keepalived config
+      ansible.builtin.file:
+        path: /etc/keepalived/conf.d/pihole.conf
+        state: absent
+      notify: Restart keepalived
+
+    - name: Remove pihole user and home directory
+      ansible.builtin.user:
+        name: pihole
+        state: absent
+        remove: true
+        force: true
+
+    - name: Remove Gravity Sync directory
+      ansible.builtin.file:
+        path: /opt/gravity-sync
+        state: absent
+
+    - name: Remove Gravity Sync symlink
+      ansible.builtin.file:
+        path: /usr/local/bin/gravity-sync
+        state: absent
+
+    - name: Remove Pi-hole cron jobs
+      ansible.builtin.cron:
+        name: "{{ item }}"
+        state: absent
+      loop:
+        - "update pihole gravity"
+        - "gravity-sync hourly"
+
+    - name: Restore NetworkManager resolv.conf management
+      ansible.builtin.file:
+        path: /etc/NetworkManager/conf.d/99-no-resolv-conf.conf
+        state: absent
+      notify: Restart NetworkManager
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted
+      failed_when: false
+
+    - name: Restart NetworkManager
+      ansible.builtin.systemd:
+        name: NetworkManager
+        state: restarted
+      failed_when: false
+
+- name: Reset Controller DNS (macOS)
+  import_playbook: reset_controller_dns.yml
+  tags: [never, dns_reset]

@@ -1,0 +1,57 @@
+---
+- name: Reset Internal Load Balancer
+  hosts: internal_lb_cluster
+  gather_facts: true
+  become: true
+  tags:
+    - never
+    - lb_reset
+
+  tasks:
+    - name: Stop and disable HAProxy services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - haproxy
+        - haproxy-ca-watch.path
+        - haproxy-ca-watch.service
+      failed_when: false
+
+    - name: Remove HAProxy systemd drop-in and watch units
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/haproxy.service.d
+        - /etc/systemd/system/haproxy-ca-watch.service
+        - /etc/systemd/system/haproxy-ca-watch.path
+      notify: Reload systemd
+
+    - name: Remove HAProxy configuration directory
+      ansible.builtin.file:
+        path: /etc/haproxy
+        state: absent
+
+    - name: Remove Load Balancer keepalived config
+      ansible.builtin.file:
+        path: /etc/keepalived/conf.d/load-balancer.conf
+        state: absent
+      notify: Restart keepalived
+
+    - name: Uninstall HAProxy package
+      ansible.builtin.package:
+        name: haproxy
+        state: absent
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted
+      failed_when: false

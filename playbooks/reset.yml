@@ -23,6 +23,21 @@
   import_playbook: includes/reset/flush_firewall.yml
   tags: [reset_firewall]
 
-# 5. Reset K3s Cluster (Nodes, DB, Storage)
+# 5. Reset DNS (Pi-hole, local resolv.conf, keepalived)
+- name: Reset DNS
+  import_playbook: includes/reset/dns_reset.yml
+  tags: [dns_reset]
+
+# 6. Reset Proxy (Edge Proxy, reverse_proxy user, keepalived)
+- name: Reset Proxy
+  import_playbook: includes/reset/proxy_reset.yml
+  tags: [proxy_reset]
+
+# 7. Reset Load Balancer (HAProxy, keepalived)
+- name: Reset Load Balancer
+  import_playbook: includes/reset/lb_reset.yml
+  tags: [lb_reset]
+
+# 8. Reset K3s Cluster (Nodes, DB, Storage)
 - name: Reset K3s
   import_playbook: includes/reset/k3s_reset.yml

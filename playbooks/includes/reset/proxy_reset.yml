@@ -1,0 +1,44 @@
+---
+- name: Reset Edge Proxy
+  hosts: edge_proxy_cluster
+  gather_facts: true
+  become: true
+  tags:
+    - never
+    - proxy_reset
+
+  tasks:
+    - name: Stop and remove Edge Proxy container
+      containers.podman.podman_container:
+        name: edge-proxy
+        state: absent
+
+    - name: Remove Edge Proxy systemd service
+      ansible.builtin.file:
+        path: /etc/systemd/system/container-edge-proxy.service
+        state: absent
+      notify: Reload systemd
+
+    - name: Remove Edge Proxy keepalived config
+      ansible.builtin.file:
+        path: /etc/keepalived/conf.d/edge-proxy.conf
+        state: absent
+      notify: Restart keepalived
+
+    - name: Remove reverse_proxy user and home directory
+      ansible.builtin.user:
+        name: reverse_proxy
+        state: absent
+        remove: true
+        force: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted
+      failed_when: false
