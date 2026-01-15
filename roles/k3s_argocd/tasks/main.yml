@@ -67,7 +67,7 @@
 
 - name: Patch ArgoCD Server Deployment with hostAliases for Authelia
   ansible.builtin.command: >-
-    k3s kubectl patch deployment argocd-server -n {{ argocd_namespace }} --patch '{"spec": {"template": {"spec": {"hostAliases": [{"ip": "{{ k3s_api_vip }}", "hostnames": ["auth.k3s.gillouche.homelab"]}]}}}}'
+    k3s kubectl patch deployment argocd-server -n {{ argocd_namespace }} --patch '{"spec": {"template": {"spec": {"hostAliases": [{"ip": "{{ reverse_proxy_virtual_ip }}", "hostnames": ["auth.k3s.gillouche.homelab"]}]}}}}'
   delegate_to: "{{ groups['server'][0] }}"
   run_once: true
   become: true
