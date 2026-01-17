@@ -1,2 +1,16 @@
 ---
 k3s_server_location: /mnt/data/k3s
+
+# specific args for server nodes (Control Plane)
+extra_server_args: >-
+  --prefer-bundled-bin
+  --disable traefik
+  --kubelet-arg=system-reserved=cpu=1000m,memory=2Gi
+  --kubelet-arg=kube-reserved=cpu=1000m,memory=2Gi
+  --kubelet-arg=max-pods=110
+  --datastore-endpoint={{ datastore_endpoint }}
+  --tls-san {{ k3s_api_vip }}
+  --tls-san {{ api_endpoint }}
+  --tls-san api.k3s.{{ base_domain }}
+  --advertise-address {{ ansible_host }}
+  --node-ip {{ ansible_host }}

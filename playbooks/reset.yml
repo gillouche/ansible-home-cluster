@@ -41,3 +41,4 @@
 # 8. Reset K3s Cluster (Nodes, DB, Storage)
 - name: Reset K3s
   import_playbook: includes/reset/k3s_reset.yml
+  tags: [k3s_reset]

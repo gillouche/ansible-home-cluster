@@ -49,6 +49,10 @@ all:
       ansible_host: 192.168.0.87
       ansible_ssh_user: alarm
       target_user: alarm
+    homeserver2:
+      ansible_host: 192.168.0.88
+      ansible_ssh_user: alarm
+      target_user: alarm
 
   children:
     devices:
@@ -65,6 +69,7 @@ all:
         rpi5b16g5:
         rpi5b16g6:
         homeserver:
+        homeserver2:
     dns_cluster:
       hosts:
         rpi5b16g4:

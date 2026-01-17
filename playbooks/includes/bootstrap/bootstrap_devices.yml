@@ -18,6 +18,8 @@
       ansible.builtin.stat:
         path: "{{ playbook_dir }}/../../../inventories/group_vars/all/vault.yml"
       register: _all_vault_file
+      delegate_to: localhost
+      run_once: true
       no_log: true
 
     - name: Load vaulted credentials from group_vars/all/vault.yml (if present)
@@ -26,18 +28,40 @@
       when: _all_vault_file.stat.exists | default(false)
       no_log: true
 
+    - name: Check if inventories/group_vars/devices/vault.yml exists
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../../../inventories/group_vars/devices/vault.yml"
+      register: _devices_vault_file
+      delegate_to: localhost
+      run_once: true
+      no_log: true
+
+    - name: Load vaulted credentials from group_vars/devices/vault.yml (if present)
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../../inventories/group_vars/devices/vault.yml"
+      when:
+        - _devices_vault_file.stat.exists | default(false)
+        - "'devices' in group_names"
+      no_log: true
+
     - name: Prompt for SSH password if not provided by vault
       ansible.builtin.pause:
         prompt: "SSH password for bootstrap user ({{ devices_bootstrap_user }})"
         echo: no
       register: bootstrap_pw
-      when: ansible_password is not defined
+      when: groups['all'] | map('extract', hostvars) | selectattr('ansible_password', 'undefined') | list | length > 0
+      delegate_to: localhost
+      run_once: true
       no_log: true
 
     - name: Set ansible_password from prompt
       ansible.builtin.set_fact:
-        ansible_password: "{{ bootstrap_pw.user_input }}"
-      when: ansible_password is not defined
+        ansible_password: "{{ hostvars['localhost']['bootstrap_pw']['user_input'] | default(omit) }}"
+      when:
+        - ansible_password is not defined
+        - hostvars['localhost']['bootstrap_pw'] is defined
+        - not hostvars['localhost']['bootstrap_pw'].skipped | default(false)
+        - hostvars['localhost']['bootstrap_pw'].user_input | default('') | length > 0
       no_log: true
 
   roles:

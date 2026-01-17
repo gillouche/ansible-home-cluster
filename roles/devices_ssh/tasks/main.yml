@@ -31,6 +31,15 @@
 
 # --- Inter-device trust: distribute peers' public keys ---
 
+- name: Prepare peer connection passwords
+  ansible.builtin.set_fact:
+    ansible_password: "{{ hostvars[item].ansible_password | default(ansible_password | default(omit)) }}"
+    ansible_ssh_pass: "{{ hostvars[item].ansible_password | default(ansible_password | default(omit)) }}"
+  loop: "{{ devices_ssh_peer_group | default(groups['all']) | difference([inventory_hostname]) | default([]) }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  no_log: true
+
 - name: Collect peers' public keys ({{ devices_ssh_user }})
   ansible.builtin.slurp:
     src: "/home/{{ devices_ssh_user }}/.ssh/id_ed25519.pub"

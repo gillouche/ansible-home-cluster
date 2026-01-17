@@ -10,7 +10,7 @@
   pre_tasks:
     - name: Load vaulted credentials from group_vars/all/vault.yml
       ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../inventories/group_vars/all/vault.yml"
+        file: "{{ playbook_dir }}/../../../inventories/group_vars/all/vault.yml"
       no_log: true
 
   tasks:
@@ -20,9 +20,18 @@
       changed_when: true
       when: (ansible_facts.get('os_family', '') | lower) == 'darwin'
 
+    - name: Flush macOS DNS caches (dscacheutil)
+      ansible.builtin.command: >-
+        dscacheutil -flushcache
+      changed_when: false
+      when: (ansible_facts.get('os_family', '') | lower) == 'darwin'
+
     - name: Flush macOS DNS caches (mDNSResponder HUP)
       ansible.builtin.command: >-
         killall -HUP mDNSResponder
       changed_when: false
       become: true
-      when: (ansible_facts.get('os_family', '') | lower) == 'darwin'
+      when:
+        - (ansible_facts.get('os_family', '') | lower) == 'darwin'
+        - ansible_become_password is defined or ansible_become_pass is defined
+      ignore_errors: true
