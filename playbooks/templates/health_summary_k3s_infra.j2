@@ -39,7 +39,7 @@
                    {% elif p == 503 %}{{ macros.ok('HEALTHY (Replica)') }}
                    {% else %}{{ macros.bad('DOWN / ERROR') }}{% endif %}
     Local Proxy:   {{ macros.ok('OPEN (' ~ (global_k3s_db_port | default(15432)) ~ ')') if hostvars[host]._postgres_proxy_port.state | default('') == 'started' else macros.bad('CLOSED') }}
-    DB Container:  {{ macros.ok('UP (' ~ (postgres_port | default(5432)) ~ ')') if hostvars[host]._postgres_container_port.state | default('') == 'started' else macros.bad('DOWN') }}
+    DB Container:  {{ macros.ok('UP (' ~ (global_postgres_port | default(5432)) ~ ')') if hostvars[host]._postgres_container_port.state | default('') == 'started' else macros.bad('DOWN') }}
     Ready (CMD):   {{ macros.ok('YES') if hostvars[host]._postgres_cmd_check.rc | default(-1) == 0 else macros.bad('NO') }}
 {% endfor %}
 {% endif %}
@@ -54,6 +54,9 @@
     API VIP:       {{ macros.ok('REACHABLE') if hostvars[host]._k3s_vip_status.status | default(0) in [200, 401] else macros.bad('UNREACHABLE') }}
     LB VIP:        {{ macros.ok('REACHABLE') if hostvars[host]._k3s_lb_vip_status.status | default(0) in [200, 404] else macros.bad('UNREACHABLE') }}
     ArgoCD (LB):   {{ macros.ok('UP') if hostvars[host]._lb_argocd_health_check.status | default(0) == 200 else macros.bad('DOWN') }}
+{% if host == 'homeserver2' and hostvars[host]._nvidia_smi_status is defined %}
+    NVIDIA GPU:    {{ macros.ok(hostvars[host]._nvidia_smi_status.stdout) if hostvars[host]._nvidia_smi_status.rc == 0 else macros.bad('ERROR / NOT FOUND') }}
+{% endif %}
 {% if hostvars[host]._k3s_vault_api_check is defined %}
     Vault Auth:    {{ macros.ok('UP') if (hostvars[host]._k3s_vault_api_check.status | default(0)) in [200, 429, 405, 403] else macros.bad('DOWN (CA Invalid)') }}
 {% endif %}

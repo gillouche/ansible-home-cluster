@@ -1,0 +1,6 @@
+---
+- name: Refresh system trust store
+  ansible.builtin.shell: |
+    (update-ca-trust || update-ca-trust extract || update-ca-certificates || true)
+  changed_when: false
+  failed_when: false

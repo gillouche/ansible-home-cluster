@@ -54,19 +54,31 @@
   ansible.builtin.debug:
     msg: "vault_needs_update is {{ vault_needs_update }}"
 
+- name: Map architecture names for HashiCorp
+  ansible.builtin.set_fact:
+    hashi_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' if ansible_architecture == 'aarch64' else ansible_architecture }}"
+
+- name: Force Vault update if current binary is incompatible
+  ansible.builtin.set_fact:
+    vault_needs_update: true
+  when:
+    - vault_bin.stat.exists
+    - vault_version_raw is defined
+    - vault_version_raw.rc == 8
+
 - name: Install Vault CLI from binary
   when: vault_needs_update
   block:
     - name: Download Vault zip artifact
       ansible.builtin.get_url:
-        url: "https://releases.hashicorp.com/vault/{{ vault_version }}/vault_{{ vault_version }}_linux_arm64.zip"
-        dest: "/tmp/vault_{{ vault_version }}_linux_arm64.zip"
+        url: "https://releases.hashicorp.com/vault/{{ vault_version }}/vault_{{ vault_version }}_linux_{{ hashi_arch }}.zip"
+        dest: "/tmp/vault_{{ vault_version }}_linux_{{ hashi_arch }}.zip"
         mode: '0644'
       become: true
 
     - name: Unzip Vault binary
       ansible.builtin.unarchive:
-        src: "/tmp/vault_{{ vault_version }}_linux_arm64.zip"
+        src: "/tmp/vault_{{ vault_version }}_linux_{{ hashi_arch }}.zip"
         dest: /tmp
         remote_src: true
       become: true
@@ -84,6 +96,6 @@
         path: "{{ item }}"
         state: absent
       loop:
-        - "/tmp/vault_{{ vault_version }}_linux_arm64.zip"
+        - "/tmp/vault_{{ vault_version }}_linux_{{ hashi_arch }}.zip"
         - "/tmp/vault"
       become: true

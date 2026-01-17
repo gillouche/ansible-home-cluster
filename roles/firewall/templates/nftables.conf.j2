@@ -31,11 +31,6 @@ ip protocol vrrp accept
 # Diagnostics (optional but sane)
 ip protocol icmp accept
 meta l4proto ipv6-icmp accept
-
-# Allow K3s API (Critical for Agents/VIP)
-tcp dport {{ global_k3s_api_port }} accept
-# Allow Postgres (Local HAProxy)
-tcp dport { {{ postgres_port }}, {{ global_k3s_db_port }} } accept
 }
 
 ###################

@@ -8,10 +8,9 @@
   failed_when: _argocd_ns.rc != 0 and 'already exists' not in _argocd_ns.stderr
   changed_when: _argocd_ns.rc == 0
 
-- name: Install ArgoCD HA ({{ argocd_version }})
+- name: Install ArgoCD HA
   ansible.builtin.command: >-
-    k3s kubectl apply -n {{ argocd_namespace }}
-    -f https://raw.githubusercontent.com/argoproj/argo-cd/{{ argocd_version }}/manifests/ha/install.yaml
+    k3s kubectl apply -k {{ path_to_gitops_repo }}//bootstrap/argocd?ref=main
   delegate_to: "{{ groups['server'][0] }}"
   run_once: true
   become: true

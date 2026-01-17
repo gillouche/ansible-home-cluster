@@ -5,7 +5,7 @@ firefly_uid: 10005
 firefly_gid: 10005
 firefly_db_uid: 33
 firefly_db_gid: 33
-firefly_home: /home/firefly
+firefly_home: "{{ user_home_root | default('/home') }}/firefly"
 firefly_data_dir: "{{ firefly_home }}/data"
 firefly_upload_dir: "{{ firefly_home }}/upload"
 firefly_container_name: firefly

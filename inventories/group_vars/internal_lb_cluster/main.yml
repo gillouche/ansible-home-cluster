@@ -20,7 +20,6 @@ load_balancer_haproxy_frontends:
       # ACLs for Pi-hole Routing
       - "acl is_pihole_primary hdr(host) -i primary.pihole.{{ base_domain }}"
       - "acl is_pihole_replica1 hdr(host) -i replica1.pihole.{{ base_domain }}"
-      - "acl is_pihole_replica2 hdr(host) -i replica2.pihole.{{ base_domain }}"
       - "acl is_pihole_cluster hdr_end(host) -i pihole.{{ base_domain }}"
 
       # ACLs for Nexus
@@ -38,7 +37,6 @@ load_balancer_haproxy_frontends:
       # Specific routing for Pi-hole
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
-      - "use_backend pihole_replica2 if is_pihole_replica2"
       - "use_backend pihole_backend if is_pihole_cluster"
 
       # Routing Logic for Nexus
@@ -85,22 +83,23 @@ load_balancer_haproxy_backends:
     # caused by HAProxy doing just TCP connect+SSL handshake and closing.
     extra:
       - "option httpchk GET /v1/sys/health"
+      - "http-check send meth GET uri /v1/sys/health hdr Host {{ load_balancer_virtual_ip }}"
 
     default_server: "check inter 5s fall 2 rise 1"
 
     servers:
       - name: vault1
-        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        addr: "{{ hostvars['homeserver2'].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
-        opts: "check check-ssl verify none"
+        opts: "check check-ssl verify none sni str({{ load_balancer_virtual_ip }})"
       - name: vault2
-        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
+        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
-        opts: "check check-ssl verify none"
+        opts: "check check-ssl verify none sni str({{ load_balancer_virtual_ip }})"
       - name: vault3
-        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
-        opts: "check check-ssl verify none"
+        opts: "check check-ssl verify none sni str({{ load_balancer_virtual_ip }})"
 
   - name: traefik_http_back
     mode: http
@@ -108,13 +107,10 @@ load_balancer_haproxy_backends:
     default_server: "check inter 5s fall 2 rise 1"
     servers:
       - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        addr: "{{ hostvars['homeserver'].ansible_host }}"
         port: 9000
       - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: 9000
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        addr: "{{ hostvars['homeserver2'].ansible_host }}"
         port: 9000
 
   # Nexus Backend
@@ -122,7 +118,7 @@ load_balancer_haproxy_backends:
     mode: http
     servers:
       - name: nexus
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        addr: "{{ hostvars['homeserver'].ansible_host }}"
         port: "{{ global_nexus_port }}"
         opts: "check"
 
@@ -131,7 +127,7 @@ load_balancer_haproxy_backends:
     mode: http
     servers:
       - name: firefly
-        addr: "{{ hostvars['rpi5b8g1'].ansible_host }}"
+        addr: "{{ hostvars['homeserver2'].ansible_host }}"
         port: "{{ global_firefly_port }}"
         opts: "check"
 
@@ -143,15 +139,11 @@ load_balancer_haproxy_backends:
     http_check_expect: "status 401"
     servers:
       - name: k3s_server1
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        addr: "{{ hostvars['homeserver'].ansible_host }}"
         port: "{{ global_k3s_api_port }}"
         opts: "check check-ssl verify none ssl"
       - name: k3s_server2
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
-        port: "{{ global_k3s_api_port }}"
-        opts: "check check-ssl verify none ssl"
-      - name: k3s_server3
-        addr: "{{ hostvars['rpi5b16g3ssd'].ansible_host }}"
+        addr: "{{ hostvars['homeserver2'].ansible_host }}"
         port: "{{ global_k3s_api_port }}"
         opts: "check check-ssl verify none ssl"
 
@@ -160,7 +152,7 @@ load_balancer_haproxy_backends:
     mode: http
     servers:
       - name: pihole_primary
-        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        addr: "{{ hostvars['homeserver'].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"
 
@@ -168,15 +160,7 @@ load_balancer_haproxy_backends:
     mode: http
     servers:
       - name: pihole_replica1
-        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
-        port: "{{ pihole_http_host_port }}"
-        opts: "check"
-
-  - name: pihole_replica2
-    mode: http
-    servers:
-      - name: pihole_replica2
-        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        addr: "{{ hostvars['homeserver2'].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"
 
@@ -185,14 +169,10 @@ load_balancer_haproxy_backends:
     balance: roundrobin
     servers:
       - name: pihole1
-        addr: "{{ hostvars['rpi5b16g4'].ansible_host }}"
+        addr: "{{ hostvars['homeserver'].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"
       - name: pihole2
-        addr: "{{ hostvars['rpi5b16g5'].ansible_host }}"
-        port: "{{ pihole_http_host_port }}"
-        opts: "check"
-      - name: pihole3
-        addr: "{{ hostvars['rpi5b16g6'].ansible_host }}"
+        addr: "{{ hostvars['homeserver2'].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"

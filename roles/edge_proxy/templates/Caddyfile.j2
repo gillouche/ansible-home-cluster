@@ -18,6 +18,7 @@ vault.{{ base_domain }} {
         header_up X-Forwarded-Proto https
         header_up X-Forwarded-For {remote}
         transport http {
+            tls_server_name {{ load_balancer_virtual_ip | default('192.168.0.253') }}
             tls_trust_pool file /etc/ssl/certs/internal-ca-bundle.pem
         }
     }

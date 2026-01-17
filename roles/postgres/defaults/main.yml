@@ -1,7 +1,7 @@
 ---
 postgres_container_name: postgres
 postgres_image: "ghcr.io/zalando/spilo-16:latest"
-postgres_port: 5432
+postgres_port: "{{ global_postgres_port | default(5432) }}"
 postgres_proxy_port: "{{ global_k3s_db_port | default(15432) }}"
 postgres_patroni_port: 8008
 postgres_version: "16"
@@ -22,7 +22,7 @@ postgres_user: postgres
 postgres_group: postgres
 postgres_uid: 101
 postgres_gid: 101
-postgres_home: /home/postgres
+postgres_home: "{{ user_home_root | default('/home') }}/postgres"
 
 # Data paths
 postgres_data_dir: /mnt/data/postgres

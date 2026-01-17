@@ -72,157 +72,247 @@ all:
         homeserver2:
     dns_cluster:
       hosts:
-        rpi5b16g4:
-        rpi5b16g5:
-        rpi5b16g6:
+        homeserver:
+        homeserver2:
     dns_primary:
       hosts:
-        rpi5b16g4:
+        homeserver:
     dns_replicas:
       hosts:
-        rpi5b16g5:
-        rpi5b16g6:
+        homeserver2:
     edge_proxy_cluster:
       hosts:
-        rpi5b16g4:
-        rpi5b16g5:
-        rpi5b16g6:
+        homeserver:
+        homeserver2:
     edge_proxy_primary:
       hosts:
-        rpi5b16g4:
+        homeserver2:
     edge_proxy_replicas:
       hosts:
-        rpi5b16g5:
-        rpi5b16g6:
+        homeserver:
     vault_cluster:
       hosts:
-        rpi5b8g1:
-        rpi5b16g4:
-        rpi5b16g5:
-        rpi5b16g6:
+        rpi5b16g1ssd:
+        rpi5b16g2ssd:
+        homeserver:
+        homeserver2:
     vault_transit:
       hosts:
-        rpi5b8g1:
+        homeserver:
     vault_leader:
       hosts:
-        rpi5b16g4:
+        homeserver2:
     vault_followers:
       hosts:
-        rpi5b16g5:
-        rpi5b16g6:
+        rpi5b16g1ssd:
+        rpi5b16g2ssd:
     internal_lb_cluster:
       hosts:
-        rpi5b16g4:
-        rpi5b16g5:
-        rpi5b16g6:
+        homeserver:
+        homeserver2:
     internal_lb_primary:
       hosts:
-        rpi5b16g4:
+        homeserver:
     internal_lb_replicas:
       hosts:
-        rpi5b16g5:
-        rpi5b16g6:
+        homeserver2:
     artifactory:
       hosts:
-        rpi5b16g1ssd:
+        homeserver:
     firefly:
       hosts:
-        rpi5b8g1:
+        homeserver2:
+    etcd_cluster:
+      hosts:
+        homeserver:
+        homeserver2:
+        rpi5b16g3ssd:
     postgres:
       hosts:
-        rpi5b16g1ssd:
-        rpi5b16g2ssd:
-        rpi5b16g3ssd:
+        homeserver:
+        homeserver2:
     postgres_leader:
       hosts:
-        rpi5b16g3ssd:
-    postgres_replicas:
+        homeserver2:
+    postgres_replica:
       hosts:
-        rpi5b16g1ssd:
-        rpi5b16g2ssd:
+        homeserver:
     k3s_cluster:
       children:
         server:
+          hosts:
+            homeserver:
+              k3s_node_labels:
+                node-class: homeserver
+                reliability: preferred
+                topology.kubernetes.io/zone: stable
+                node-role.kubernetes.io/control-plane: "true"
+                topology.kubernetes.io/node-group: homeserver
+                accelerator.amd.com/gpu.present: "true"
+                kubernetes.io/accelerator: amd
+                workload.tier: critical
+                hardware.reliability: server
+                storage.longhorn.io/eligible: "true"
+                node.longhorn.io/create-default-disk: "true"
+            homeserver2:
+              k3s_node_labels:
+                node-class: homeserver
+                reliability: preferred
+                topology.kubernetes.io/zone: stable
+                node-role.kubernetes.io/control-plane: "true"
+                topology.kubernetes.io/node-group: homeserver
+                accelerator.nvidia.com/gpu.present: "true"
+                kubernetes.io/accelerator: nvidia
+                workload.tier: critical
+                hardware.reliability: server
+                storage.longhorn.io/eligible: "true"
+                node.longhorn.io/create-default-disk: "true"
+        agent:
           hosts:
             rpi5b16g1ssd:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: stable
-                storage: ssd
-                gpu: false
                 topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: infra
             rpi5b16g2ssd:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: stable
-                storage: ssd
-                gpu: false
                 topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: infra
             rpi5b16g3ssd:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: stable
-                storage: ssd
-                gpu: false
                 topology.kubernetes.io/zone: rpi
-        agent:
-          hosts:
-            rpi4b8g1:
-              k3s_node_labels:
-                node-class: rpi4
-                reliability: best-effort
-                storage: sdcard
-                gpu: false
-            rpi4b8g2:
-              k3s_node_labels:
-                node-class: rpi4
-                reliability: best-effort
-                storage: sdcard
-                gpu: false
-            rpi4b8g3:
-              k3s_node_labels:
-                node-class: rpi4
-                reliability: best-effort
-                storage: sdcard
-                gpu: false
-            rpi4b8g4:
-              k3s_node_labels:
-                node-class: rpi4
-                reliability: best-effort
-                storage: sdcard
-                gpu: false
-            rpi5b8g1:
-              k3s_node_labels:
-                node-class: rpi5
-                reliability: best-effort
-                storage: sdcard
-                gpu: false
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: infra
             rpi5b16g4:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: best-effort
-                storage: sdcard
-                gpu: false
+                topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: playground
             rpi5b16g5:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: best-effort
-                storage: sdcard
-                gpu: false
+                topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: playground
             rpi5b16g6:
               k3s_node_labels:
                 node-class: rpi5
                 reliability: best-effort
-                storage: sdcard
-                gpu: false
-            homeserver:
+                topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: playground
+            rpi5b8g1:
               k3s_node_labels:
-                node-class: homeserver
-                reliability: preferred
-                storage: ssd
-                gpu: true
-                node.longhorn.io/create-default-disk: "true"
-                topology.kubernetes.io/zone: stable
+                node-class: rpi5
+                reliability: best-effort
+                topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: playground
+            rpi4b8g1:
+              k3s_node_labels:
+                node-class: rpi4
+                reliability: best-effort
+                topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: playground
+            rpi4b8g2:
+              k3s_node_labels:
+                node-class: rpi4
+                reliability: best-effort
+                topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: playground
+            rpi4b8g3:
+              k3s_node_labels:
+                node-class: rpi4
+                reliability: best-effort
+                topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: playground
+            rpi4b8g4:
+              k3s_node_labels:
+                node-class: rpi4
+                reliability: best-effort
+                topology.kubernetes.io/zone: rpi
+                node.longhorn.io/create-default-disk: "false"
+                node-role.kubernetes.io/worker: "true"
+                topology.kubernetes.io/node-group: rpi
+                storage.longhorn.io/eligible: "false"
+                hardware.reliability: consumer
+                accelerator.nvidia.com/gpu.present: "false"
+                accelerator.amd.com/gpu.present: "false"
+                workload.tier: playground
         agent_storage:
           hosts:
             homeserver:
+            homeserver2:

@@ -1,7 +1,7 @@
 ---
 reverse_proxy_image: "caddy:2.10.2"
 reverse_proxy_virtual_ip: 192.168.0.252
-reverse_proxy_primary_host: rpi5b16g4
+reverse_proxy_primary_host: homeserver2
 reverse_proxy_acme_email: "noreply@gillouche.homelab"
 
 # Prefer resolving via the Pi-hole VIP from reverse proxy hosts

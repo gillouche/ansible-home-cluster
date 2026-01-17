@@ -6,3 +6,4 @@
   tags: [apps, firefly]
   roles:
     - role: firefly
+      tags: [apps, firefly]

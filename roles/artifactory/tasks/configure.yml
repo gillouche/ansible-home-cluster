@@ -4,8 +4,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
     method: PUT
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       enabled: true
@@ -19,8 +20,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/system/eula"
     method: GET
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     status_code: 200
   register: _nexus_eula_status
   become: false
@@ -30,8 +32,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/system/eula"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       accepted: true
@@ -45,8 +48,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories"
     method: GET
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     status_code: 200
   register: _nexus_repos
   become: false
@@ -56,8 +60,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/docker/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       name: "docker-hub"
@@ -92,8 +97,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/docker/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       name: "quay-proxy"
@@ -128,8 +134,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/docker/group"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       name: "docker-all"
@@ -154,8 +161,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/pypi/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       name: "pypi-proxy"
@@ -182,8 +190,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/helm/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       name: "helm-proxy"
@@ -210,8 +219,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/go/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       name: "go-proxy"
@@ -238,8 +248,9 @@
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/cargo/proxy"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       name: "cargo-proxy"
@@ -261,24 +272,61 @@
   when: _nexus_repos.json | selectattr('name', 'equalto', 'cargo-proxy') | list | length == 0
   become: false
 
+- name: Get list of roles
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/roles"
+    method: GET
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 200
+  register: _nexus_roles
+  become: false
+
+- name: Create publish role
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/roles"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      id: "nx-publish"
+      name: "nx-publish"
+      description: "Publish Role for CICD"
+      privileges:
+        - "nx-repository-view-*-*-browse"
+        - "nx-repository-view-*-*-read"
+        - "nx-repository-view-*-*-add"
+        - "nx-repository-view-*-*-edit"
+      roles: []
+    status_code: [200, 201]
+  when: _nexus_roles.json | selectattr('id', 'equalto', 'nx-publish') | list | length == 0
+  become: false
+
 - name: Get list of users
   ansible.builtin.uri:
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/users"
     method: GET
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
     status_code: 200
   register: _nexus_users
   become: false
+  no_log: true
 
 - name: Create publish user
   ansible.builtin.uri:
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/users"
     method: POST
     user: "{{ artifactory_nexus_admin_user }}"
-    password: "{{ artifactory_nexus_admin_password }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
+    validate_certs: false
     body_format: json
     body:
       userId: "{{ artifactory_nexus_publish_user }}"
@@ -288,7 +336,122 @@
       password: "{{ artifactory_nexus_publish_user_password }}"
       status: "active"
       roles:
-        - "nx-admin"
-    status_code: [200, 201]
-  when: _nexus_users.json | selectattr('userId', 'equalto', artifactory_nexus_publish_user) | list | length == 0
+        - "nx-publish"
+    status_code: [201]
   become: false
+  no_log: true
+  register: _nexus_publish_user_created
+  when: _nexus_users.json | selectattr('userId', 'equalto', artifactory_nexus_publish_user) | list | length == 0
+
+- name: Set existing publish user fact
+  ansible.builtin.set_fact:
+    _nexus_existing_publish_user: "{{ _nexus_users.json | selectattr('userId', 'equalto', artifactory_nexus_publish_user) | first | default({}) }}"
+  when: _nexus_users.json | selectattr('userId', 'equalto', artifactory_nexus_publish_user) | list | length > 0
+  no_log: true
+
+- name: Update publish user details and roles
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/users/{{ artifactory_nexus_publish_user }}"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      userId: "{{ artifactory_nexus_publish_user }}"
+      firstName: "{{ _nexus_existing_publish_user.firstName | default('Publish') }}"
+      lastName: "{{ _nexus_existing_publish_user.lastName | default('User') }}"
+      emailAddress: "{{ _nexus_existing_publish_user.emailAddress | default('publish@example.com') }}"
+      status: "active"
+      source: "default"
+      roles:
+        - "nx-publish"
+    status_code: [204]
+  become: false
+  no_log: true
+  when:
+    - _nexus_existing_publish_user.userId is defined
+    - not (_nexus_publish_user_created is changed)
+
+- name: Check if admin password needs rotation
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200, 401]
+  register: _nexus_vault_auth_test
+  become: false
+  no_log: true
+
+- name: Rotate Nexus admin password to vault value
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/users/admin/change-password"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    headers:
+      Content-Type: "text/plain"
+    body: "{{ artifactory_nexus_admin_password }}"
+    status_code: [204]
+  become: false
+  no_log: true
+  when: _nexus_vault_auth_test.status == 401
+  register: _nexus_admin_rotated
+
+- name: Update working admin password fact if rotated
+  ansible.builtin.set_fact:
+    artifactory_nexus_admin_password_working: "{{ artifactory_nexus_admin_password }}"
+  when: _nexus_admin_rotated is changed
+  no_log: true
+
+- name: Update publish user password
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/users/{{ artifactory_nexus_publish_user }}/change-password"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    headers:
+      Content-Type: "text/plain"
+    body: "{{ artifactory_nexus_publish_user_password }}"
+    status_code: [204]
+  become: false
+  no_log: true
+  when:
+    - _nexus_existing_publish_user.userId is defined
+    - not (_nexus_publish_user_created is changed)
+
+- name: Verify publish user authentication
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/users"
+    user: "{{ artifactory_nexus_publish_user }}"
+    password: "{{ artifactory_nexus_publish_user_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 403
+  become: false
+  no_log: true
+
+- name: Verify publish user can read repositories (REST API)
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories"
+    user: "{{ artifactory_nexus_publish_user }}"
+    password: "{{ artifactory_nexus_publish_user_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 200
+  become: false
+  no_log: true
+
+- name: Remove Nexus initial admin password file
+  ansible.builtin.file:
+    path: "{{ artifactory_nexus_data_dir }}/admin.password"
+    state: absent
+  become: true
+  when: _nexus_admin_pw_file.stat.exists | default(false)

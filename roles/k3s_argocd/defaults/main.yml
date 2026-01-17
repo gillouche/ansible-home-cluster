@@ -1,4 +1,4 @@
 ---
-argocd_version: "v3.2.3"
 argocd_namespace: "argocd"
 argocd_credentials_file: "{{ lookup('env', 'HOME') }}/.local/share/ansible-home-cluster/argocd.json"
+path_to_gitops_repo: https://github.com/gillouche/home-cluster-gitops

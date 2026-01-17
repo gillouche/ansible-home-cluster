@@ -80,6 +80,13 @@
         - /opt/cni
         - /var/lib/cni
 
+    - name: Remove longhorn user and its home directory
+      ansible.builtin.user:
+        name: longhorn
+        state: absent
+        remove: true
+      failed_when: false
+
     - name: Remove K3s Keepalived Configurations
       ansible.builtin.file:
         path: "{{ item }}"

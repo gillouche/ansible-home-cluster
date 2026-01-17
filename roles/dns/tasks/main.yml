@@ -83,7 +83,7 @@
   ansible.builtin.stat:
     path: "{{ pihole_host_etc_dir }}/pihole.toml"
   register: pihole_toml_stat
-  become: false
+  become: true
 
 - name: Ensure pihole.toml exists (create only when missing)
   ansible.builtin.file:
@@ -112,7 +112,7 @@
       register: pihole_toml_dnsmasq_true
       changed_when: false
       failed_when: false
-      become: false
+      become: true
 
     - name: Set etc_dnsmasq_d to true if set to false
       ansible.builtin.replace:

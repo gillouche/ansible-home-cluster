@@ -31,7 +31,7 @@
     - "{{ artifactory_nexus_home }}"
   become: true
 
-- name: Ensure nexus.properties exists in /home/nexus
+- name: Ensure nexus.properties exists in nexus home
   ansible.builtin.template:
     src: nexus.properties.j2
     dest: "{{ artifactory_nexus_home }}/nexus.properties"
@@ -69,6 +69,85 @@
   become: false
   tags: [nexus_config]
 
+- name: Handle Nexus initial admin password
+  become: true
+  block:
+    - name: Check if admin.password file exists
+      ansible.builtin.stat:
+        path: "{{ artifactory_nexus_data_dir }}/admin.password"
+      register: _nexus_admin_pw_file
+
+    - name: Read initial admin password
+      ansible.builtin.slurp:
+        src: "{{ artifactory_nexus_data_dir }}/admin.password"
+      register: _nexus_initial_pw_b64
+      when: _nexus_admin_pw_file.stat.exists
+
+    - name: Set current admin password fact
+      ansible.builtin.set_fact:
+        artifactory_nexus_admin_password_current: >-
+          {{ (_nexus_initial_pw_b64.content | b64decode | trim)
+             if (_nexus_admin_pw_file.stat.exists and (_nexus_initial_pw_b64.content | default('') | length > 0))
+             else artifactory_nexus_admin_password }}
+      no_log: true
+
+- name: Try to authenticate with current password
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_current }}"
+    force_basic_auth: true
+    status_code: [200, 401]
+    validate_certs: false
+  register: _nexus_auth_test
+  become: false
+  no_log: true
+
+- name: Fallback to default password if 401
+  ansible.builtin.set_fact:
+    artifactory_nexus_admin_password_current: "{{ artifactory_nexus_admin_password_default }}"
+  no_log: true
+  when:
+    - _nexus_auth_test.status == 401
+    - artifactory_nexus_admin_password_current != artifactory_nexus_admin_password_default
+
+- name: Try to authenticate with default password
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_current }}"
+    force_basic_auth: true
+    status_code: [200, 401]
+    validate_certs: false
+  register: _nexus_auth_test_default
+  become: false
+  no_log: true
+  when:
+    - _nexus_auth_test.status == 401
+
+- name: Fallback to vault password if still 401
+  ansible.builtin.set_fact:
+    artifactory_nexus_admin_password_current: "{{ artifactory_nexus_admin_password }}"
+  no_log: true
+  when:
+    - _nexus_auth_test.status == 401
+    - _nexus_auth_test_default.status | default(0) == 401
+    - artifactory_nexus_admin_password_current != artifactory_nexus_admin_password
+
+- name: Final attempt to authenticate
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_current }}"
+    force_basic_auth: true
+    status_code: 200
+    validate_certs: false
+  become: false
+  no_log: true
+  when: _nexus_auth_test.status == 401
+
 - name: Configure Nexus repositories
   ansible.builtin.include_tasks: configure.yml
+  vars:
+    artifactory_nexus_admin_password_working: "{{ artifactory_nexus_admin_password_current }}"
   tags: [nexus_config]

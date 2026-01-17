@@ -1,23 +1,39 @@
 ---
-- name: "Setup Base System Components"
+- name: "Setup system Components"
   hosts: all
   gather_facts: true
   become: false
-  tags: [base, system]
+  tags: [system]
   roles:
     - role: facts
-      tags: facts
+      tags: [system, facts]
     - role: ntp
-      tags: ntp
+      tags: [system, ntp]
     - role: devices_os
-      tags: os
+      tags: [system, os]
     - role: utils
-      tags: utils
+      tags: [system, utils]
     - role: aur
-      tags: [aur, aur_rebuild_yay]
+      tags: [system, aur, aur_rebuild_yay]
     - role: firewall
-      tags: firewall
+      tags: [system, firewall]
     - role: containers
-      tags: containers
+      tags: [system, containers]
     - role: monit
-      tags: monit
+      tags: [system, monit]
+
+- name: "Setup AMD GPU"
+  hosts: homeserver
+  gather_facts: true
+  become: false
+  tags: [system, gpu]
+  roles:
+    - role: gpu_amd
+
+- name: "Setup Nvidia GPU"
+  hosts: homeserver2
+  gather_facts: true
+  become: false
+  tags: [system, gpu]
+  roles:
+    - role: gpu_nvidia

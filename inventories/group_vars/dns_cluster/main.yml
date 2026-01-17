@@ -1,9 +1,9 @@
 ---
 # Virtual IP and primary node
 pihole_virtual_ip: 192.168.0.251
-pihole_vrrp_interface: end0
+pihole_vrrp_interface: "{{ monit_network_interface | default('end0') }}"
 vip_prefixlen: 24
-pihole_primary_host: rpi5b16g4
+pihole_primary_host: homeserver
 
 # Enable wildcard DNS via dnsmasq to point domains to reverse proxy VIP
 pihole_dns_wildcard_enabled: true

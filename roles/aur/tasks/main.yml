@@ -11,6 +11,7 @@
   become: yes
   ansible.builtin.user:
     name: aur_builder
+    home: "{{ user_home_root | default('/home') }}/aur_builder"
     create_home: yes
     group: wheel
 

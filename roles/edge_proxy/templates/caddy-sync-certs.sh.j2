@@ -7,7 +7,7 @@ VAULT_TOKEN="{{ caddy_vault_token }}"
 CERT_DIR="{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard"
 DATA_DIR="{{ reverse_proxy_data_dir }}/"
 CONTAINER_NAME="{{ reverse_proxy_container_name }}"
-SSH_OPTS="-o StrictHostKeyChecking=no -i /home/alarm/.ssh/id_ed25519"
+SSH_OPTS="-o StrictHostKeyChecking=no -i {{ user_home_root | default('/home') }}/alarm/.ssh/id_ed25519"
 
 IS_PRIMARY={{ 'true' if reverse_proxy_is_primary | bool else 'false' }}
 REPLICAS=({% for host in groups['edge_proxy_cluster'] | difference(groups['edge_proxy_primary']) %}"{{ hostvars[host].ansible_host | default(host) }}" {% endfor %})

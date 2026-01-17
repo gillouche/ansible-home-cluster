@@ -19,6 +19,7 @@
       - cronie
       - ca-certificates-utils
       - bpytop
+      - iperf
       - jq
       - ncdu
       - lsof

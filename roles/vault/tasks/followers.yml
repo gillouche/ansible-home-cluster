@@ -46,6 +46,31 @@
     mode: '0755'
   become: true
 
+- name: Load Transit Token for Followers
+  block:
+    - name: Locate bootstrap transit token
+      ansible.builtin.stat:
+        path: "{{ vault_transit_token_export_path | expanduser }}"
+      register: _bootstrap_transit_token_file
+      delegate_to: localhost
+      run_once: true
+
+    - name: Read bootstrap transit token
+      ansible.builtin.slurp:
+        src: "{{ vault_transit_token_export_path | expanduser }}"
+      register: _bootstrap_transit_token
+      when: _bootstrap_transit_token_file.stat.exists
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set transit token fact
+      ansible.builtin.set_fact:
+        vault_transit_token: >-
+          {{ (_bootstrap_transit_token.content | b64decode | trim)
+             if (_bootstrap_transit_token is defined and _bootstrap_transit_token.content is defined) else '' }}
+      run_once: true
+  when: vault_enable_transit_seal | default(false) | bool
+
 - name: Render Vault configuration (followers)
   ansible.builtin.template:
     src: "vault.hcl.j2"

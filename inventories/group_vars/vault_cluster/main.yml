@@ -8,5 +8,5 @@ vault_acme_require_eab: false
 controller_vault_password_file: "~/.vault_pass"
 
 # Stable advertise addr for ACME (avoid redirects to leader hostname)
-vault_acme_advertise_addr: 192.168.0.253
+vault_acme_advertise_addr: "{{ load_balancer_virtual_ip }}"
 vault_transit_tls_skip_verify: true

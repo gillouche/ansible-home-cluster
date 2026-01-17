@@ -6,9 +6,9 @@ pihole_container_name: "pihole"
 # User and directory configuration
 pihole_user: "pihole"
 pihole_group: "pihole"
-pihole_root_dir: "/home/{{ pihole_user }}"
+pihole_root_dir: "{{ user_home_root | default('/home') }}/{{ pihole_user }}"
 # Old path for migration logic
-pihole_old_root_dir: "/home/{{ target_user | default('alarm') }}/pihole"
+pihole_old_root_dir: "{{ user_home_root | default('/home') }}/{{ target_user | default('alarm') }}/pihole"
 
 # Environment defaults
 pihole_web_password: "changeme"

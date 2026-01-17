@@ -1,0 +1,59 @@
+---
+- name: Fetch Intermediate CAs to controller for bundle creation
+  ansible.builtin.get_url:
+    url: >-
+      https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/{{ item.path }}/ca/pem
+    dest: "{{ tls_cluster_ca_dir_controller | expanduser }}/{{ item.name }}.pem"
+    mode: '0644'
+    validate_certs: false
+  loop:
+    - { path: 'pki_int', name: 'intermediate-ca' }
+    - { path: 'pki', name: 'middle-ca' }
+
+- name: Create CA bundle on controller
+  ansible.builtin.shell: |
+    for f in "{{ tls_cluster_ca_dir_controller | expanduser }}/intermediate-ca.pem" \
+             "{{ tls_cluster_ca_dir_controller | expanduser }}/middle-ca.pem" \
+             "{{ tls_cluster_ca_cert_controller | expanduser }}"; do
+      cat "$f"
+      echo ""
+    done > "{{ tls_cluster_ca_dir_controller | expanduser }}/ca-bundle.pem"
+  changed_when: false
+
+- name: Browser and System Trust (macOS)
+  when:
+    - hostvars['localhost'].ansible_facts['os_family'] == 'Darwin'
+    - tls_trust_ca_on_controller | default(false) | bool
+  become: false
+  block:
+    - name: Get local certificate fingerprint
+      ansible.builtin.command: openssl x509 -noout -fingerprint -sha256 -in "{{ tls_cluster_ca_cert_controller | expanduser }}"
+      register: _local_cert_fingerprint
+      changed_when: false
+
+    - name: Check if Homelab Root CA is in macOS keychain
+      ansible.builtin.shell: |
+        set -o pipefail
+        security find-certificate -c "Homelab Root CA" -p | openssl x509 -noout -fingerprint -sha256
+      register: _macos_cert_check
+      failed_when: false
+      changed_when: false
+
+    - name: Remove old Homelab Root CA from macOS keychain if fingerprint mismatch
+      ansible.builtin.command: security delete-certificate -c "Homelab Root CA"
+      when:
+        - _macos_cert_check.rc == 0
+        - _local_cert_fingerprint.stdout not in _macos_cert_check.stdout
+      changed_when: true
+
+    - name: Trust Root CA in macOS keychain (controller)
+      ansible.builtin.shell: >
+        sudo security add-trusted-cert -d
+        -r trustRoot
+        -k {{ (hostvars['localhost'].ansible_facts['env']['HOME'] ~ '/Library/Keychains/' ~
+               tls_controller_install_keychain ~ '.keychain-db')
+               if tls_controller_install_keychain != 'login'
+               else (hostvars['localhost'].ansible_facts['env']['HOME'] ~ '/Library/Keychains/login.keychain-db') }}
+        "{{ tls_cluster_ca_cert_controller | expanduser }}"
+      when: _macos_cert_check.rc != 0 or _local_cert_fingerprint.stdout not in _macos_cert_check.stdout
+      changed_when: true

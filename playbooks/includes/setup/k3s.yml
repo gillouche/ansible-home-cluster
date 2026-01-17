@@ -1,11 +1,12 @@
 ---
 - name: "Setup Etcd for Patroni + keepalived"
-  hosts: postgres
+  hosts: etcd_cluster
   gather_facts: true
   become: true
   tags: [k3s, etcd, postgres]
   roles:
     - role: etcd
+      tags: [k3s, etcd]
 
 - name: "Verify Etcd Cluster Health"
   hosts: postgres
@@ -21,6 +22,7 @@
       retries: 15
       delay: 2
       until: _etcd_health.status == 200
+      tags: [k3s, etcd]
 
 - name: "Setup Postgres Leader"
   hosts: postgres_leader
@@ -29,14 +31,16 @@
   tags: [k3s, postgres]
   roles:
     - role: postgres
+      tags: [k3s, postgres]
 
-- name: "Setup Postgres Followers"
-  hosts: postgres_replicas
+- name: "Setup Postgres replicas"
+  hosts: postgres_replica
   gather_facts: true
   become: true
   tags: [k3s, postgres]
   roles:
     - role: postgres
+      tags: [k3s, postgres]
 
 - name: "Setup K3s Load Balancer"
   hosts: server
@@ -45,6 +49,7 @@
   tags: [k3s, k3s_lb]
   roles:
     - role: k3s_lb
+      tags: [k3s, k3s_lb]
 
 - name: "Verify Postgres VIP and HAProxy Readiness"
   hosts: localhost
@@ -58,6 +63,7 @@
         port: "{{ global_k3s_db_port }}"
         state: started
         timeout: 60
+      tags: [k3s, postgres]
 
 - name: Cluster prep
   hosts: k3s_cluster
@@ -83,7 +89,12 @@
         - not _default_k3s_dir.stat.islnk
   roles:
     - role: k3s.orchestration.prereq
+      tags: [k3s, k3s_prep]
     - role: k3s.orchestration.raspberrypi
+      tags: [k3s, k3s_prep]
+    - role: k3s_nvidia
+      when: "'server' in group_names"
+      tags: [k3s, k3s_prep]
 
 - name: Setup K3S server
   hosts: server
@@ -100,6 +111,7 @@
       when: k3s_server_location is defined
   roles:
     - role: k3s.orchestration.k3s_server
+      tags: [k3s, k3s_server]
 
 - name: Fetch K3s Token
   hosts: server
@@ -111,17 +123,20 @@
       ansible.builtin.stat:
         path: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/node-token"
       register: _node_token_stat
+      tags: [k3s, k3s_agent]
 
     - name: Read node-token
       ansible.builtin.slurp:
         src: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/node-token"
       register: _node_token_content
       when: _node_token_stat.stat.exists
+      tags: [k3s, k3s_agent]
 
     - name: Set token fact
       ansible.builtin.set_fact:
         token: "{{ _node_token_content.content | b64decode | trim }}"
       when: _node_token_stat.stat.exists
+      tags: [k3s, k3s_agent]
 
 - name: Setup K3S agent
   hosts: agent
@@ -133,6 +148,7 @@
         daemon_reload: true
   roles:
     - role: k3s.orchestration.k3s_agent
+      tags: [k3s, k3s_agent]
 
 - name: Label K3s nodes
   hosts: server[0]
@@ -140,6 +156,7 @@
   tags: [k3s, k3s_labels]
   roles:
     - role: k3s_labels
+      tags: [k3s, k3s_labels]
 
 - name: Configure Vault Integration (Kubernetes Auth)
   hosts: server[0]
@@ -163,6 +180,7 @@
         - (_cluster_init_content.content | b64decode | regex_search('^\\s*[{\\[]')) | length > 0
   roles:
     - role: k3s_vault_config
+      tags: [k3s, vault, k3s_vault_config]
 
 - name: Setup Longhorn OS Dependencies
   hosts: k3s_cluster
@@ -171,6 +189,7 @@
   tags: [k3s, k3s_longhorn]
   roles:
     - role: k3s_longhorn
+      tags: [k3s, longhorn]
 
 - name: Fetch K3s Kubeconfig
   hosts: server[0]

@@ -23,31 +23,3 @@
     enabled: true
     state: started
   become: true
-
-- name: Ensure longhorn group exists
-  ansible.builtin.group:
-    name: longhorn
-    state: present
-  become: true
-  when: inventory_hostname in groups['agent_storage']
-
-- name: Ensure longhorn user exists
-  ansible.builtin.user:
-    name: longhorn
-    group: longhorn
-    home: /home/longhorn
-    create_home: true
-    shell: /usr/bin/nologin
-    state: present
-  become: true
-  when: inventory_hostname in groups['agent_storage']
-
-- name: Ensure Longhorn data directory exists on storage nodes
-  ansible.builtin.file:
-    path: "{{ longhorn_default_data_path }}"
-    state: directory
-    mode: '0755'
-    owner: longhorn
-    group: longhorn
-  become: true
-  when: inventory_hostname in groups['agent_storage']

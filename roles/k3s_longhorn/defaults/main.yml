@@ -2,4 +2,3 @@
 longhorn_namespace: "longhorn-system"
 longhorn_chart_version: "1.10.1"
 longhorn_replica_count: 3
-longhorn_default_data_path: "/mnt/data/longhorn"

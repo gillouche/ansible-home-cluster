@@ -286,12 +286,18 @@
   run_once: true
   when: _transit_token_file_stat.stat.exists
 
+- name: Set transit token fact (transit stage)
+  ansible.builtin.set_fact:
+    vault_transit_token: "{{ _transit_token_slurp.content | b64decode | trim }}"
+  when: _transit_token_file_stat.stat.exists
+  run_once: true
+
 - name: Verify if transit token is valid
   ansible.builtin.uri:
     url: "https://127.0.0.1:{{ vault_api_port }}/v1/auth/token/lookup-self"
     method: GET
     headers:
-      X-Vault-Token: "{{ _transit_token_slurp.content | b64decode | trim }}"
+      X-Vault-Token: "{{ vault_transit_token }}"
     validate_certs: false
     status_code: [200, 403]
   register: _transit_token_lookup
@@ -329,3 +335,10 @@
   when:
     - (_vault_transit_token_output.stdout | default('') | regex_search('^\s*[\[{]')) != ''
     - (_vault_transit_token_output.changed or (not _transit_token_file_stat.stat.exists and _vault_transit_token_output.stdout is defined))
+  register: _store_token_result
+
+- name: Update transit token fact after creation
+  ansible.builtin.set_fact:
+    vault_transit_token: "{{ (_vault_transit_token_output.stdout | from_json).auth.client_token }}"
+  when: _store_token_result.changed
+  run_once: true

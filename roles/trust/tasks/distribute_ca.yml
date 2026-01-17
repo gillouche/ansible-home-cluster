@@ -1,0 +1,9 @@
+---
+- name: Copy Homelab Root CA to system anchor path
+  ansible.builtin.copy:
+    src: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
+    dest: "{{ tls_root_ca_anchor_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Refresh system trust store

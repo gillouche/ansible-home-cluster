@@ -16,12 +16,11 @@ cluster_addr = "https://{{ _pub_host | trim | replace('"','\\"') }}:{{ vault_clu
 {% if vault_enable_transit_seal | default(false) %}
 seal "transit" {
   {# Use explicit IP for the bootstrap transit provider #}
-  {% set _bootstrap_host = (groups['vault_bootstrap'] | default([])) | length > 0 and (groups['vault_bootstrap'][0]) or 'rpi5b8g1' %}
+  {% set _bootstrap_host = (groups['vault_bootstrap'] | default([])) | length > 0 and (groups['vault_bootstrap'][0]) or 'homeserver' %}
   {% set _bootstrap_ip = hostvars[_bootstrap_host].ansible_host | default(hostvars[_bootstrap_host].ansible_facts.default_ipv4.address) %}
   address         = "https://{{ _bootstrap_ip }}:{{ vault_api_port }}"
-  {# Read the transit token directly from the controller file and sanitize quotes/newlines #}
-  {% set _transit_token = lookup('file', vault_transit_token_export_path | expanduser) | trim | replace('"','\\"') %}
-  token           = "{{ _transit_token }}"
+  {# Use pre-loaded transit token fact #}
+  token           = "{{ vault_transit_token | default('') | trim | replace('"','\\"') }}"
   key_name        = "{{ vault_transit_key_name | trim | replace('"','\\"') }}"
   mount_path      = "{{ vault_transit_mount_path | trim | replace('"','\\"') }}"
   tls_skip_verify = {{ vault_transit_tls_skip_verify | ternary('true','false') }}

@@ -83,50 +83,6 @@
   become: true
   notify: Refresh system trust store
 
-- name: Controller-side CA bundle management
-  block:
-    - name: Fetch Intermediate CAs to controller for bundle creation
-      ansible.builtin.get_url:
-        url: >-
-          https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/{{ item.path }}/ca/pem
-        dest: "{{ tls_cluster_ca_dir_controller | expanduser }}/{{ item.name }}.pem"
-        mode: '0644'
-        validate_certs: false
-      loop:
-        - { path: 'pki_int', name: 'intermediate-ca' }
-        - { path: 'pki', name: 'middle-ca' }
-      delegate_to: localhost
-      run_once: true
-
-    - name: Create CA bundle on controller
-      ansible.builtin.shell: |
-        for f in "{{ tls_cluster_ca_dir_controller | expanduser }}/intermediate-ca.pem" \
-                 "{{ tls_cluster_ca_dir_controller | expanduser }}/middle-ca.pem" \
-                 "{{ tls_cluster_ca_cert_controller | expanduser }}"; do
-          cat "$f"
-          echo ""
-        done > "{{ tls_cluster_ca_dir_controller | expanduser }}/ca-bundle.pem"
-      delegate_to: localhost
-      run_once: true
-      changed_when: false
-
-    - name: Trust Root CA in macOS keychain (controller)
-      ansible.builtin.shell: >
-        security add-trusted-cert -d
-        -r trustRoot
-        -k {{ (ansible_env.HOME ~ '/Library/Keychains/' ~
-               tls_controller_install_keychain ~ '.keychain-db')
-               if tls_controller_install_keychain != 'login'
-               else (ansible_env.HOME ~ '/Library/Keychains/login.keychain-db') }}
-        "{{ tls_cluster_ca_cert_controller | expanduser }}"
-      delegate_to: localhost
-      run_once: true
-      become: false
-      when:
-        - ansible_os_family == 'Darwin'
-        - tls_trust_ca_on_controller | default(false) | bool
-      changed_when: false
-
 - name: Server certificate generation (optional)
   when: tls_generate_server_cert | default(false) | bool
   block:

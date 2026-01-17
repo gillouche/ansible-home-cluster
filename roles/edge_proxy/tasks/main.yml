@@ -24,7 +24,7 @@
       ansible.builtin.user:
         name: reverse_proxy
         comment: "Reverse Proxy Service User"
-        home: "/home/reverse_proxy"
+        home: "{{ reverse_proxy_root_dir }}"
         create_home: true
         shell: "{{ reverse_proxy_nologin }}"
         system: true

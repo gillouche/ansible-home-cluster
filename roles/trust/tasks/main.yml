@@ -1,0 +1,12 @@
+---
+# Entry point for the trust role
+
+- name: Route to split-stage tasks when trust_stage is set (generate_ca|distribute_ca)
+  ansible.builtin.include_tasks: "{{ trust_stage }}.yml"
+  when:
+    - trust_stage is defined
+
+- name: End role after stage execution
+  ansible.builtin.meta: end_role
+  when:
+    - trust_stage is defined

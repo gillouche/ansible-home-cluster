@@ -36,6 +36,7 @@ k3s_lb_vip: 192.168.0.248
 # These are used by both the Postgres role (to create DB) and K3s (to connect)
 global_k3s_db_host: 192.168.0.247
 global_k3s_db_port: 15432
+global_postgres_port: 5432
 global_k3s_db_name: kubernetes
 global_k3s_db_user: k3s
 # global_k3s_db_password: defined in vault
@@ -44,6 +45,9 @@ global_k3s_db_user: k3s
 postgres_virtual_ip: 192.168.0.247
 postgres_vrrp_router_id: 88
 postgres_vrrp_auth_pass: "{{ vault_postgres_vrrp_auth_pass | default('changeme-postgres') }}"
+
+# Global system settings
+user_home_root: /home
 
 # Centralized Networking Configuration
 # ------------------------------------
@@ -58,7 +62,7 @@ pihole_dns_tcp_port: 53
 pihole_dns_udp_port: 53
 pihole_http_host_port: 8080
 global_pihole_http_port: 8080
-pihole_transit_ip: 192.168.0.80
+pihole_transit_ip: "{{ hostvars['homeserver'].ansible_host | default('192.168.0.87') }}"
 
 # K3s
 global_k3s_api_port: 6443
@@ -75,7 +79,7 @@ reverse_proxy_http_port: 80
 reverse_proxy_https_port: 443
 
 # Reverse proxy directory structure
-reverse_proxy_root_dir: "/home/reverse_proxy"
+reverse_proxy_root_dir: "{{ user_home_root | default('/home') }}/reverse_proxy"
 reverse_proxy_config_dir: "{{ reverse_proxy_root_dir }}/config"
 reverse_proxy_data_dir: "{{ reverse_proxy_root_dir }}/data"
 reverse_proxy_certs_dir: "{{ reverse_proxy_root_dir }}/certs"

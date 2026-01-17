@@ -125,7 +125,7 @@
     - name: Verify certificate chain locally
       ansible.builtin.command: >-
         openssl verify
-        -CAfile {{ (inventory_hostname in (groups['vault_transit'] | default(['rpi5b8g1']))) |
+        -CAfile {{ (inventory_hostname in (groups['vault_transit'] | default(['homeserver']))) |
         ternary(tls_dir ~ '/api.crt', tls_dir ~ '/ca-bundle.pem') }}
         {{ tls_dir }}/api.crt
       register: _tls_inspect_chain
@@ -255,7 +255,7 @@
       ansible.builtin.uri:
         url: "http://localhost:{{ firefly_port }}/login"
         method: GET
-        status_code: 200
+        status_code: [200, 302]
       register: _firefly_health
       failed_when: false
 
@@ -286,28 +286,6 @@
       ansible.builtin.set_fact:
         _external_vault_ready:
           status: "{{ _external_vault_ready_cmd.stdout | int if _external_vault_ready_cmd.stdout | length > 0 else 0 }}"
-
-    - name: Verify Firefly via External Proxy (HTTPS) # noqa: command-instead-of-module
-      ansible.builtin.command: >-
-        curl -v -k --silent --output /dev/null --write-out "%{http_code}"
-        --resolve firefly.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
-        https://firefly.{{ base_domain }}/login
-      register: _external_firefly_ready_cmd
-      changed_when: false
-      failed_when: false
-
-    - name: Debug External Firefly
-      ansible.builtin.debug:
-        msg:
-          - "RC: {{ _external_firefly_ready_cmd.rc }}"
-          - "STDOUT: {{ _external_firefly_ready_cmd.stdout }}"
-          - "STDERR: {{ _external_firefly_ready_cmd.stderr }}"
-      when: _external_firefly_ready_cmd.stdout | int != 200
-
-    - name: Set Firefly status fact
-      ansible.builtin.set_fact:
-        _external_firefly_ready:
-          status: "{{ _external_firefly_ready_cmd.stdout | int if _external_firefly_ready_cmd.stdout | length > 0 else 0 }}"
 
     - name: Verify Pi-hole Primary via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
@@ -345,19 +323,47 @@
         _external_pihole_replica1_ready:
           status: "{{ _external_pihole_replica1_ready_cmd.stdout | int if _external_pihole_replica1_ready_cmd.stdout | length > 0 else 0 }}"
 
-    - name: Verify Pi-hole Replica2 via External Proxy (HTTPS) # noqa: command-instead-of-module
+    - name: Verify Nexus via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
         curl -v -k -L --silent --output /dev/null --write-out "%{http_code}"
-        --resolve replica2.pihole.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
-        https://replica2.pihole.{{ base_domain }}/admin/
-      register: _external_pihole_replica2_ready_cmd
+        --resolve nexus.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://nexus.{{ base_domain }}/
+      register: _external_nexus_ready_cmd
       changed_when: false
       failed_when: false
 
-    - name: Set Pi-hole Replica2 status fact
+    - name: Set Nexus status fact
       ansible.builtin.set_fact:
-        _external_pihole_replica2_ready:
-          status: "{{ _external_pihole_replica2_ready_cmd.stdout | int if _external_pihole_replica2_ready_cmd.stdout | length > 0 else 0 }}"
+        _external_nexus_ready:
+          status: "{{ _external_nexus_ready_cmd.stdout | int if _external_nexus_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify Firefly via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -v -k -L --silent --output /dev/null --write-out "%{http_code}"
+        --resolve firefly.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://firefly.{{ base_domain }}/
+      register: _external_firefly_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Firefly status fact
+      ansible.builtin.set_fact:
+        _external_firefly_ready:
+          status: "{{ _external_firefly_ready_cmd.stdout | int if _external_firefly_ready_cmd.stdout | length > 0 else 0 }}"
+
+    - name: Verify Firefly Login via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -k --silent --output /dev/null --write-out "%{http_code}"
+        --resolve firefly.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://firefly.{{ base_domain }}/login
+      register: _external_firefly_login_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Firefly login status fact
+      ansible.builtin.set_fact:
+        _external_firefly_login_ready:
+          status: "{{ _external_firefly_login_cmd.stdout | int if _external_firefly_login_cmd.stdout | length > 0 else 0 }}"
 
 - name: "Base Infrastructure Health Report"
   hosts: localhost

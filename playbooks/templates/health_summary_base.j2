@@ -86,7 +86,7 @@
 {% endfor %}
 {% for host in groups['firefly'] | sort %}
   {{ macros.CYAN }}> Firefly III: {{ host }}{{ macros.RESET }}
-    Status:           {{ macros.ok('UP') if hostvars[host]._firefly_health.status | default(0) == 200 else macros.bad('DOWN') }}
+    Status:           {{ macros.ok('UP') if hostvars[host]._firefly_health.status | default(0) in [200, 302] else macros.bad('DOWN') }}
 {% endfor %}
 {% endif %}
 
@@ -106,12 +106,16 @@
 {{ macros.BOLD }}[ EXTERNAL ACCESS (via {{ reverse_proxy_virtual_ip }}) ]{{ macros.RESET }}
   {{ macros.CYAN }}-- Base Infrastructure --{{ macros.RESET }}
   Vault (HTTPS):         {{ macros.ok('UP') if (_external_vault_ready.status | default(-1)) in [200, 429] else macros.bad('DOWN') }}
-  Firefly (HTTPS):      {{ macros.ok('UP') if (_external_firefly_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Firefly (HTTPS):      {{ macros.ok('UP') if (_external_firefly_ready.status | default(-1)) == 200 or (_external_firefly_login_ready.status | default(-1)) in [200, 302] else macros.bad('DOWN') }}
+  Nexus (HTTPS):        {{ macros.ok('UP') if (_external_nexus_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
   Pi-hole Pri (HTTPS):  {{ macros.ok('UP') if (_external_pihole_primary_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Pi-hole Rep1 (HTTPS): {{ macros.ok('UP') if (_external_pihole_replica1_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
 
 {{ macros.BOLD }}[ SERVICE URLS ]{{ macros.RESET }}
   Vault:           {{ macros.CYAN }}https://vault.{{ base_domain }}{{ macros.RESET }}
   Firefly:         {{ macros.CYAN }}https://firefly.{{ base_domain }}{{ macros.RESET }}
+  Nexus:           {{ macros.CYAN }}https://nexus.{{ base_domain }}{{ macros.RESET }}
   Pi-hole Pri:     {{ macros.CYAN }}https://primary.pihole.{{ base_domain }}{{ macros.RESET }}
+  Pi-hole Rep1:    {{ macros.CYAN }}https://replica1.pihole.{{ base_domain }}{{ macros.RESET }}
 
 ================================================================================

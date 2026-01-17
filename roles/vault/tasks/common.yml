@@ -9,13 +9,20 @@
     system: true
   become: true
 
+- name: Ensure tls group exists
+  ansible.builtin.group:
+    name: "{{ tls_group_name | default('tls') }}"
+    state: present
+    system: true
+  become: true
+
 - name: Ensure vault user exists with home directory
   ansible.builtin.user:
     name: "{{ vault_runtime_user | default('vault') }}"
     state: present
     system: true
     group: "{{ vault_runtime_group_name | default('vault') }}"
-    home: "/home/{{ vault_runtime_user | default('vault') }}"
+    home: "{{ vault_host_root_dir }}"
     create_home: true
     shell: /usr/bin/nologin
     groups: "{{ tls_group_name | default('tls') }}"
@@ -46,7 +53,7 @@
 
 - name: Install startup wrapper on bootstrap to capture early logs
   ansible.builtin.copy:
-    dest: "/home/vault/bin/start-vault.sh"
+    dest: "{{ vault_host_bin_dir }}/start-vault.sh"
     owner: "{{ vault_runtime_user | default('vault') }}"
     group: "{{ vault_runtime_group_name | default('vault') }}"
     mode: '0755'

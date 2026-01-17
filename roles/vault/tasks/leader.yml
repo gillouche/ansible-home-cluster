@@ -23,6 +23,31 @@
     mode: '0755'
   become: true
 
+- name: Load Transit Token for Leader
+  block:
+    - name: Locate bootstrap transit token
+      ansible.builtin.stat:
+        path: "{{ vault_transit_token_export_path | expanduser }}"
+      register: _bootstrap_transit_token_file
+      delegate_to: localhost
+      run_once: true
+
+    - name: Read bootstrap transit token
+      ansible.builtin.slurp:
+        src: "{{ vault_transit_token_export_path | expanduser }}"
+      register: _bootstrap_transit_token
+      when: _bootstrap_transit_token_file.stat.exists
+      delegate_to: localhost
+      run_once: true
+
+    - name: Set transit token fact
+      ansible.builtin.set_fact:
+        vault_transit_token: >-
+          {{ (_bootstrap_transit_token.content | b64decode | trim)
+             if (_bootstrap_transit_token is defined and _bootstrap_transit_token.content is defined) else '' }}
+      run_once: true
+  when: vault_enable_transit_seal | default(false) | bool
+
 - name: Render Vault configuration (leader)
   ansible.builtin.template:
     src: "vault.hcl.j2"
@@ -552,7 +577,7 @@
     msg: >-
       The Vault Root Token is invalid.
       This usually happens if the Vault data volume persists but the token in cluster-init.json is stale/lost.
-      To fix: Run `rm -rf /home/vault/data` on the leader {{ inventory_hostname }} to force a fresh initialization.
+      To fix: Run `rm -rf {{ vault_host_data_dir }}` on the leader {{ inventory_hostname }} to force a fresh initialization.
   when: _leader_token_final_check.rc != 0
 
 - name: Include PKI and ACME setup tasks

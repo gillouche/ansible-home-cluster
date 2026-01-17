@@ -17,7 +17,6 @@ load_balancer_keepalived_service: keepalived
 # VRRP Defaults
 load_balancer_vrrp_auth_pass: "secret-lb"
 
-# Users should override these in group_vars
 load_balancer_haproxy_frontends: []
 load_balancer_haproxy_backends: []
 

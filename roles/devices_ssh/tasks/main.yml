@@ -3,7 +3,7 @@
 
 - name: Ensure ~/.ssh exists for user ({{ devices_ssh_user }})
   ansible.builtin.file:
-    path: "/home/{{ devices_ssh_user }}/.ssh"
+    path: "{{ user_home_root | default('/home') }}/{{ devices_ssh_user }}/.ssh"
     state: directory
     owner: "{{ devices_ssh_user }}"
     group: "{{ devices_ssh_group | default(devices_ssh_user) }}"
@@ -12,7 +12,7 @@
 
 - name: Ensure SSH keypair exists for user ({{ devices_ssh_user }})
   community.crypto.openssh_keypair:
-    path: "/home/{{ devices_ssh_user }}/.ssh/id_ed25519"
+    path: "{{ user_home_root | default('/home') }}/{{ devices_ssh_user }}/.ssh/id_ed25519"
     type: ed25519
     state: present
     owner: "{{ devices_ssh_user }}"
@@ -42,7 +42,7 @@
 
 - name: Collect peers' public keys ({{ devices_ssh_user }})
   ansible.builtin.slurp:
-    src: "/home/{{ devices_ssh_user }}/.ssh/id_ed25519.pub"
+    src: "{{ user_home_root | default('/home') }}/{{ devices_ssh_user }}/.ssh/id_ed25519.pub"
   delegate_to: "{{ item }}"
   register: devices_peer_pubkeys
   loop: "{{ devices_ssh_peer_group | default(groups['all']) | difference([inventory_hostname]) | default([]) }}"
@@ -92,7 +92,7 @@
          | default('')
       }}
   ansible.builtin.known_hosts:
-    path: "/home/{{ devices_ssh_user }}/.ssh/known_hosts"
+    path: "{{ user_home_root | default('/home') }}/{{ devices_ssh_user }}/.ssh/known_hosts"
     name: "{{ devices_peer_ip }}"
     key: "{{ devices_peer_key_line }}"
     state: present
@@ -104,7 +104,7 @@
 - name: Generate SSH config for peer devices ({{ devices_ssh_user }})
   ansible.builtin.template:
     src: config.j2
-    dest: "/home/{{ devices_ssh_user }}/.ssh/config"
+    dest: "{{ user_home_root | default('/home') }}/{{ devices_ssh_user }}/.ssh/config"
     owner: "{{ devices_ssh_user }}"
     group: "{{ devices_ssh_group | default(devices_ssh_user) }}"
     mode: "0600"

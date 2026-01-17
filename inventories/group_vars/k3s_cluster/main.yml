@@ -4,7 +4,7 @@ systemd_dir: /etc/systemd/system
 
 # Collection variables
 use_external_database: true
-api_endpoint: 192.168.0.249 # Using the first server as endpoint or use a VIP if available
+api_endpoint: "{{ k3s_api_vip }}" # Using the VIP for the endpoint
 api_port: 6443
 
 # Database Configuration
@@ -19,13 +19,13 @@ datastore_endpoint: "postgres://{{ k3s_db_user }}:{{ k3s_db_password | replace('
 # Keepalived Configuration for K3s API
 k3s_api_vip_prefixlen: 24
 k3s_api_virtual_router_id: 64
-k3s_api_vrrp_interface: end0
+k3s_api_vrrp_interface: "{{ monit_network_interface | default('end0') }}"
 k3s_vrrp_auth_pass: "{{ vault_k3s_vrrp_auth_pass | default('k3s-vrrp-secret') }}"
 
 # Keepalived Configuration for K3s Service LB
 k3s_lb_vip_prefixlen: 24
 k3s_lb_virtual_router_id: 65
-k3s_lb_vrrp_interface: end0
+k3s_lb_vrrp_interface: "{{ monit_network_interface | default('end0') }}"
 
 # Server Arguments
 extra_server_args: >-

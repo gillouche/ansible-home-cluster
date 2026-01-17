@@ -50,16 +50,16 @@
       register: _postgres_proxy_port
       failed_when: false
 
-    - name: Check Postgres Container Port ({{ postgres_port | default(5432) }})
+    - name: Check Postgres Container Port ({{ global_postgres_port | default(5432) }})
       ansible.builtin.wait_for:
-        port: "{{ postgres_port | default(5432) }}"
+        port: "{{ global_postgres_port | default(5432) }}"
         host: 127.0.0.1
         timeout: 5
       register: _postgres_container_port
       failed_when: false
 
     - name: Check Postgres Ready (Command)
-      ansible.builtin.command: "podman exec {{ postgres_container_name }} pg_isready -U {{ postgres_db_user }} -p {{ postgres_port }}"
+      ansible.builtin.command: "podman exec {{ postgres_container_name }} pg_isready -U {{ postgres_db_user }} -p {{ global_postgres_port | default(5432) }}"
       register: _postgres_cmd_check
       become: true
       failed_when: false
@@ -90,7 +90,7 @@
   tasks:
     - name: Verify K3s Vault Auth API (Kubernetes Auth with CA check)
       ansible.builtin.uri:
-        url: "https://192.168.0.253:8200/v1/auth/kubernetes"
+        url: "https://{{ load_balancer_virtual_ip }}:8200/v1/auth/kubernetes"
         method: GET
         validate_certs: true
         ca_path: "/etc/tls/ca-bundle.pem"
@@ -128,6 +128,13 @@
         validate_certs: false
         status_code: [200, 404] # 404 is fine as long as we reach Traefik
       register: _k3s_lb_vip_status
+      failed_when: false
+
+    - name: Verify NVIDIA GPU Status (homeserver2)
+      ansible.builtin.command: nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+      register: _nvidia_smi_status
+      when: inventory_hostname == 'homeserver2'
+      changed_when: false
       failed_when: false
 
     - name: Verify ArgoCD via LB VIP (HAProxy)

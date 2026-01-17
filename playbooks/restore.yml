@@ -41,7 +41,6 @@
       # Only fallback if chrony hasn't synced yet (e.g. DNS issues or first boot)
       # Check if the year is behind 2026 (current year)
       # Or if it's already 2026 but we are at the beginning of the year (January) and the date is significantly off
-      # The user reported Jan 07 when it is Jan 13.
       when: >
         ansible_date_time.year | int < 2026 or
         (ansible_date_time.year | int == 2026 and ansible_date_time.month | int == 1 and ansible_date_time.day | int < 13)

@@ -16,6 +16,15 @@
     state: present
   become: true
 
+- name: Ensure user_home_root directory exists
+  ansible.builtin.file:
+    path: "{{ user_home_root }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  become: true
+
 - name: Update hostname
   ansible.builtin.hostname:
     name: "{{ inventory_hostname }}"
