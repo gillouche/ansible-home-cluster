@@ -100,6 +100,7 @@
   loop: "{{ devices_ssh_peer_group | default(groups['all']) | difference([inventory_hostname]) | default([]) }}"
   when: devices_peer_key_line | length > 0
   become: true
+  become_user: "{{ devices_ssh_user }}"
 
 - name: Generate SSH config for peer devices ({{ devices_ssh_user }})
   ansible.builtin.template:

@@ -4,6 +4,25 @@
   gather_facts: true
   become: true
   tasks:
+    - name: Ensure .ssh directory exists and has correct permissions
+      ansible.builtin.file:
+        path: "/home/{{ target_user | default('alarm') }}/.ssh"
+        state: directory
+        owner: "{{ target_user | default('alarm') }}"
+        group: "{{ target_user | default('alarm') }}"
+        mode: '0700'
+      become: true
+
+    - name: Ensure known_hosts exists and has correct permissions
+      ansible.builtin.file:
+        path: "/home/{{ target_user | default('alarm') }}/.ssh/known_hosts"
+        state: touch
+        owner: "{{ target_user | default('alarm') }}"
+        group: "{{ target_user | default('alarm') }}"
+        mode: '0600'
+      become: true
+      changed_when: false
+
     - name: Remove known_hosts file
       ansible.builtin.file:
         path: "/home/{{ target_user | default('alarm') }}/.ssh/known_hosts"

@@ -24,37 +24,25 @@
         - /usr/local/bin/k3s-agent-uninstall.sh
       register: k3s_scripts
 
-    - name: Stop k3s service
+    - name: Stop K3s services
       ansible.builtin.systemd:
-        name: k3s
+        name: "{{ item }}"
         state: stopped
         enabled: false
-      when:
-        - "'server' in group_names"
+      loop:
+        - k3s
+        - k3s-agent
       failed_when: false
 
     - name: Run K3s Server Uninstall
       ansible.builtin.command: /usr/local/bin/k3s-uninstall.sh
-      when:
-        - "'server' in group_names"
-        - k3s_scripts.results[0].stat.exists
+      when: k3s_scripts.results[0].stat.exists
       register: uninstall_server
       changed_when: uninstall_server.rc == 0
 
-    - name: Stop k3s-agent service if present
-      ansible.builtin.systemd:
-        name: k3s-agent
-        state: stopped
-        enabled: false
-      when:
-        - "'agent' in group_names"
-      failed_when: false
-
     - name: Run K3s Agent Uninstall
       ansible.builtin.command: /usr/local/bin/k3s-agent-uninstall.sh
-      when:
-        - "'agent' in group_names"
-        - k3s_scripts.results[1].stat.exists
+      when: k3s_scripts.results[1].stat.exists
       register: uninstall_agent
       changed_when: uninstall_agent.rc == 0
 
@@ -78,6 +66,18 @@
         - /etc/cni
         - /opt/cni
         - /var/lib/cni
+        - /etc/systemd/system/k3s.service
+        - /etc/systemd/system/k3s.service.env
+        - /etc/systemd/system/k3s-agent.service
+        - /etc/systemd/system/k3s-agent.service.env
+        - /usr/local/bin/k3s
+        - /usr/local/bin/kubectl
+        - /usr/local/bin/crictl
+        - /usr/local/bin/ctr
+        - /usr/local/bin/k3s-install.sh
+        - /usr/local/bin/k3s-killall.sh
+        - /usr/local/bin/k3s-uninstall.sh
+        - /usr/local/bin/k3s-agent-uninstall.sh
 
     - name: Remove longhorn user and its home directory
       ansible.builtin.user:

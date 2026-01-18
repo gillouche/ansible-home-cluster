@@ -247,8 +247,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: playground
             rpi4b8g1:
               k3s_node_labels:
@@ -260,8 +258,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: playground
             rpi4b8g2:
               k3s_node_labels:
@@ -273,8 +269,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: playground
             rpi4b8g3:
               k3s_node_labels:
@@ -286,8 +280,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: playground
             rpi4b8g4:
               k3s_node_labels:
@@ -299,8 +291,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: playground
         agent_storage:
           hosts:

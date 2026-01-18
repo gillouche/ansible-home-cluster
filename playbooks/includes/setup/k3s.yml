@@ -129,28 +129,6 @@
     - name: Ensure systemd is reloaded before agent setup
       ansible.builtin.systemd:
         daemon_reload: true
-
-    - name: Ensure k3s-agent.service exists with minimal content
-      ansible.builtin.copy:
-        dest: "{{ systemd_dir | default('/etc/systemd/system') }}/k3s-agent.service"
-        content: |
-          [Service]
-          ExecStart=/usr/local/bin/k3s \
-              agent
-        mode: '0644'
-        owner: root
-        group: root
-        force: false # Only create if it doesn't exist
-      changed_when: false
-
-    - name: Ensure k3s-agent.service.env exists
-      ansible.builtin.file:
-        path: "{{ systemd_dir | default('/etc/systemd/system') }}/k3s-agent.service.env"
-        state: touch
-        mode: '0600'
-        owner: root
-        group: root
-      changed_when: false
   roles:
     - role: k3s.orchestration.k3s_agent
       tags: [k3s, k3s_agent]
