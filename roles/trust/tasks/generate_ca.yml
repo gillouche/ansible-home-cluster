@@ -1,20 +1,20 @@
 ---
 - name: Ensure Homelab Root CA directory exists
   ansible.builtin.file:
-    path: "{{ vault_cluster_ca_dir_controller | expanduser }}"
+    path: "{{ root_ca_dir_controller | expanduser }}"
     state: directory
     mode: '0700'
   delegate_to: localhost
 
 - name: Check if Homelab Root CA key exists
   ansible.builtin.stat:
-    path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.key"
+    path: "{{ root_ca_dir_controller | expanduser }}/homelab-root-ca.key"
   register: _homelab_root_ca_key_stat
   delegate_to: localhost
 
 - name: Generate Homelab Root CA private key if missing
   community.crypto.openssl_privatekey:
-    path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.key"
+    path: "{{ root_ca_dir_controller | expanduser }}/homelab-root-ca.key"
     size: 4096
     type: RSA
     state: present
@@ -24,13 +24,13 @@
 
 - name: Check if Homelab Root certificate exists
   ansible.builtin.stat:
-    path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
+    path: "{{ root_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
   register: _homelab_root_ca_certificate_stat
   delegate_to: localhost
 
 - name: Create OpenSSL config for Root CA extensions
   ansible.builtin.copy:
-    dest: "{{ vault_cluster_ca_dir_controller | expanduser }}/root_ca.ext"
+    dest: "{{ root_ca_dir_controller | expanduser }}/root_ca.ext"
     content: |
       [req]
       distinguished_name = req_distinguished_name
@@ -54,18 +54,18 @@
 - name: Generate Homelab Root CA certificate if missing
   ansible.builtin.command: >
     openssl req -new -x509
-    -key "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.key"
-    -out "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
+    -key "{{ root_ca_dir_controller | expanduser }}/homelab-root-ca.key"
+    -out "{{ root_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
     -days 3650
     -sha256
-    -config "{{ vault_cluster_ca_dir_controller | expanduser }}/root_ca.ext"
+    -config "{{ root_ca_dir_controller | expanduser }}/root_ca.ext"
   changed_when: true
   when: not _homelab_root_ca_certificate_stat.stat.exists
   delegate_to: localhost
 
 - name: Set fact for Homelab Root CA path
   ansible.builtin.set_fact:
-    homelab_root_ca_cert_path: "{{ vault_cluster_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
+    homelab_root_ca_cert_path: "{{ root_ca_dir_controller | expanduser }}/homelab-root-ca.crt"
 
 - name: Browser and System Trust (macOS)
   when: hostvars['localhost'].ansible_facts['os_family'] == 'Darwin'
@@ -88,15 +88,17 @@
 
     - name: Remove old Homelab Root CA from macOS keychain if fingerprint mismatch
       ansible.builtin.command: security delete-certificate -c "Homelab Root CA"
+      become: false
       when:
         - _macos_cert_check.rc == 0
         - _local_cert_fingerprint.stdout not in _macos_cert_check.stdout
       changed_when: true
 
-    - name: Install Homelab Root CA into macOS login keychain
+    - name: Install Homelab Root CA into macOS keychain
       ansible.builtin.command: >-
-        sudo security add-trusted-cert -d -r trustRoot -k /Users/{{ hostvars['localhost'].ansible_facts['user_id'] }}/Library/Keychains/login.keychain-db
+        security add-trusted-cert -r trustRoot -k /Users/{{ hostvars['localhost'].ansible_facts['user_id'] }}/Library/Keychains/login.keychain-db
         "{{ homelab_root_ca_cert_path }}"
+      become: false
       changed_when: true
       when: _macos_cert_check.rc != 0 or _local_cert_fingerprint.stdout not in _macos_cert_check.stdout
 

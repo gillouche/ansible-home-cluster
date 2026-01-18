@@ -12,3 +12,8 @@
 - name: Bootstrap devices
   import_playbook: includes/bootstrap/bootstrap_devices.yml
   tags: [bootstrap_devices]
+
+# 3. Root CA Generation (Homelab Root CA)
+- name: Root CA Generation
+  import_playbook: includes/setup/trust.yml
+  tags: [root_ca_gen]

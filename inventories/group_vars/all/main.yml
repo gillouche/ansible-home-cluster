@@ -88,16 +88,20 @@ reverse_proxy_certs_dir: "{{ reverse_proxy_root_dir }}/certs"
 vault_pki_int_role_name: "homelab-server"
 
 # Controller-side CA paths
+root_ca_dir_controller: "~/.local/share/ansible-home-cluster/root-ca"
+root_ca_cert_controller: "{{ root_ca_dir_controller }}/homelab-root-ca.crt"
+root_ca_key_controller: "{{ root_ca_dir_controller }}/homelab-root-ca.key"
+
 vault_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
-vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.crt"
-vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.key"
+vault_cluster_ca_cert_controller: "{{ root_ca_cert_controller }}"
+vault_cluster_ca_key_controller: "{{ root_ca_key_controller }}"
 homelab_ca_bundle_path: "{{ vault_cluster_ca_dir_controller }}/ca-bundle.pem"
 
 # Controller-side Initialization and Token Paths
-vault_init_export_path: "~/.local/share/ansible-home-cluster/cluster-init.json"
-vault_transit_init_export_path: "~/.local/share/ansible-home-cluster/transit-init.json"
+vault_init_export_path: "{{ vault_cluster_ca_dir_controller }}/cluster-init.json"
+vault_transit_init_export_path: "~/.local/share/ansible-home-cluster/vault-transit/transit-init.json"
 vault_transit_token_export_path: "~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt"
-vault_edge_proxy_token_path: "{{ vault_init_export_path | dirname }}/edge_proxy_token.txt"
+vault_edge_proxy_token_path: "{{ vault_cluster_ca_dir_controller }}/edge_proxy_token.txt"
 
 # Global System Trust Anchor Paths
 tls_root_ca_anchor_path: "/etc/ca-certificates/trust-source/anchors/homelab-root-ca.pem"

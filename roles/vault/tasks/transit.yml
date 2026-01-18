@@ -1,6 +1,9 @@
 ---
 # Removed: common.yml is now included in the vault_init stage
 
+- name: Include common preparation tasks
+  ansible.builtin.include_tasks: common.yml
+
 - name: Ensure TLS directory exists
   ansible.builtin.file:
     path: "{{ vault_host_tls_dir }}"
@@ -82,9 +85,9 @@
     mode: '0644'
   become: true
 
-- name: Render Vault configuration (bootstrap)
+- name: Render Vault configuration (transit)
   ansible.builtin.template:
-    src: "vault.bootstrap.hcl.j2"
+    src: "vault.transit.hcl.j2"
     dest: "{{ vault_host_config_dir }}/vault.hcl"
     owner: "{{ vault_runtime_user | default('vault') }}"
     group: "{{ vault_runtime_group_name | default('vault') }}"
@@ -151,20 +154,15 @@
 
 - name: Check for existing transit init JSON on controller
   ansible.builtin.stat:
-    path: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
+    path: "{{ vault_transit_init_export_path | expanduser }}"
   register: _transit_init_stat
   delegate_to: localhost
   run_once: true
 
 - name: Backup stale transit-init.json if Vault is fresh
   ansible.builtin.copy:
-    src: >-
-      {{ vault_transit_init_export_path |
-      default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}
-    dest: >-
-      {{ vault_transit_init_export_path |
-      default('~/.local/share/ansible-home-cluster/vault/transit-init.json') |
-      expanduser }}.bak.{{ ansible_date_time.iso8601 }}
+    src: "{{ vault_transit_init_export_path | expanduser }}"
+    dest: "{{ vault_transit_init_export_path | expanduser }}.bak.{{ ansible_date_time.iso8601 }}"
     remote_src: true
     mode: '0600'
   delegate_to: localhost
@@ -174,7 +172,7 @@
 
 - name: Load transit init JSON from controller if present
   ansible.builtin.slurp:
-    src: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
+    src: "{{ vault_transit_init_export_path | expanduser }}"
   register: _transit_init_loaded
   delegate_to: localhost
   run_once: true
@@ -206,7 +204,7 @@
 - name: Store transit init JSON to controller # noqa: no-handler
   ansible.builtin.copy:
     content: "{{ (_vault_init_output.stdout | default('{}', true) | from_json) | to_nice_json }}"
-    dest: "{{ vault_transit_init_export_path | default('~/.local/share/ansible-home-cluster/vault/transit-init.json') | expanduser }}"
+    dest: "{{ vault_transit_init_export_path | expanduser }}"
     mode: '0600'
   delegate_to: localhost
   when:
@@ -273,14 +271,14 @@
 
 - name: Check if transit token file exists on controller
   ansible.builtin.stat:
-    path: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
+    path: "{{ vault_transit_token_export_path | expanduser }}"
   delegate_to: localhost
   register: _transit_token_file_stat
   run_once: true
 
 - name: Read transit token from controller
   ansible.builtin.slurp:
-    src: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
+    src: "{{ vault_transit_token_export_path | expanduser }}"
   register: _transit_token_slurp
   delegate_to: localhost
   run_once: true
@@ -320,7 +318,7 @@
 
 - name: Ensure Vault controller export directory exists
   ansible.builtin.file:
-    path: "{{ (vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser) | ansible.builtin.dirname }}"
+    path: "{{ vault_transit_token_export_path | expanduser | ansible.builtin.dirname }}"
     state: directory
     mode: '0700'
   delegate_to: localhost
@@ -329,7 +327,7 @@
 - name: Store transit token on controller
   ansible.builtin.copy:
     content: "{{ (_vault_transit_token_output.stdout | default('{}', true) | from_json).auth.client_token }}"
-    dest: "{{ vault_transit_token_export_path | default('~/.local/share/ansible-home-cluster/vault-transit/transit_token.txt') | expanduser }}"
+    dest: "{{ vault_transit_token_export_path | expanduser }}"
     mode: '0600'
   delegate_to: localhost
   when:

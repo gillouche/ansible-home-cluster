@@ -8,22 +8,17 @@
   import_playbook: includes/setup/system.yml
   tags: [system]
 
-# 2. Trust: Root CA Generation (Controller only)
-- name: Root CA Generation
-  import_playbook: includes/setup/trust.yml
-  tags: [trust, tls, root_ca_gen]
-
-# 3. Vault: Init, Transit, Leader, Followers
+# 2. Vault: Init, Transit, Leader, Followers
 - name: Vault Setup
   import_playbook: includes/setup/vault.yml
   tags: [vault]
 
-# 4. Infrastructure: TLS Provisioning, DNS, Load Balancer, Edge Proxy
+# 3. Infrastructure: TLS Provisioning, DNS, Load Balancer, Edge Proxy
 - name: Infrastructure Setup
   import_playbook: includes/setup/infrastructure.yml
   tags: [infra]
 
-# 5. Trust: Distribute Root CA to All Devices
+# 4. Trust: Distribute Root CA to All Devices
 - name: Trust Distribution
   import_playbook: includes/setup/trust.yml
   tags: [trust, tls, root_ca_dist]
@@ -32,8 +27,3 @@
 - name: Applications Setup
   import_playbook: includes/setup/apps.yml
   tags: [apps]
-
-# 6. k3s: k3s cluster
-- name: K3s install
-  import_playbook: includes/setup/k3s.yml
-  tags: [k3s]

@@ -98,10 +98,10 @@ all:
         homeserver2:
     vault_transit:
       hosts:
-        homeserver:
+        homeserver2:
     vault_leader:
       hosts:
-        homeserver2:
+        homeserver:
     vault_followers:
       hosts:
         rpi5b16g1ssd:
@@ -118,7 +118,7 @@ all:
         homeserver2:
     artifactory:
       hosts:
-        homeserver:
+        homeserver2:
     firefly:
       hosts:
         homeserver2:
@@ -150,6 +150,7 @@ all:
                 topology.kubernetes.io/node-group: homeserver
                 accelerator.amd.com/gpu.present: "true"
                 kubernetes.io/accelerator: amd
+                amd.com/gpu.count: "1"
                 workload.tier: critical
                 hardware.reliability: server
                 storage.longhorn.io/eligible: "true"
@@ -163,6 +164,7 @@ all:
                 topology.kubernetes.io/node-group: homeserver
                 accelerator.nvidia.com/gpu.present: "true"
                 kubernetes.io/accelerator: nvidia
+                nvidia.com/gpu.count: "1"
                 workload.tier: critical
                 hardware.reliability: server
                 storage.longhorn.io/eligible: "true"
@@ -179,8 +181,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: infra
             rpi5b16g2ssd:
               k3s_node_labels:
@@ -192,8 +192,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: infra
             rpi5b16g3ssd:
               k3s_node_labels:
@@ -205,8 +203,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: infra
             rpi5b16g4:
               k3s_node_labels:
@@ -218,8 +214,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: playground
             rpi5b16g5:
               k3s_node_labels:
@@ -231,8 +225,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: playground
             rpi5b16g6:
               k3s_node_labels:
@@ -244,8 +236,6 @@ all:
                 topology.kubernetes.io/node-group: rpi
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
-                accelerator.nvidia.com/gpu.present: "false"
-                accelerator.amd.com/gpu.present: "false"
                 workload.tier: playground
             rpi5b8g1:
               k3s_node_labels:

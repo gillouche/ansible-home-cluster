@@ -88,7 +88,7 @@
         forceBasicAuth: false
       dockerProxy:
         indexType: "HUB"
-    status_code: 201
+    status_code: [200, 201]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'docker-hub') | list | length == 0
   become: false
 
@@ -125,7 +125,7 @@
         forceBasicAuth: false
       dockerProxy:
         indexType: "REGISTRY"
-    status_code: 201
+    status_code: [200, 201]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'quay-proxy') | list | length == 0
   become: false
 
@@ -152,7 +152,7 @@
         v1Enabled: true
         forceBasicAuth: false
         httpPort: 5000
-    status_code: 201
+    status_code: [200, 201]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'docker-all') | list | length == 0
   become: false
 
@@ -181,7 +181,7 @@
       httpClient:
         blocked: false
         autoBlock: true
-    status_code: 201
+    status_code: [200, 201]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'pypi-proxy') | list | length == 0
   become: false
 
@@ -210,7 +210,7 @@
       httpClient:
         blocked: false
         autoBlock: true
-    status_code: 201
+    status_code: [200, 201]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'helm-proxy') | list | length == 0
   become: false
 
@@ -239,7 +239,7 @@
       httpClient:
         blocked: false
         autoBlock: true
-    status_code: 201
+    status_code: [200, 201]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'go-proxy') | list | length == 0
   become: false
 
@@ -268,7 +268,7 @@
       httpClient:
         blocked: false
         autoBlock: true
-    status_code: 201
+    status_code: [200, 201]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'cargo-proxy') | list | length == 0
   become: false
 
@@ -337,7 +337,7 @@
       status: "active"
       roles:
         - "nx-publish"
-    status_code: [201]
+    status_code: [200, 201]
   become: false
   no_log: true
   register: _nexus_publish_user_created
@@ -384,6 +384,12 @@
     status_code: [200, 401]
   register: _nexus_vault_auth_test
   become: false
+  no_log: true
+
+- name: Update working admin password fact if current is incorrect
+  ansible.builtin.set_fact:
+    artifactory_nexus_admin_password_working: "{{ artifactory_nexus_admin_password }}"
+  when: _nexus_vault_auth_test.status == 200
   no_log: true
 
 - name: Rotate Nexus admin password to vault value

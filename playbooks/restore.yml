@@ -43,7 +43,7 @@
       # Or if it's already 2026 but we are at the beginning of the year (January) and the date is significantly off
       when: >
         ansible_date_time.year | int < 2026 or
-        (ansible_date_time.year | int == 2026 and ansible_date_time.month | int == 1 and ansible_date_time.day | int < 13)
+        (ansible_date_time.year | int == 2026 and ansible_date_time.month | int == 1 and ansible_date_time.day | int < 18)
       register: _http_sync
       changed_when: _http_sync.rc == 0
       failed_when: false
@@ -93,7 +93,7 @@
         (_leader_status.rc | default(1)) == 0 and
         ((_leader_status.stdout | from_json).sealed | default(true)) == false
       retries: 30
-      delay: 2
+      delay: 5
       changed_when: false
 
 # 3. Vault Followers
@@ -121,7 +121,7 @@
         (_follower_status.rc | default(1)) == 0 and
         ((_follower_status.stdout | from_json).sealed | default(true)) == false
       retries: 30
-      delay: 2
+      delay: 5
       changed_when: false
 
 # 4. Infrastructure Services
@@ -216,7 +216,7 @@
       changed_when: false
 
 - name: "Restore Etcd (Postgres coordination)"
-  hosts: postgres
+  hosts: etcd_cluster
   gather_facts: true
   become: true
   tags: [never, k3s, infra, etcd]
@@ -249,7 +249,7 @@
         status_code: 200
       register: _etcd_health
       retries: 20
-      delay: 3
+      delay: 5
       until: _etcd_health.status == 200
 
 - name: "Restore Postgres"
@@ -319,7 +319,8 @@
           sudo pacman -Sy --noconfirm jq
         fi
 
-        LEADER_NAME=$(podman exec postgres patronictl list -f json | jq -r '.[] | select(.Role == "Leader") | .Member')
+        # We connect to the VIP to find the leader
+        LEADER_NAME=$(podman exec postgres patronictl -c /config/patroni.yml list -f json | jq -r '.[] | select(.Role == "Leader") | .Member')
         if [ "$LEADER_NAME" != "{{ inventory_hostname }}" ]; then
           echo "Current host is not the Patroni leader ($LEADER_NAME). Skipping Kine fix."
           exit 0
@@ -343,7 +344,7 @@
         fi
 
         # Get patronictl list output once to avoid multiple execs
-        PATRONI_LIST=$(podman exec postgres patronictl list -f json)
+        PATRONI_LIST=$(podman exec postgres patronictl -c /config/patroni.yml list -f json)
         LEADER_NAME=$(echo "$PATRONI_LIST" | jq -r '.[] | select(.Role == "Leader") | .Member')
 
         if [ -z "$LEADER_NAME" ] || [ "$LEADER_NAME" = "null" ]; then
@@ -383,11 +384,11 @@
 
         PG_HBA="['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'local replication replicator trust', 'host replication replicator $LAN_SUBNET md5', 'host $K3S_DB_NAME $K3S_DB_USER $LAN_SUBNET md5', 'host $K3S_DB_NAME $K3S_DB_USER $K3S_CLUSTER_CIDR md5', 'host $AUTHELIA_DB_NAME $AUTHELIA_DB_USER $LAN_SUBNET md5', 'host $AUTHELIA_DB_NAME $AUTHELIA_DB_USER $K3S_CLUSTER_CIDR md5', 'local all postgres trust', 'host all postgres $LAN_SUBNET md5']"
 
-        podman exec postgres patronictl edit-config --force --set "postgresql.pg_hba=$PG_HBA"
+        podman exec postgres patronictl -c /config/patroni.yml edit-config --force --set "postgresql.pg_hba=$PG_HBA"
         # Force Patroni to reload the config and apply HBA changes
         # Added retries because networking might be unstable during restore (No route to host errors)
         for i in {1..5}; do
-          if podman exec postgres patronictl reload {{ postgres_cluster_name | default('k3scluster') }} --force; then
+          if podman exec postgres patronictl -c /config/patroni.yml reload {{ postgres_cluster_name | default('k3scluster') }} --force; then
             echo "Patroni cluster reloaded successfully"
             break
           else
@@ -467,7 +468,7 @@
       delay: 5
       # Run only on the first node to avoid thundering herd on API
       run_once: true
-      delegate_to: "{{ groups['server'][0] }}"
+      delegate_to: "{{ groups['server'] | first }}"
       changed_when: false
 
 - name: "Restore K3s Agents"
@@ -493,7 +494,7 @@
 
     - name: Wait for Agent Nodes to be Ready # noqa: run-once
       ansible.builtin.command: k3s kubectl get nodes --no-headers
-      delegate_to: "{{ groups['server'][0] }}"
+      delegate_to: "{{ groups['server'] | first }}"
       register: _k3s_agent_nodes
       # Check that all nodes (lines) contain "Ready"
       until: >-
@@ -511,39 +512,51 @@
   hosts: localhost
   gather_facts: false
   become: false
-  tags: [always, k3s, vault_test]
+  tags: [always, vault_test]
   vars_files:
     - ../inventories/group_vars/all/main.yml
   tasks:
     - name: Test K3s Vault API endpoint (Kubernetes Auth)
       ansible.builtin.uri:
-        url: "https://192.168.0.253:8200/v1/auth/kubernetes"
+        url: "https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:{{ global_vault_api_port | default(8200) }}/v1/auth/kubernetes"
         method: GET
-        validate_certs: true
-        ca_path: "/etc/tls/ca-bundle.pem"
+        validate_certs: false # Changed to false because /etc/tls/ca-bundle.pem might not exist yet if k3s is not installed
         status_code: [200, 429, 405, 403] # 405 or 403 are expected for GET on this endpoint without proper auth
       register: _k3s_vault_health
       ignore_errors: true
-      delegate_to: "{{ groups['server'][0] }}" # Run from a cluster node where ca-bundle.pem exists
+      delegate_to: "{{ groups['server'] | first }}"
+      tags: [k3s] # Only run if k3s is requested
 
     - name: Fetch current CA bundle from Vault
       ansible.builtin.uri:
-        url: "https://192.168.0.253:8200/v1/pki_int/ca/pem"
+        url: "https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:{{ global_vault_api_port | default(8200) }}/v1/pki_int/ca/pem"
         method: GET
         validate_certs: false
         return_content: true
       register: _vault_ca_bundle
-      when: _k3s_vault_health.status not in [200, 429, 405, 403]
+      # Only attempt if k3s verification failed AND we are specifically targeting k3s restoration
+      # 403 Forbidden is ignored here because if it fails, we just can't update the bundle
+      failed_when: false
+      when:
+        - "'k3s' in ansible_run_tags"
+        - "_k3s_vault_health.status is defined"
+        - "_k3s_vault_health.status not in [200, 429, 405, 403]"
+      tags: [k3s]
 
     - name: Regenerate vault-issuer.yaml if CA bundle is invalid
       ansible.builtin.set_fact:
         _new_cabundle: "{{ _vault_ca_bundle.content | b64encode | regex_replace('\\s+', '') }}"
       when:
-        - _k3s_vault_health.status not in [200, 429, 405, 403]
-        - _vault_ca_bundle.status == 200
+        - "'k3s' in ansible_run_tags"
+        - "_vault_ca_bundle is defined"
+        - "_vault_ca_bundle.status | default(0) == 200"
+      tags: [k3s]
 
     - name: Print new CA bundle for vault-issuer.yaml
       ansible.builtin.debug:
         msg: "New CA bundle: {{ _new_cabundle }}"
-      when: _new_cabundle is defined
+      when:
+        - "'k3s' in ansible_run_tags"
+        - "_new_cabundle is defined"
       delegate_to: localhost
+      tags: [k3s]

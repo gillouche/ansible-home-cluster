@@ -32,11 +32,14 @@ vault_log_level: "debug"
 vault_listener_address: "0.0.0.0"
 vault_bind_ip: "0.0.0.0"
 
-# TLS/CA Defaults
-vault_enable_cluster_ca: true
+# Controller-side CA paths
+root_ca_dir_controller: "~/.local/share/ansible-home-cluster/root-ca"
+root_ca_cert_controller: "{{ root_ca_dir_controller }}/homelab-root-ca.crt"
+root_ca_key_controller: "{{ root_ca_dir_controller }}/homelab-root-ca.key"
+
 vault_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
-vault_cluster_ca_cert_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.crt"
-vault_cluster_ca_key_controller: "{{ vault_cluster_ca_dir_controller }}/homelab-root-ca.key"
+vault_cluster_ca_cert_controller: "{{ root_ca_cert_controller }}"
+vault_cluster_ca_key_controller: "{{ root_ca_key_controller }}"
 vault_cluster_ca_days: 3650
 vault_server_cert_days: 1825
 

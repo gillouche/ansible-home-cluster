@@ -1,2 +1,4 @@
 ---
 ansible_connection: local
+ansible_become_password: "{{ lookup('ansible.builtin.env', 'ANSIBLE_BECOME_PASS') | default(omit) }}"
+# controller_become_password was removed as requested

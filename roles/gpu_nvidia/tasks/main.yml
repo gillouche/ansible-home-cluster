@@ -1,12 +1,31 @@
 ---
-- name: Install NVIDIA drivers and utilities
+- name: Install Linux Headers (required for DKMS) and NVIDIA Toolkit
   community.general.pacman:
     name:
-      - nvidia-open
-      - nvidia-utils
+      - linux-lts
+      - linux-lts-headers
       - nvidia-container-toolkit
     state: present
   become: true
+
+- name: Check if NVIDIA packages are installed
+  ansible.builtin.command: pacman -Qq {{ item }}
+  loop:
+    - nvidia-550xx-dkms
+    - nvidia-550xx-utils
+    - nvidia-550xx-settings
+    - opencl-nvidia-550xx
+  register: nvidia_packages_check
+  failed_when: false
+  changed_when: false
+
+- name: Install Legacy NVIDIA drivers (550xx) from AUR (1080Ti)
+  ansible.builtin.command:
+    cmd: yay -S --noconfirm nvidia-550xx-dkms nvidia-550xx-utils nvidia-550xx-settings opencl-nvidia-550xx
+  become: true
+  become_user: aur_builder
+  when: nvidia_packages_check.results | selectattr('rc', 'ne', 0) | list | length > 0
+  changed_when: true
 
 - name: Configure NVIDIA Container Toolkit
   ansible.builtin.shell:

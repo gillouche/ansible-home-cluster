@@ -71,44 +71,28 @@
   become: true
   tags: [k3s, k3s_prep]
   pre_tasks:
-    - name: Check for default K3s directory
-      ansible.builtin.stat:
-        path: /var/lib/rancher/k3s
-      register: _default_k3s_dir
-
-    - name: Remove default K3s directory if it conflicts with custom location
-      ansible.builtin.file:
-        path: /var/lib/rancher/k3s
-        state: absent
-      when:
-        - "'server' in group_names"
-        - k3s_server_location is defined
-        - k3s_server_location != '/var/lib/rancher/k3s'
-        - _default_k3s_dir.stat.exists
-        - _default_k3s_dir.stat.isdir
-        - not _default_k3s_dir.stat.islnk
   roles:
     - role: k3s.orchestration.prereq
       tags: [k3s, k3s_prep]
     - role: k3s.orchestration.raspberrypi
       tags: [k3s, k3s_prep]
     - role: k3s_nvidia
-      when: "'server' in group_names"
+      when:
+        - "'server' in group_names"
+        - k3s_node_labels['accelerator.nvidia.com/gpu.present'] | default('false') | bool
       tags: [k3s, k3s_prep]
 
 - name: Setup K3S server
   hosts: server
   become: true
+  serial: 1
   tags: [k3s, k3s_server]
   pre_tasks:
-    - name: Ensure K3s data directory exists on SSD
-      ansible.builtin.file:
-        path: "{{ k3s_server_location }}"
-        state: directory
-        mode: '0755'
-        owner: root
-        group: root
-      when: k3s_server_location is defined
+    - name: Set token fact from k3s_cluster_token
+      ansible.builtin.set_fact:
+        token: "{{ k3s_cluster_token }}"
+      when: k3s_cluster_token is defined
+      tags: [k3s, k3s_server]
   roles:
     - role: k3s.orchestration.k3s_server
       tags: [k3s, k3s_server]
@@ -121,13 +105,13 @@
   tasks:
     - name: Check for node-token
       ansible.builtin.stat:
-        path: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/node-token"
+        path: /var/lib/rancher/k3s/server/node-token
       register: _node_token_stat
       tags: [k3s, k3s_agent]
 
     - name: Read node-token
       ansible.builtin.slurp:
-        src: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/node-token"
+        src: /var/lib/rancher/k3s/server/node-token
       register: _node_token_content
       when: _node_token_stat.stat.exists
       tags: [k3s, k3s_agent]
@@ -146,6 +130,28 @@
     - name: Ensure systemd is reloaded before agent setup
       ansible.builtin.systemd:
         daemon_reload: true
+
+    - name: Ensure k3s-agent.service exists with minimal content
+      ansible.builtin.copy:
+        dest: "{{ systemd_dir | default('/etc/systemd/system') }}/k3s-agent.service"
+        content: |
+          [Service]
+          ExecStart=/usr/local/bin/k3s \
+              agent
+        mode: '0644'
+        owner: root
+        group: root
+        force: false # Only create if it doesn't exist
+      changed_when: false
+
+    - name: Ensure k3s-agent.service.env exists
+      ansible.builtin.file:
+        path: "{{ systemd_dir | default('/etc/systemd/system') }}/k3s-agent.service.env"
+        state: touch
+        mode: '0600'
+        owner: root
+        group: root
+      changed_when: false
   roles:
     - role: k3s.orchestration.k3s_agent
       tags: [k3s, k3s_agent]

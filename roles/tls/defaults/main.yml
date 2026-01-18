@@ -1,9 +1,9 @@
 ---
 
 # Controller Cluster CA paths (source of truth)
-tls_cluster_ca_dir_controller: "~/.local/share/ansible-home-cluster/vault-ca"
-tls_cluster_ca_cert_controller: "{{ tls_cluster_ca_dir_controller }}/homelab-root-ca.crt"
-tls_cluster_ca_key_controller: "{{ tls_cluster_ca_dir_controller }}/homelab-root-ca.key"
+tls_cluster_ca_dir_controller: "{{ vault_cluster_ca_dir_controller }}"
+tls_cluster_ca_cert_controller: "{{ root_ca_cert_controller }}"
+tls_cluster_ca_key_controller: "{{ root_ca_key_controller }}"
 
 # SAN customization (added to hostnames, FQDN and local IP/127.0.0.1)
 tls_additional_san_ips: []

@@ -73,7 +73,6 @@
       loop:
         - /etc/rancher
         - /var/lib/rancher
-        - "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}"
         - /var/lib/kubelet
         - /var/lib/longhorn
         - /etc/cni
@@ -124,31 +123,25 @@
 #      ansible.builtin.reboot:
 #        reboot_timeout: 300
 
-# 2. Reset Postgres and Etcd Cluster (HA)
-- name: Reset HA Infrastructure for K3s
+# 2. Reset HA Infrastructure for K3s
+- name: Reset Postgres HA Infrastructure
   hosts: postgres
   become: true
   gather_facts: false
   tags: [k3s, k3s_nodes]
   tasks:
-    - name: Stop and Remove HA Components
+    - name: Stop and Remove Postgres Container
       containers.podman.podman_container:
-        name: "{{ item }}"
+        name: "{{ postgres_container_name | default('postgres') }}"
         state: absent
-      loop:
-        - "{{ postgres_container_name | default('postgres') }}"
-        - "{{ etcd_container_name | default('etcd') }}"
       failed_when: false
 
-    - name: Wipe HA Data Directories
+    - name: Wipe Postgres Data Directory
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ postgres_data_dir | default('/mnt/data/postgres') }}"
         state: absent
-      loop:
-        - "{{ postgres_data_dir | default('/mnt/data/postgres') }}"
-        - "{{ etcd_data_dir | default('/mnt/data/etcd') }}"
 
-    - name: Remove HA Infrastructure Keepalived/HAProxy Configurations
+    - name: Remove Postgres Keepalived/HAProxy Configurations
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
@@ -156,17 +149,34 @@
         - /etc/keepalived/conf.d/postgres.conf
         - /etc/haproxy/conf.d/postgres.cfg
         - /etc/systemd/system/haproxy.service.d/conf-d.conf
-      register: _ha_infra_clean
+      register: _postgres_infra_clean
 
-    - name: Restart Keepalived/HAProxy to release HA VIPs
+    - name: Restart Keepalived/HAProxy to release Postgres VIPs
       ansible.builtin.systemd:
         name: "{{ item }}"
         state: restarted
       loop:
         - keepalived
         - haproxy
-      when: _ha_infra_clean.changed
+      when: _postgres_infra_clean.changed
       failed_when: false
+
+- name: Reset Etcd HA Infrastructure
+  hosts: etcd_cluster
+  become: true
+  gather_facts: false
+  tags: [k3s, k3s_nodes]
+  tasks:
+    - name: Stop and Remove Etcd Container
+      containers.podman.podman_container:
+        name: "{{ etcd_container_name | default('etcd') }}"
+        state: absent
+      failed_when: false
+
+    - name: Wipe Etcd Data Directory
+      ansible.builtin.file:
+        path: "{{ etcd_data_dir | default('/mnt/data/etcd') }}"
+        state: absent
 
 # 3. Clean Longhorn Storage
 - name: Clean Longhorn Storage

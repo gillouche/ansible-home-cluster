@@ -67,7 +67,9 @@
           force={{ aur_helper_force_build | default(false) }},
           packages_has_yay_bin={{ 'yay-bin' in (ansible_facts.packages | default({})) }},
           pacman_Q_rc={{ aur_helper_yay_q.rc | default('n/a') }},
-          should_build={{ aur_helper_should_build | default('unset') }}"
+          should_build={{ aur_helper_should_build | default('unset') }},
+          target_user={{ target_user }},
+          ansible_user={{ ansible_user | default('n/a') }}"
         verbosity: 1
 
     - name: Determine if yay-bin is installed and if build is required
@@ -106,12 +108,12 @@
       ansible.builtin.file:
         path: "{{ aur_helper_work_dir_path }}"
         state: directory
-        owner: "{{ target_user }}"
-        group: "{{ target_user }}"
+        owner: aur_builder
+        group: wheel
         mode: "0755"
         recurse: yes
       when: aur_helper_should_build | bool
-      become: false
+      become: true
 
     - name: Clone yay-bin AUR repository
       ansible.builtin.git:
@@ -119,7 +121,8 @@
         dest: "{{ aur_helper_work_dir_path }}"
         version: "{{ aur_helper_yay_ref | default('HEAD') }}"
         update: true
-      become: false
+      become: yes
+      become_user: aur_builder
       when: aur_helper_should_build | bool
 
     - name: Build yay-bin
@@ -128,7 +131,8 @@
         chdir: "{{ aur_helper_work_dir_path }}"
       changed_when: true
       when: aur_helper_should_build | bool
-      become: false
+      become: yes
+      become_user: aur_builder
 
     - name: Find built package file (yay-bin)
       ansible.builtin.find:
@@ -139,7 +143,7 @@
         age_stamp: mtime
       register: aur_helper_yay_pkg_find
       when: aur_helper_should_build | bool
-      become: false
+      become: true
 
     - name: Install yay-bin with pacman
       community.general.pacman:
@@ -151,8 +155,8 @@
         - (aur_helper_yay_pkg_find.files | default([])) | length > 0
 
     - name: Verify yay works (prints version)
-      ansible.builtin.command: yay -V
+      ansible.builtin.command: /usr/bin/yay -V
       register: aur_helper_yay_version_cmd
       changed_when: false
-      failed_when: false
+      failed_when: aur_helper_yay_version_cmd.rc != 0
       become: false

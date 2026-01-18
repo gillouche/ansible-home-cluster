@@ -566,19 +566,24 @@
   environment:
     VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
     VAULT_SKIP_VERIFY: "true"
-    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_TOKEN: "{{ vault_root_token | default('') }}"
   register: _leader_token_final_check
   changed_when: false
   failed_when: false
   become: true
+  when: (vault_root_token | default('') | length) > 0
 
 - name: Fail if Root Token is invalid
   ansible.builtin.fail:
     msg: >-
-      The Vault Root Token is invalid.
+      The Vault Root Token is invalid or could not be verified.
       This usually happens if the Vault data volume persists but the token in cluster-init.json is stale/lost.
       To fix: Run `rm -rf {{ vault_host_data_dir }}` on the leader {{ inventory_hostname }} to force a fresh initialization.
-  when: _leader_token_final_check.rc != 0
+  when:
+    - (vault_root_token | default('') | length) > 0
+    - _leader_token_final_check.rc is defined
+    - _leader_token_final_check.rc != 0
+    - not (vault_enable_transit_seal | default(false))
 
 - name: Include PKI and ACME setup tasks
   ansible.builtin.include_tasks: pki_acme_setup.yml

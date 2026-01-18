@@ -262,9 +262,9 @@
       PATRONI_RESTAPI_CONNECT_ADDRESS: "{{ hostvars[inventory_hostname].ansible_host }}:{{ postgres_patroni_port }}"
 
       # Etcd Configuration
-      ETCD_HOSTS: "{{ groups['postgres'] | sort | map('extract', hostvars, 'ansible_host') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
-      PATRONI_ETCD3_HOSTS: "{{ groups['postgres'] | sort | map('extract', hostvars, 'ansible_host') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
-      ETCD3_ENDPOINTS: "{{ groups['postgres'] | sort | map('extract', hostvars, 'ansible_host') | map('regex_replace', '^', 'http://') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
+      ETCD_HOSTS: "{{ groups['etcd_cluster'] | sort | map('extract', hostvars, 'ansible_host') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
+      PATRONI_ETCD3_HOSTS: "{{ groups['etcd_cluster'] | sort | map('extract', hostvars, 'ansible_host') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
+      ETCD3_ENDPOINTS: "{{ groups['etcd_cluster'] | sort | map('extract', hostvars, 'ansible_host') | map('regex_replace', '^', 'http://') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
       DCS_ENABLE_INTERNAL_ETCD: "false"
 
       # Authentication
@@ -313,7 +313,7 @@
     url: "http://127.0.0.1:{{ postgres_patroni_port }}/health"
     status_code: 200
   register: _patroni_health
-  retries: 30
+  retries: 120 # can be quite long on fresh install
   delay: 5
   until: _patroni_health.status == 200
   become: false

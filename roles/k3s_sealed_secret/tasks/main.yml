@@ -1,7 +1,7 @@
 ---
 - name: Ensure K3s manifest directory exists
   ansible.builtin.file:
-    path: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/manifests"
+    path: /var/lib/rancher/k3s/server/manifests
     state: directory
     mode: '0755'
   become: true
@@ -9,7 +9,7 @@
 - name: Deploy Sealed Secret Private Key to K3s manifests
   ansible.builtin.template:
     src: 00-sealed-secrets-key.yaml.j2
-    dest: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/manifests/00-sealed-secrets-key.yaml"
+    dest: /var/lib/rancher/k3s/server/manifests/00-sealed-secrets-key.yaml
     mode: '0600'
   become: true
 
@@ -27,7 +27,7 @@
 - name: Deploy Sealed Secrets via K3s HelmChart CRD
   ansible.builtin.template:
     src: 01-sealed-secrets-helm.yaml.j2
-    dest: "{{ k3s_server_location | default('/var/lib/rancher/k3s') }}/server/manifests/01-sealed-secrets-helm.yaml"
+    dest: /var/lib/rancher/k3s/server/manifests/01-sealed-secrets-helm.yaml
     mode: '0644'
   become: true
 

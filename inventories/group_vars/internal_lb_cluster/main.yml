@@ -118,7 +118,7 @@ load_balancer_haproxy_backends:
     mode: http
     servers:
       - name: nexus
-        addr: "{{ hostvars['homeserver'].ansible_host }}"
+        addr: "{{ hostvars[groups['artifactory'][0]].ansible_host }}"
         port: "{{ global_nexus_port }}"
         opts: "check"
 
@@ -127,7 +127,7 @@ load_balancer_haproxy_backends:
     mode: http
     servers:
       - name: firefly
-        addr: "{{ hostvars['homeserver2'].ansible_host }}"
+        addr: "{{ hostvars[groups['firefly'][0]].ansible_host }}"
         port: "{{ global_firefly_port }}"
         opts: "check"
 

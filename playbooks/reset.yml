@@ -13,32 +13,54 @@
   import_playbook: includes/reset/vault_tls_reset.yml
   tags: [vault_reset]
 
-# 3. Maintenance - Clean devices (SSH config, known_hosts, /etc/hosts)
+# 3. Reset TLS Controller (Homelab Root CA)
+- name: Reset TLS Controller
+  hosts: localhost
+  gather_facts: true
+  become: false
+  tags: [bootstrap_reset, tls_controller_reset]
+  tasks:
+    - name: Remove Homelab Root CA artifacts from controller
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ root_ca_cert_controller }}"
+        - "{{ root_ca_key_controller }}"
+        - "{{ root_ca_dir_controller }}/root_ca.ext"
+        - "{{ root_ca_dir_controller }}/root_ca.srl"
+
+    - name: Remove Homelab Root CA from macOS keychain
+      ansible.builtin.command: security delete-certificate -c "Homelab Root CA"
+      failed_when: false
+      when: ansible_facts['os_family'] == 'Darwin'
+
+# 4. Maintenance - Clean devices (SSH config, known_hosts, /etc/hosts)
 - name: Clean Devices
   import_playbook: includes/reset/clean_devices.yml
   tags: [clean_devices]
 
-# 4. Flush firewall rules
+# 5. Flush firewall rules
 - name: Flush Firewall
   import_playbook: includes/reset/flush_firewall.yml
   tags: [reset_firewall]
 
-# 5. Reset DNS (Pi-hole, local resolv.conf, keepalived)
+# 6. Reset DNS (Pi-hole, local resolv.conf, keepalived)
 - name: Reset DNS
   import_playbook: includes/reset/dns_reset.yml
   tags: [dns_reset]
 
-# 6. Reset Proxy (Edge Proxy, reverse_proxy user, keepalived)
+# 7. Reset Proxy (Edge Proxy, reverse_proxy user, keepalived)
 - name: Reset Proxy
   import_playbook: includes/reset/proxy_reset.yml
   tags: [proxy_reset]
 
-# 7. Reset Load Balancer (HAProxy, keepalived)
+# 8. Reset Load Balancer (HAProxy, keepalived)
 - name: Reset Load Balancer
   import_playbook: includes/reset/lb_reset.yml
   tags: [lb_reset, reset_lb]
 
-# 8. Reset K3s Cluster (Nodes, DB, Storage)
+# 9. Reset K3s Cluster (Nodes, DB, Storage)
 - name: Reset K3s
   import_playbook: includes/reset/k3s_reset.yml
   tags: [k3s_reset]

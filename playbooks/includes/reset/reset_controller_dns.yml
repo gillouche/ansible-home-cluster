@@ -12,6 +12,7 @@
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../../../inventories/group_vars/all/vault.yml"
       no_log: true
+      failed_when: false
 
   tasks:
     - name: Set macOS DNS server to public resolvers (networksetup)
@@ -33,5 +34,4 @@
       become: true
       when:
         - (ansible_facts.get('os_family', '') | lower) == 'darwin'
-        - ansible_become_password is defined or ansible_become_pass is defined
       ignore_errors: true

@@ -3,4 +3,4 @@ ansible_user: alarm
 ansible_ssh_pass: "{{ ansible_password }}"
 
 ansible_become_method: sudo
-ansible_become_password: "{{ vault_device_become_password }}"
+ansible_become_password: "{{ device_become_password | default(vault_device_become_password) }}"

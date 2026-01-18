@@ -9,11 +9,14 @@
       ansible.builtin.slurp:
         src: "{{ vault_init_export_path | expanduser }}"
       register: _cluster_init_content
+      failed_when: false
 
     - name: Set vault_root_token fact
       ansible.builtin.set_fact:
         vault_root_token: "{{ (_cluster_init_content.content | b64decode | from_json).root_token }}"
-      when: _cluster_init_content.content is defined
+      when:
+        - _cluster_init_content.content is defined
+        - (_cluster_init_content.content | b64decode | regex_search('^\\s*[{\\[]')) | length > 0
   tasks:
     - name: Run controller-side TLS tasks
       ansible.builtin.include_role:

@@ -1,10 +1,10 @@
 ---
-k3s_server_location: /mnt/data/k3s
 
 # specific args for server nodes (Control Plane)
 extra_server_args: >-
   --prefer-bundled-bin
   --disable traefik
+  --flannel-backend=vxlan
   --kubelet-arg=system-reserved=cpu=1000m,memory=2Gi
   --kubelet-arg=kube-reserved=cpu=1000m,memory=2Gi
   --kubelet-arg=max-pods=110

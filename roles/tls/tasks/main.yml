@@ -54,7 +54,7 @@
 
 - name: Copy Root CA from controller
   ansible.builtin.copy:
-    src: "{{ tls_cluster_ca_cert_controller }}"
+    src: "{{ root_ca_cert_controller | expanduser }}"
     dest: "{{ tls_dir }}/root-ca.pem"
     owner: root
     group: root

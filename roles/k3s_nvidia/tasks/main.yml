@@ -4,7 +4,8 @@
     path: /var/lib/rancher/k3s/agent/etc/containerd
     state: directory
     mode: '0755'
-    recurse: true
+    owner: root
+    group: root
   become: true
 
 - name: Deploy K3s Containerd config template
@@ -12,5 +13,4 @@
     src: config.toml.tmpl.j2
     dest: /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
     mode: '0644'
-  notify: Restart K3s Agent
   become: true
