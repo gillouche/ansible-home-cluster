@@ -3,9 +3,6 @@
   hosts: localhost
   gather_facts: true
   become: false
-  tags:
-    - never
-    - controller_dns_reset
 
   pre_tasks:
     - name: Load vaulted credentials from group_vars/all/vault.yml
@@ -31,7 +28,6 @@
       ansible.builtin.command: >-
         killall -HUP mDNSResponder
       changed_when: false
-      become: true
+      failed_when: false
       when:
         - (ansible_facts.get('os_family', '') | lower) == 'darwin'
-      failed_when: false

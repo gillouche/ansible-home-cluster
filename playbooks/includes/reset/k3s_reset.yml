@@ -194,5 +194,11 @@
         path: /mnt/data/longhorn
         state: absent
       become: true
+
+    - name: Clean extra Longhorn storage disks
+      ansible.builtin.shell: |
+        rm -rf /mnt/ssd_nvme/*
+        rm -rf /mnt/ssd_sata/*
+      become: true
       register: clean_storage
       changed_when: true

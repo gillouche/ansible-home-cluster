@@ -162,31 +162,68 @@
         - _cluster_init_content.content is defined
         - (_cluster_init_content.content | b64decode | regex_search('^\\s*[{\\[]')) | length > 0
 
+    - name: Find active Vault leader
+      ansible.builtin.command: vault status -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:{{ global_vault_api_port | default(18200) }}"
+        VAULT_SKIP_VERIFY: "true"
+      register: _vault_node_status
+      delegate_to: "{{ item }}"
+      with_items: "{{ groups['vault_cluster'] }}"
+      become: false
+      failed_when: false
+      changed_when: false
+
+    - name: Set Vault Leader Fact
+      ansible.builtin.set_fact:
+        active_vault_leader: "{{ item.item }}"
+      with_items: "{{ _vault_node_status.results }}"
+      vars:
+        _status: "{{ item.stdout | from_json }}"
+      when:
+        - item.rc == 0
+        - item.item in groups['vault_cluster']
+        - item.item not in (groups['vault_transit'] | default([]))
+        - _status.ha_enabled | default(false)
+        - _status.cluster_name | default('') == (global_vault_cluster_name | default('homelab-vault'))
+        # A node is a leader if standby is explicitly false OR it's the active node
+        - >-
+          _status.standby | default(true) == false or
+          _status.is_self | default(false) == true
+      # Ensure we only pick the first one that matches
+      run_once: true
+
+    - name: Fallback to first vault_leader if no active leader found (for single node or early bootstrap)
+      ansible.builtin.set_fact:
+        active_vault_leader: "{{ groups['vault_leader'][0] }}"
+      when: active_vault_leader is not defined
+
     - name: Verify local vault_root_token validity
-      ansible.builtin.uri:
-        url: "https://{{ load_balancer_virtual_ip }}:{{ global_vault_api_lb_port | default(8200) }}/v1/sys/capabilities-self"
-        method: POST
-        headers:
-          X-Vault-Token: "{{ vault_root_token }}"
-        body_format: json
-        body:
-          paths: ["sys/auth"]
-        validate_certs: false
-        status_code: [200]
-      delegate_to: localhost
+      ansible.builtin.command: vault token lookup
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:{{ global_vault_api_port | default(18200) }}"
+        VAULT_TOKEN: "{{ vault_root_token }}"
+        VAULT_SKIP_VERIFY: "true"
+      delegate_to: "{{ active_vault_leader }}"
       become: false
       register: _local_token_verify
+      until: _local_token_verify.rc == 0
+      retries: 10
+      delay: 5
       ignore_errors: true
-      when: vault_root_token is defined and vault_root_token | length > 0
+      when:
+        - vault_root_token is defined
+        - vault_root_token | length > 0
+        - active_vault_leader is defined
 
     - name: Check for /root/.vault-token on leader if local token is missing or invalid
       ansible.builtin.slurp:
         src: /root/.vault-token
       register: _leader_token_slurp
-      delegate_to: "{{ groups['vault_leader'][0] }}"
-      when: >
-        (vault_root_token is not defined or vault_root_token | length == 0) or
-        (_local_token_verify.status | default(0) != 200)
+      delegate_to: "{{ active_vault_leader }}"
+      when:
+        - active_vault_leader is defined
+        - (vault_root_token is not defined or vault_root_token | length == 0) or (_local_token_verify.rc | default(1) != 0)
       ignore_errors: true
 
     - name: Set vault_root_token from leader host if local was missing or invalid
@@ -194,26 +231,24 @@
         vault_root_token: "{{ _leader_token_slurp.content | b64decode | trim }}"
       when:
         - _leader_token_slurp.content is defined
-        - (vault_root_token is not defined or vault_root_token | length == 0 or _local_token_verify.status | default(0) != 200)
+        - (vault_root_token is not defined or vault_root_token | length == 0 or _local_token_verify.rc | default(1) != 0)
 
     - name: Verify recovered vault_root_token validity
-      ansible.builtin.uri:
-        url: "https://{{ load_balancer_virtual_ip }}:{{ global_vault_api_lb_port | default(8200) }}/v1/sys/capabilities-self"
-        method: POST
-        headers:
-          X-Vault-Token: "{{ vault_root_token }}"
-        body_format: json
-        body:
-          paths: ["sys/auth"]
-        validate_certs: false
-        status_code: [200]
-      delegate_to: localhost
+      ansible.builtin.command: vault token lookup
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:{{ global_vault_api_port | default(18200) }}"
+        VAULT_TOKEN: "{{ vault_root_token }}"
+        VAULT_SKIP_VERIFY: "true"
+      delegate_to: "{{ active_vault_leader }}"
       become: false
       register: _recovered_token_verify
+      until: _recovered_token_verify.rc == 0
+      retries: 10
+      delay: 5
       ignore_errors: true
       when:
         - _leader_token_slurp.content is defined
-        - (_local_token_verify.status | default(0) != 200)
+        - (_local_token_verify.rc | default(1) != 0)
 
     - name: "Update local cluster init JSON if token was recovered from leader and is valid" # noqa: run-once[task]
       ansible.builtin.copy:
@@ -229,21 +264,26 @@
       run_once: true # noqa: run-once
       become: false
       when:
-        - _recovered_token_verify.status | default(0) == 200
-        - (_local_token_verify.status | default(0) != 200)
+        - _recovered_token_verify.rc | default(1) == 0
+        - (_local_token_verify.rc | default(1) != 0)
 
     - name: Fail if vault_root_token is still invalid after recovery attempt
       ansible.builtin.fail:
         msg: |
           The Vault Root Token is invalid and recovery from leader host also failed or returned an invalid token.
-          Current token: {{ vault_root_token }}
-          Vault API Status (local): {{ _local_token_verify.status | default('N/A') }}
-          Vault API Status (recovered): {{ _recovered_token_verify.status | default('N/A') }}
-          Please verify Vault status manually: ssh homeserver "sudo vault status"
+
+          Current token (from local cluster-init.json): {{ vault_root_token | default('N/A') }}
+          Vault API Status (local verify): {{ _local_token_verify.rc | default('N/A') }}
+          Vault API Status (recovered verify): {{ _recovered_token_verify.rc | default('N/A') }}
+
+          HINT: Since you just performed a 'nuke' reset, your local 'cluster-init.json' is stale.
+          Please run the 'vault' role first to re-initialize Vault and generate a new token:
+          ansible-playbook playbooks/setup.yml -t vault
+
+          Alternatively, verify Vault status manually: ssh {{ active_vault_leader | default('homeserver') }} "vault status"
       when:
-        - vault_root_token is defined
-        - (_local_token_verify.status | default(0) != 200)
-        - (_recovered_token_verify.status | default(0) != 200)
+        - (_local_token_verify.rc | default(1) != 0)
+        - (_recovered_token_verify.rc | default(1) != 0)
   roles:
     - role: k3s_vault_config
       tags: [k3s, vault, k3s_vault_config]

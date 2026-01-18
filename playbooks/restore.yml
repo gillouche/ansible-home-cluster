@@ -55,7 +55,22 @@
       failed_when: false
       changed_when: true # It does change state if run
 
-# 1. Vault Transit (CRITICAL: Must be first to allow auto-unseal)
+# 1. Start all Vault Nodes (Ensure Quorum)
+- name: "Start Vault Cluster Nodes"
+  hosts: vault_cluster
+  gather_facts: false
+  become: true
+  tags: [always, base, vault]
+  tasks:
+    - name: Start Vault container
+      ansible.builtin.command: podman start vault
+      register: _vault_start
+      changed_when: _vault_start.rc == 0
+      failed_when:
+        - _vault_start.rc != 0
+        - "'already' not in _vault_start.stderr"
+
+# 2. Vault Transit (CRITICAL: Must be first to allow auto-unseal)
 - name: "Restore Vault Transit"
   hosts: vault_transit
   gather_facts: false
@@ -143,11 +158,11 @@
 
     - name: Wait for Pi-hole to be ready
       ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ global_pihole_http_port | default(8080) }}/admin/index.php"
+        url: "http://127.0.0.1:{{ global_pihole_http_port | default(8080) }}/admin/"
         method: GET
-        status_code: [200, 302]
+        status_code: [200, 302, 401, 403]
       register: _pihole_health
-      until: _pihole_health.status in [200, 302]
+      until: _pihole_health.status in [200, 302, 401, 403]
       retries: 30
       delay: 5
       become: false
@@ -214,13 +229,6 @@
         - _caddy_start.rc != 0
         - "'already' not in _caddy_start.stderr"
 
-    - name: Wait for Caddy to be ready
-      ansible.builtin.wait_for:
-        port: 80
-        host: 127.0.0.1
-        timeout: 30
-      become: false
-
     - name: Start Keepalived
       ansible.builtin.systemd:
         name: keepalived
@@ -234,6 +242,18 @@
       retries: 5
       delay: 2
       until: _keepalived_status.status.ActiveState == "active"
+
+    - name: Wait for Caddy to be ready
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:80/"
+        method: GET
+        status_code: [200, 301, 302, 303, 307, 308]
+        validate_certs: false
+      register: _caddy_health
+      until: _caddy_health.status in [200, 301, 302, 303, 307, 308]
+      retries: 30
+      delay: 5
+      become: false
 
 - name: "Restore Etcd (Postgres coordination)"
   hosts: etcd_cluster
@@ -337,7 +357,7 @@
         # Identify the Patroni leader
         if ! command -v jq >/dev/null 2>&1; then
           echo "jq is missing, attempting to install it..."
-          if ! sudo pacman -Sy --noconfirm jq; then
+          if ! pacman -Sy --noconfirm jq; then
             echo "Failed to install jq. Cannot proceed with leader detection."
             exit 1
           fi
@@ -416,7 +436,7 @@
         # Identify the Patroni leader
         if ! command -v jq >/dev/null 2>&1; then
           echo "jq is missing, attempting to install it..."
-          if ! sudo pacman -Sy --noconfirm jq; then
+          if ! pacman -Sy --noconfirm jq; then
             echo "Failed to install jq. Cannot proceed with leader detection."
             exit 1
           fi
@@ -667,32 +687,59 @@
       register: _k3s_vault_health
       ignore_errors: true
       delegate_to: "{{ groups['server'] | first }}"
+      become: false
       tags: [k3s] # Only run if k3s is requested
 
-    - name: Fetch current CA bundle from Vault
+    - name: Fetch Intermediate CA from Vault
       ansible.builtin.uri:
         url: >-
           https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:{{ global_vault_api_port | default(8200) }}/v1/pki_int/ca/pem
         method: GET
         validate_certs: false
         return_content: true
-      register: _vault_ca_bundle
-      # Only attempt if k3s verification failed AND we are specifically targeting k3s restoration
-      # 403 Forbidden is ignored here because if it fails, we just can't update the bundle
+      register: _vault_ca_int
       failed_when: false
-      when:
-        - "'k3s' in ansible_run_tags"
-        - "_k3s_vault_health.status is defined"
-        - "_k3s_vault_health.status not in [200, 429, 405, 403]"
+      when: "'k3s' in ansible_run_tags"
       tags: [k3s]
 
-    - name: Regenerate vault-issuer.yaml if CA bundle is invalid
+    - name: Fetch Middle CA from Vault
+      ansible.builtin.uri:
+        url: >-
+          https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:{{ global_vault_api_port | default(8200) }}/v1/pki/ca/pem
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: _vault_ca_middle
+      failed_when: false
+      when: "'k3s' in ansible_run_tags"
+      tags: [k3s]
+
+    - name: Get Root CA from controller
+      ansible.builtin.slurp:
+        src: "{{ root_ca_cert_controller }}"
+      register: _vault_ca_root
+      delegate_to: localhost
+      failed_when: false
+      when: "'k3s' in ansible_run_tags"
+      tags: [k3s]
+
+    - name: Regenerate vault-issuer.yaml if CA bundle components are valid
       ansible.builtin.set_fact:
-        _new_cabundle: "{{ _vault_ca_bundle.content | b64encode | regex_replace('\\s+', '') }}"
+        _full_bundle_content: |
+          {{ _vault_ca_int.content | default('') }}
+          {{ _vault_ca_middle.content | default('') }}
+          {{ _vault_ca_root.content | default('') | b64decode }}
       when:
         - "'k3s' in ansible_run_tags"
-        - "_vault_ca_bundle is defined"
-        - "_vault_ca_bundle.status | default(0) == 200"
+        - "_vault_ca_int.status | default(0) == 200"
+      tags: [k3s]
+
+    - name: Set new CA bundle fact (Base64)
+      ansible.builtin.set_fact:
+        _new_cabundle: "{{ _full_bundle_content | b64encode | regex_replace('\\s+', '') }}"
+      when:
+        - "'k3s' in ansible_run_tags"
+        - "_full_bundle_content is defined"
       tags: [k3s]
 
     - name: Print new CA bundle for vault-issuer.yaml

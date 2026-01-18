@@ -1,4 +1,3 @@
----
 - name: Fetch Intermediate CAs to controller for bundle creation
   ansible.builtin.get_url:
     url: >-
@@ -6,6 +5,7 @@
     dest: "{{ tls_cluster_ca_dir_controller | expanduser }}/{{ item.name }}.pem"
     mode: '0644'
     validate_certs: false
+    force: true
   loop:
     - { path: 'pki_int', name: 'intermediate-ca' }
     - { path: 'pki', name: 'middle-ca' }

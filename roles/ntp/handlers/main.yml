@@ -17,3 +17,10 @@
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
+
+- name: Restart force-time-sync
+  ansible.builtin.systemd:
+    name: force-time-sync.service
+    state: restarted
+    daemon_reload: true
+  become: true

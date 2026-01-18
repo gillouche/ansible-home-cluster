@@ -1,0 +1,18 @@
+[Unit]
+Description=Force System Time Sync at Boot
+Documentation=https://github.com/ansible/ansible-home-cluster
+# Ensure network is up (for HTTP check)
+After=network-online.target
+Wants=network-online.target
+# Ensure this runs before time-sync target so other services see correct time
+Before=time-sync.target
+ConditionVirtualization=!container
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/force-time-sync.sh
+RemainAfterExit=yes
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

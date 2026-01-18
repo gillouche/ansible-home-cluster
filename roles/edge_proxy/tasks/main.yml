@@ -170,6 +170,22 @@
     daemon_reload: true
   become: true
 
+- name: Flush handlers to ensure Caddy restarts before readiness check
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Caddy to be ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:80/"
+    method: GET
+    status_code: [200, 301, 302, 303, 307, 308]
+    validate_certs: false
+    follow_redirects: "none"
+  register: _caddy_health
+  until: _caddy_health.status in [200, 301, 302, 303, 307, 308]
+  retries: 30
+  delay: 5
+  become: false
+
 - name: Restart Reverse Proxy if certificates were updated
   ansible.builtin.systemd:
     name: "container-{{ reverse_proxy_container_name }}"

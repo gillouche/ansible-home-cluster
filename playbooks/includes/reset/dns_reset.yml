@@ -90,7 +90,3 @@
         name: NetworkManager
         state: restarted
       failed_when: false
-
-- name: Reset Controller DNS (macOS)
-  import_playbook: reset_controller_dns.yml
-  tags: [never, dns_reset]

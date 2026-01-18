@@ -1,6 +1,13 @@
 ---
 # Removed: common.yml is now included in the vault_init stage
 
+- name: Get Homelab Root CA certificate content (controller)
+  ansible.builtin.slurp:
+    src: "{{ vault_cluster_ca_cert_controller }}"
+  register: _homelab_root_ca_cert_content
+  delegate_to: localhost
+  run_once: true
+
 - name: Include common preparation tasks
   ansible.builtin.include_tasks: common.yml
 
@@ -75,7 +82,18 @@
     mode: '0644'
   become: true
 
-- name: Ensure ca-bundle.pem exists for transit vault
+- name: Construct CA bundle for transit vault
+  ansible.builtin.copy:
+    content: |
+      {{ _homelab_root_ca_cert_content.content | b64decode }}
+    dest: "{{ vault_host_tls_dir }}/ca-bundle.pem"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: _homelab_root_ca_cert_content is defined
+
+- name: Ensure ca-bundle.pem exists for transit vault (Fallback to api.crt if root not available)
   ansible.builtin.copy:
     src: "{{ vault_host_tls_dir }}/api.crt"
     dest: "{{ vault_host_tls_dir }}/ca-bundle.pem"
@@ -84,6 +102,7 @@
     group: root
     mode: '0644'
   become: true
+  when: _homelab_root_ca_cert_content is not defined
 
 - name: Render Vault configuration (transit)
   ansible.builtin.template:

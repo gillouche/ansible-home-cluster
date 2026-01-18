@@ -342,11 +342,14 @@
   become: true
 
 - name: Wait for Pi-hole web interface to be available
-  ansible.builtin.wait_for:
-    host: "127.0.0.1"
-    port: "{{ pihole_http_host_port | int }}"
-    delay: 5
-    timeout: 60
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ pihole_http_host_port | int }}/admin/"
+    method: GET
+    status_code: [200, 302, 401, 403]
+  register: _pihole_health
+  until: _pihole_health.status in [200, 302, 401, 403]
+  retries: 30
+  delay: 5
   become: false
 
 - name: Add cron to update gravity every day

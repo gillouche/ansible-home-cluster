@@ -514,7 +514,6 @@
         - _leader_host_token_verify.rc | default(1) == 0
         - (_leader_host_token.content | b64decode | trim) != _known_token
 
-
 - name: Write /root/.vault-token when vault_root_token is available (leader)
   ansible.builtin.copy:
     content: "{{ vault_root_token }}"

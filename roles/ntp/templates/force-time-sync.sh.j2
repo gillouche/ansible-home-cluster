@@ -1,0 +1,88 @@
+#!/bin/bash
+set -o pipefail
+set -u
+
+# ==============================================================================
+# Force Time Sync Script
+# ==============================================================================
+# This script ensures the system time is correct at boot, particularly for
+# devices without an RTC (like Raspberry Pi).
+# It attempts:
+# 1. Chrony makestep (fastest, standard NTP)
+# 2. fallback to HTTP Date (Google) if time is significantly off/invalid.
+# ==============================================================================
+
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+}
+
+log "Starting Force Time Sync..."
+
+# 1. Try Chrony Makestep
+# ----------------------
+if command -v chronyc &> /dev/null; then
+    log "Attempting chronyc -a makestep..."
+    if chronyc -a makestep; then
+        log "Chronyc makestep successful."
+    else
+        log "Chronyc makestep failed (exit code $?). Continuing to check drift..."
+    fi
+else
+    log "Chronyc not found. Skipping."
+fi
+
+# 2. Check for Significant Drift / Invalid Date
+# ---------------------------------------------
+CURRENT_YEAR=$(date +'%Y')
+
+# Logic from restore.yml:
+# If year < 2026 OR (Year is 2026 AND Month is Jan AND Day < 18)
+# Since this runs at boot, "current year" check is robust for RTC-less resets.
+
+NEED_HTTP_SYNC=false
+
+if [ "$CURRENT_YEAR" -lt 2026 ]; then
+    log "System year ($CURRENT_YEAR) is prior to 2026. RTC likely lost/absent. Forcing HTTP sync."
+    NEED_HTTP_SYNC=true
+else
+    log "System year ($CURRENT_YEAR) seems plausible. Checking accuracy with HTTP..."
+    # Optional: We could just skip, but a quick HEAD request ensures we aren't drifting by minutes/hours
+    # if NTP is blocked or failing silently.
+    NEED_HTTP_SYNC=true
+fi
+
+# 3. HTTP Fallback Sync
+# ---------------------
+if [ "$NEED_HTTP_SYNC" = true ]; then
+    log "Fetching time from google.com..."
+
+    # -I / --head fetches headers only
+    # --connect-timeout 10 ensures we don't hang forever
+
+    HTTP_DATE=$(curl -s --head --connect-timeout 10 http://google.com | grep ^Date: | sed 's/Date: //g')
+
+    if [ -n "$HTTP_DATE" ]; then
+        log "Google says: $HTTP_DATE"
+
+        # Determine drift roughly (optional, or just set it)
+        # We just set it. 'date -s' handles many formats.
+        if date -s "$HTTP_DATE"; then
+            log "System time updated successfully via HTTP."
+
+            # Post-set fixups
+            if command -v chronyc &> /dev/null; then
+                log "Triggering chrony makestep again to lock in..."
+                chronyc -a makestep
+            fi
+        else
+            log "Failed to set system time using 'date -s'. Check permissions."
+            exit 1
+        fi
+    else
+        log "Failed to retrieve Date header from google.com. Network might be down or captive portal."
+        exit 1
+    fi
+fi
+
+log "Time sync complete. Current Date: $(date)"
+exit 0

@@ -32,6 +32,7 @@
     mode: '0644'
     owner: root
     group: root
+    force: true
   become: true
   register: _fetch_ca
   retries: 20
@@ -46,6 +47,7 @@
     mode: '0644'
     owner: root
     group: root
+    force: true
   become: true
   register: _fetch_middle_ca
   retries: 20

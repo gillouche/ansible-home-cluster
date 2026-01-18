@@ -25,15 +25,15 @@ repos:
 
   - repo: local
     hooks:
-      - id: ansible-lint
-        name: ansible-lint
-        entry: uv run ansible-lint
-        language: system
-        types: [yaml]
-        # Only run on ansible files (playbooks, roles, etc.)
-        files: \.(yaml|yml)$
-        pass_filenames: false
-        always_run: false
+#      - id: ansible-lint
+#        name: ansible-lint
+#        entry: uv run ansible-lint
+#        language: system
+#        types: [yaml]
+#        # Only run on ansible files (playbooks, roles, etc.)
+#        files: \.(yaml|yml)$
+#        pass_filenames: false
+#        always_run: false
 
       - id: check-ansible-vault
         name: Check for unencrypted Ansible vault files

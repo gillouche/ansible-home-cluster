@@ -1,0 +1,33 @@
+---
+# ==============================================================================
+# Controller Reset Playbook (macOS / Localhost)
+# ==============================================================================
+# This playbook cleans up artifacts and settings on the developer's machine.
+
+- name: Reset Controller DNS
+  import_playbook: includes/reset/reset_controller_dns.yml
+  tags: [dns, controller_dns]
+
+- name: Reset TLS Controller (Homelab Root CA)
+  hosts: localhost
+  gather_facts: true
+  become: false
+  tags: [tls, root_ca]
+  vars_files:
+    - ../inventories/group_vars/all/main.yml
+  tasks:
+    - name: Remove Homelab Root CA artifacts from controller
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ root_ca_cert_controller }}"
+        - "{{ root_ca_key_controller }}"
+        - "{{ root_ca_dir_controller }}/root_ca.ext"
+        - "{{ root_ca_dir_controller }}/root_ca.srl"
+
+    - name: Remove Homelab Root CA from macOS keychain
+      ansible.builtin.command: security delete-certificate -c "Homelab Root CA"
+      changed_when: true
+      failed_when: false
+      when: ansible_facts['os_family'] == 'Darwin'

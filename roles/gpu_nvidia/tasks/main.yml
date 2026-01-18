@@ -9,7 +9,7 @@
   become: true
 
 - name: Check if NVIDIA packages are installed
-  ansible.builtin.command: pacman -Qq {{ item }}
+  ansible.builtin.command: pacman -Qi {{ item }}
   loop:
     - nvidia-550xx-dkms
     - nvidia-550xx-utils
@@ -24,12 +24,20 @@
     cmd: yay -S --noconfirm nvidia-550xx-dkms nvidia-550xx-utils nvidia-550xx-settings opencl-nvidia-550xx
   become: true
   become_user: aur_builder
-  when: nvidia_packages_check.results | selectattr('rc', 'ne', 0) | list | length > 0
+  when: >
+    nvidia_packages_check.results | map(attribute='rc') | select('ne', 0) | list | length > 0
   changed_when: true
+
+- name: Check if NVIDIA runtime is already configured in containerd
+  ansible.builtin.command: grep -q "nvidia-container-runtime" /etc/containerd/config.toml
+  register: nvidia_runtime_check
+  failed_when: false
+  changed_when: false
+  become: true
 
 - name: Configure NVIDIA Container Toolkit
   ansible.builtin.command:
     cmd: nvidia-ctk runtime configure --runtime containerd
-  register: nvidia_ctk_config
-  changed_when: nvidia_ctk_config.rc == 0
+  when: nvidia_runtime_check.rc != 0
+  notify: Restart containerd
   become: true
