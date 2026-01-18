@@ -42,15 +42,6 @@
     - role: postgres
       tags: [k3s, postgres]
 
-- name: "Setup K3s Load Balancer"
-  hosts: server
-  gather_facts: true
-  become: true
-  tags: [k3s, k3s_lb]
-  roles:
-    - role: k3s_lb
-      tags: [k3s, k3s_lb]
-
 - name: "Verify Postgres VIP and HAProxy Readiness"
   hosts: localhost
   connection: local
@@ -64,6 +55,15 @@
         state: started
         timeout: 60
       tags: [k3s, postgres]
+
+- name: "Setup K3s Load Balancer"
+  hosts: server
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_lb]
+  roles:
+    - role: k3s_lb
+      tags: [k3s, k3s_lb]
 
 - name: Cluster prep
   hosts: k3s_cluster

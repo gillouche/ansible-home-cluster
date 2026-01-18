@@ -17,7 +17,7 @@ k3s_db_password: "{{ global_k3s_db_password }}"
 k3s_version: "{{ global_k3s_version | default('v1.31.2+k3s1') }}"
 
 # Escape $ for systemd unit files
-datastore_endpoint: "postgres://{{ k3s_db_user }}:{{ k3s_db_password | replace('$', '$$') }}@{{ k3s_db_host }}:{{ k3s_db_port }}/{{ k3s_db_name }}?sslmode=disable"
+datastore_endpoint: "postgres://{{ k3s_db_user }}:{{ k3s_db_password | replace('$', '$$') }}@{{ k3s_db_host }}:{{ k3s_db_port }}/{{ k3s_db_name }}"
 
 # Define a static token for the cluster to avoid propagation issues during setup
 # In a real-world scenario, this should be moved to a vault file.
