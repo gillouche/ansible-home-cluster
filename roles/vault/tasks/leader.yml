@@ -336,8 +336,11 @@
 
     - name: Wipe Vault Data Directory
       ansible.builtin.file:
-        path: "{{ vault_host_data_dir }}"
+        path: "{{ item }}"
         state: absent
+      loop:
+        - "{{ vault_host_data_dir }}"
+        - /root/.vault-token
 
     - name: Re-create Vault Data Directory
       ansible.builtin.file:
@@ -452,6 +455,60 @@
     - _leader_init is defined
     - (_leader_init.rc | default(1)) == 0
     - (_leader_init.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+
+- name: Sync valid root token back to controller if file is stale
+  block:
+    - name: Read root token from leader host
+      ansible.builtin.slurp:
+        src: /root/.vault-token
+      register: _leader_host_token
+      failed_when: false
+
+    - name: Verify leader host token
+      ansible.builtin.command: /usr/local/bin/vault token lookup -format=json
+      environment:
+        VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+        VAULT_SKIP_VERIFY: "true"
+        VAULT_TOKEN: "{{ _leader_host_token.content | b64decode | trim }}"
+      register: _leader_host_token_verify
+      when: _leader_host_token.content is defined
+      failed_when: false
+      changed_when: false
+
+    - name: Load cluster init JSON (for combining)
+      ansible.builtin.slurp:
+        src: "{{ vault_init_export_path | expanduser }}"
+      register: _leader_init_json_for_sync
+      delegate_to: localhost
+      run_once: true
+      failed_when: false
+
+    - name: Update controller cluster-init.json with valid token from host
+      ansible.builtin.copy:
+        dest: "{{ vault_init_export_path | expanduser }}"
+        mode: '0600'
+        content: |
+          {{
+            (_leader_init_json_for_sync.content | default('e30=') | b64decode | from_json)
+            | combine({'root_token': _leader_host_token.content | b64decode | trim})
+            | to_nice_json
+          }}
+      delegate_to: localhost
+      run_once: true
+      when:
+        - _leader_host_token_verify.rc | default(1) == 0
+        - (_leader_host_token.content | b64decode | trim) != _known_token
+
+    - name: Ensure vault_root_token fact is updated if host token was valid and file was stale
+      ansible.builtin.set_fact:
+        vault_root_token: "{{ _leader_host_token.content | b64decode | trim }}"
+      when:
+        - _leader_host_token_verify.rc | default(1) == 0
+        - (_leader_host_token.content | b64decode | trim) != _known_token
+  when:
+    - not vault_needs_init
+    - not (_rem_is_sealed | default(true))
+  become: true
 
 - name: Write /root/.vault-token when vault_root_token is available (leader)
   ansible.builtin.copy:

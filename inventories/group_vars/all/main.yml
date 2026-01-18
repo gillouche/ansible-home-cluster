@@ -54,6 +54,7 @@ user_home_root: /home
 
 # Vault
 global_vault_api_port: 18200
+global_vault_api_lb_port: 8200
 global_vault_cluster_port: 18201
 
 # Pi-hole

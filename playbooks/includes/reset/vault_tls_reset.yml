@@ -48,10 +48,13 @@
       become: true
       failed_when: false
 
-    - name: Wipe Vault home directory on host (DANGEROUS)
+    - name: Wipe Vault home and token on host (DANGEROUS)
       ansible.builtin.file:
-        path: "/home/vault"
+        path: "{{ item }}"
         state: absent
+      loop:
+        - "/home/vault"
+        - "/root/.vault-token"
       become: true
 
     - name: Delete existing ca-certificates
