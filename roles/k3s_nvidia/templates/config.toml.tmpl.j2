@@ -1,49 +1,26 @@
 {% raw %}
-[plugins.opt]
-  path = "{{ .NodeConfig.Containerd.Opt }}"
+version = 2
 
-[plugins.cri]
-  stream_server_address = "127.0.0.1"
-  stream_server_port = "10010"
-  enable_selinux = {{ .NodeConfig.SELinux }}
+[plugins."io.containerd.grpc.v1.cri"]
   sandbox_image = "{{ .NodeConfig.AgentConfig.PauseImage }}"
 
-[plugins.cri.cni]
-  bin_dir = "/var/lib/rancher/k3s/data/cni"
-  conf_dir = "/var/lib/rancher/k3s/agent/etc/cni/net.d"
+  [plugins."io.containerd.grpc.v1.cri".cni]
+    bin_dir = "/var/lib/rancher/k3s/data/cni"
+    conf_dir = "/var/lib/rancher/k3s/agent/etc/cni/net.d"
 
-[plugins.cri.containerd]
-  snapshotter = "overlayfs"
-  disable_snapshot_annotations = true
-  discard_unpacked_layers = false
+  [plugins."io.containerd.grpc.v1.cri".containerd]
+    snapshotter = "overlayfs"
 
-[plugins.cri.containerd.runtimes.runc]
-  runtime_type = "io.containerd.runc.v2"
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+      runtime_type = "io.containerd.runc.v2"
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+        SystemdCgroup = true
 
-[plugins.cri.containerd.runtimes.runc.options]
-  SystemdCgroup = true
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia]
+      runtime_type = "io.containerd.runc.v2"
+      privileged_without_host_devices = true
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
+        BinaryName = "/usr/bin/nvidia-container-runtime"
+        SystemdCgroup = true
 
-# NVIDIA Runtime Configuration
-[plugins.cri.containerd.runtimes."nvidia"]
-  runtime_type = "io.containerd.runc.v2"
-[plugins.cri.containerd.runtimes."nvidia".options]
-  BinaryName = "/usr/bin/nvidia-container-runtime-hook"
-  SystemdCgroup = true
-
-[plugins.cri.registry]
-  {{ if .PrivateRegistryConfig }}
-  {{ range $k, $v := .PrivateRegistryConfig.Configs }}
-  [plugins.cri.registry.configs."{{$k}}".auth]
-    {{ if $v.Auth }}
-    username = {{ printf "%q" $v.Auth.Username }}
-    password = {{ printf "%q" $v.Auth.Password }}
-    auth = {{ printf "%q" $v.Auth.Auth }}
-    identitytoken = {{ printf "%q" $v.Auth.IdentityToken }}
-    {{ end }}
-  {{ end }}
-  {{ range $k, $v := .PrivateRegistryConfig.Mirrors }}
-  [plugins.cri.registry.mirrors."{{$k}}"]
-    endpoint = [{{ range $i, $j := $v.Endpoints }}{{if $i}}, {{end}}{{printf "%q" $j}}{{end}}]
-  {{ end }}
-  {{ end }}
 {% endraw %}

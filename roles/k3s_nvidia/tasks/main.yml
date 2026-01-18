@@ -14,3 +14,17 @@
     dest: /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
     mode: '0644'
   become: true
+
+- name: Ensure runc symlink exists for nvidia-container-runtime
+  ansible.builtin.file:
+    src: /var/lib/rancher/k3s/data/current/bin/runc
+    dest: /usr/bin/runc
+    state: link
+  become: true
+
+- name: Configure nvidia-container-runtime ldconfig path
+  ansible.builtin.lineinfile:
+    path: /etc/nvidia-container-runtime/config.toml
+    regexp: '^ldconfig ='
+    line: 'ldconfig = "@/sbin/ldconfig"'
+  become: true
