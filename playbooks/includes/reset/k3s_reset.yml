@@ -1,3 +1,4 @@
+---
 # ==============================================================================
 # K3s Cluster Reset Playbook
 # ==============================================================================
@@ -48,6 +49,7 @@
 
     - name: Unmount all K3s and Kubelet mount points
       ansible.builtin.shell: |
+        set -o pipefail
         for m in $(grep -E '/var/lib/kubelet|/var/lib/rancher|/run/k3s' /proc/mounts | cut -d ' ' -f 2 | sort -r); do
           umount -l "$m" || true
         done
@@ -95,7 +97,7 @@
         - /etc/keepalived/conf.d/k3s-lb.conf
       register: _k3s_keepalived_clean
 
-    - name: Restart Keepalived to release VIPs
+    - name: Restart Keepalived to release VIPs # noqa: no-handler
       ansible.builtin.systemd:
         name: keepalived
         state: restarted
@@ -107,12 +109,14 @@
         pkill -9 -f k3s || true
         pkill -9 -f containerd-shim || true
       failed_when: false
+      changed_when: true
 
     - name: Verify no K3s processes are running
-      ansible.builtin.shell: "pgrep -a k3s"
+      ansible.builtin.command: "pgrep -a k3s"
       register: _k3s_running
       failed_when: _k3s_running.rc == 0
       ignore_errors: true
+      changed_when: false
 
     - name: Warn if K3s is still running
       ansible.builtin.fail:
@@ -151,7 +155,7 @@
         - /etc/systemd/system/haproxy.service.d/conf-d.conf
       register: _postgres_infra_clean
 
-    - name: Restart Keepalived/HAProxy to release Postgres VIPs
+    - name: Restart Keepalived/HAProxy to release Postgres VIPs # noqa: no-handler
       ansible.builtin.systemd:
         name: "{{ item }}"
         state: restarted

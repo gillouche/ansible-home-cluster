@@ -12,6 +12,7 @@
 
 - name: Restart pihole dns
   ansible.builtin.command: "podman exec {{ pihole_container_name }} pihole restartdns"
+  changed_when: true
   become: true
 
 - name: Restart keepalived

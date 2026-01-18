@@ -345,7 +345,8 @@
 
 - name: Set existing publish user fact
   ansible.builtin.set_fact:
-    _nexus_existing_publish_user: "{{ _nexus_users.json | selectattr('userId', 'equalto', artifactory_nexus_publish_user) | first | default({}) }}"
+    _nexus_existing_publish_user: >-
+      {{ _nexus_users.json | selectattr('userId', 'equalto', artifactory_nexus_publish_user) | first | default({}) }}
   when: _nexus_users.json | selectattr('userId', 'equalto', artifactory_nexus_publish_user) | list | length > 0
   no_log: true
 
@@ -409,7 +410,7 @@
   when: _nexus_vault_auth_test.status == 401
   register: _nexus_admin_rotated
 
-- name: Update working admin password fact if rotated
+- name: Update working admin password fact if rotated # noqa: no-handler
   ansible.builtin.set_fact:
     artifactory_nexus_admin_password_working: "{{ artifactory_nexus_admin_password }}"
   when: _nexus_admin_rotated is changed

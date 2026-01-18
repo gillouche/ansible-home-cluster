@@ -34,4 +34,4 @@
       become: true
       when:
         - (ansible_facts.get('os_family', '') | lower) == 'darwin'
-      ignore_errors: true
+      failed_when: false

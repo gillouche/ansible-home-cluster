@@ -225,6 +225,7 @@
 
 - name: Find pki intermediate issuer ID
   ansible.builtin.shell: |
+    set -o pipefail
     for issuer in {{ (_pki_issuers_list.stdout | default('[]', true) | from_json) | join(' ') }}; do
       subject=$(/usr/local/bin/vault read -format=json pki/issuer/$issuer | jq -r '.data.certificate' | openssl x509 -noout -subject)
       if echo "$subject" | grep -q "Homelab Intermediate CA"; then

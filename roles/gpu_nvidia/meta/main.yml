@@ -1,9 +1,10 @@
+---
 galaxy_info:
   author: your_name
   description: Nvidia GPU setup
   company: your_company
   license: MIT
-  min_ansible_version: 2.9
+  min_ansible_version: "2.9"
   platforms:
     - name: ArchLinux
       versions:

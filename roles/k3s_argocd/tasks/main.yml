@@ -43,6 +43,7 @@
   run_once: true
   become: true
   when: _argocd_notifications_secret_check.rc == 0
+  changed_when: true
 
 - name: Wait for argocd-secret to be available
   ansible.builtin.command: >-
@@ -63,10 +64,14 @@
   run_once: true
   become: true
   when: _argocd_secret_check.rc == 0
+  changed_when: true
 
 - name: Patch ArgoCD Server Deployment with hostAliases for Authelia
   ansible.builtin.command: >-
-    k3s kubectl patch deployment argocd-server -n {{ argocd_namespace }} --patch '{"spec": {"template": {"spec": {"hostAliases": [{"ip": "{{ reverse_proxy_virtual_ip }}", "hostnames": ["auth.k3s.gillouche.homelab"]}]}}}}'
+    k3s kubectl patch deployment argocd-server -n {{ argocd_namespace }} --patch
+    '{"spec": {"template": {"spec": {"hostAliases": [{"ip": "{{ reverse_proxy_virtual_ip }}",
+    "hostnames": ["auth.k3s.gillouche.homelab"]}]}}}}'
   delegate_to: "{{ groups['server'][0] }}"
   run_once: true
   become: true
+  changed_when: true

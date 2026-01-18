@@ -24,6 +24,7 @@
   become: true
 
 - name: Load Transit Token for Leader
+  when: vault_enable_transit_seal | default(false) | bool
   block:
     - name: Locate bootstrap transit token
       ansible.builtin.stat:
@@ -46,7 +47,6 @@
           {{ (_bootstrap_transit_token.content | b64decode | trim)
              if (_bootstrap_transit_token is defined and _bootstrap_transit_token.content is defined) else '' }}
       run_once: true
-  when: vault_enable_transit_seal | default(false) | bool
 
 - name: Render Vault configuration (leader)
   ansible.builtin.template:
@@ -441,7 +441,9 @@
 
 - name: Set vault_root_token from controller file (leader)
   ansible.builtin.set_fact:
-    vault_root_token: "{{ (_leader_init_json.content | b64decode | default('{}', true) | from_json).root_token | default(vault_root_token | default('')) }}"
+    vault_root_token: >-
+      {{ (_leader_init_json.content | b64decode | default('{}', true) | from_json).root_token |
+         default(vault_root_token | default('')) }}
   when:
     - (vault_root_token | default('') | length) == 0
     - (_leader_init_json.content is defined)
@@ -457,6 +459,10 @@
     - (_leader_init.stdout | default('') | regex_search('^\s*[\[{]')) != ''
 
 - name: Sync valid root token back to controller if file is stale
+  when:
+    - not vault_needs_init
+    - not (_rem_is_sealed | default(true))
+  become: true
   block:
     - name: Read root token from leader host
       ansible.builtin.slurp:
@@ -505,10 +511,7 @@
       when:
         - _leader_host_token_verify.rc | default(1) == 0
         - (_leader_host_token.content | b64decode | trim) != _known_token
-  when:
-    - not vault_needs_init
-    - not (_rem_is_sealed | default(true))
-  become: true
+
 
 - name: Write /root/.vault-token when vault_root_token is available (leader)
   ansible.builtin.copy:

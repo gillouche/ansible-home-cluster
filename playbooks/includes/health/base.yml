@@ -62,7 +62,9 @@
       ansible.builtin.assert:
         that:
           - _device_time.stdout | int >= hostvars['localhost']['_controller_time'].stdout | int
-        fail_msg: "Clock Drift Detected! Device time ({{ _device_time.stdout }}) is behind Controller time ({{ hostvars['localhost']['_controller_time'].stdout }})."
+        fail_msg: >-
+          Clock Drift Detected! Device time ({{ _device_time.stdout }}) is behind Controller time
+          ({{ hostvars['localhost']['_controller_time'].stdout }}).
         success_msg: "Clock is synchronized."
 
     - name: Verify Chrony is Synced
@@ -126,7 +128,8 @@
       ansible.builtin.command: >-
         openssl verify
         -CAfile {{ (inventory_hostname in (groups['vault_transit'] | default(['homeserver']))) |
-        ternary(tls_dir ~ '/api.crt', tls_dir ~ '/ca-bundle.pem') }}
+        ternary(tls_dir ~ '/api.crt',
+                tls_dir ~ '/ca-bundle.pem') }}
         {{ tls_dir }}/api.crt
       register: _tls_inspect_chain
       changed_when: false
@@ -398,8 +401,15 @@
     - name: Assert Base Infrastructure Health
       ansible.builtin.assert:
         that:
-          - (groups['dns_cluster'] | map('extract', hostvars, '_pihole_vip_dns_check') | select('defined') | map(attribute='rc', default=-1) | select('equalto', 0) | list | length) > 0
-          - (groups['vault_cluster'] | map('extract', hostvars, '_vault_node_health') | select('defined') | map(attribute='status', default=0) | intersect([200, 429]) | list | length) > 0
+          - (groups['dns_cluster'] | map('extract', hostvars, '_pihole_vip_dns_check') |
+             select('defined') | map(attribute='rc', default=-1) | select('equalto', 0) | list | length) > 0
+          - (groups['vault_cluster'] | map('extract', hostvars, '_vault_node_health') |
+             select('defined') | map(attribute='status', default=0) | intersect([200, 429]) | list | length) > 0
         fail_msg: "CRITICAL: Base Infrastructure (DNS or Vault) is DOWN. Cannot proceed to K3s layer."
         success_msg: "Base Infrastructure is healthy. Proceeding to K3s Platform layer."
-      ignore_errors: "{{ 'k3s_infra' not in ansible_run_tags and 'k3s_apps' not in ansible_run_tags and 'k3s' not in ansible_run_tags and 'all' not in ansible_run_tags }}"
+      # noqa: ignore-errors
+      ignore_errors: >-
+        {{ 'k3s_infra' not in ansible_run_tags and
+           'k3s_apps' not in ansible_run_tags and
+           'k3s' not in ansible_run_tags and
+           'all' not in ansible_run_tags }}

@@ -56,7 +56,8 @@
 
 - name: Map architecture names for HashiCorp
   ansible.builtin.set_fact:
-    hashi_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' if ansible_architecture == 'aarch64' else ansible_architecture }}"
+    hashi_arch: >-
+      {{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' if ansible_architecture == 'aarch64' else ansible_architecture }}
 
 - name: Force Vault update if current binary is incompatible
   ansible.builtin.set_fact:

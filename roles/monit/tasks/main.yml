@@ -1,5 +1,5 @@
 ---
-- name: Check if NetworkManager is installed
+- name: Check if NetworkManager is installed # noqa: command-instead-of-module
   ansible.builtin.command: systemctl is-active NetworkManager
   register: nm_check
   failed_when: false
@@ -17,7 +17,7 @@
     mode: '0644'
   become: true
   when: nm_check.rc == 0
-  notify: restart NetworkManager
+  notify: Restart NetworkManager
 
 - name: Check if /etc/resolv.conf is a symlink
   ansible.builtin.stat:
@@ -43,7 +43,7 @@
   become: true
 
 - name: Install Monit and dependencies
-  pacman:
+  community.general.pacman:
     name:
       - monit
       - networkmanager
@@ -71,18 +71,18 @@
   become: true
 
 - name: Ensure Monit service is enabled and started
-  systemd:
+  ansible.builtin.systemd:
     name: monit
     enabled: true
     state: started
   become: true
 
 - name: Configure Monit
-  template:
+  ansible.builtin.template:
     src: monitrc.j2
     dest: /etc/monitrc
     mode: '0700'
     owner: root
     group: root
-  notify: restart monit
+  notify: Restart Monit
   become: true

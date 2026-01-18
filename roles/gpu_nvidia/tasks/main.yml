@@ -28,7 +28,7 @@
   changed_when: true
 
 - name: Configure NVIDIA Container Toolkit
-  ansible.builtin.shell:
+  ansible.builtin.command:
     cmd: nvidia-ctk runtime configure --runtime containerd
   register: nvidia_ctk_config
   changed_when: nvidia_ctk_config.rc == 0

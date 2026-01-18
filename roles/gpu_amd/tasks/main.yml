@@ -20,7 +20,9 @@
   notify: Regenerate initramfs
 
 - name: Check if amdgpu is in mkinitcpio MODULES
-  ansible.builtin.shell: grep '^MODULES=' /etc/mkinitcpio.conf | grep -q amdgpu
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep '^MODULES=' /etc/mkinitcpio.conf | grep -q amdgpu
   register: _amdgpu_in_modules
   changed_when: false
   failed_when: false

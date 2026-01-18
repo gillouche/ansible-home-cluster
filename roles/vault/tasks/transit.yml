@@ -50,7 +50,7 @@
 - name: Check if Transit Vault certificate exists
   ansible.builtin.stat:
     path: "{{ vault_host_tls_dir }}/api.crt"
-    get_checksum: no
+    get_checksum: false
   register: _api_crt_stat
   become: true
 
@@ -335,7 +335,7 @@
     - (_vault_transit_token_output.changed or (not _transit_token_file_stat.stat.exists and _vault_transit_token_output.stdout is defined))
   register: _store_token_result
 
-- name: Update transit token fact after creation
+- name: Update transit token fact after creation # noqa: no-handler
   ansible.builtin.set_fact:
     vault_transit_token: "{{ (_vault_transit_token_output.stdout | from_json).auth.client_token }}"
   when: _store_token_result.changed

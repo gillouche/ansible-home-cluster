@@ -13,7 +13,7 @@
     uid: "{{ firefly_uid }}"
     group: "{{ firefly_group }}"
     home: "{{ firefly_home }}"
-    create_home: yes
+    create_home: true
     state: present
     system: true
     shell: /bin/bash
@@ -76,7 +76,7 @@
   ansible.builtin.user:
     name: "{{ ansible_user }}"
     groups: "{{ firefly_db_gid }}"
-    append: yes
+    append: true
   become: true
 
 - name: Verify backup path exists on controller

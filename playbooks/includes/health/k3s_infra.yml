@@ -10,7 +10,7 @@
     - name: Ensure facts are gathered # noqa: run-once
       ansible.builtin.set_fact:
         _health_facts_gathered: true
-      run_once: true
+      run_once: true # noqa: run-once
 
 - name: "Etcd Cluster Health Check"
   hosts: postgres
@@ -59,7 +59,10 @@
       failed_when: false
 
     - name: Check Postgres Ready (Command)
-      ansible.builtin.command: "podman exec {{ postgres_container_name }} pg_isready -U {{ postgres_db_user }} -p {{ global_postgres_port | default(5432) }}"
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name }} pg_isready
+        -U {{ postgres_db_user }}
+        -p {{ global_postgres_port | default(5432) }}
       register: _postgres_cmd_check
       become: true
       failed_when: false
@@ -97,7 +100,7 @@
         status_code: [200, 429, 405, 403]
       register: _k3s_vault_api_check
       failed_when: false
-      run_once: true
+      run_once: true # noqa: run-once
       delegate_to: "{{ groups['server'][0] }}"
 
     - name: Check K3s Service Status
@@ -109,7 +112,7 @@
     - name: Check Node Readiness (kubectl)
       ansible.builtin.command: k3s kubectl get nodes --no-headers
       register: _k3s_node_status
-      run_once: true
+      run_once: true # noqa: run-once
       delegate_to: "{{ groups['server'][0] }}"
       changed_when: false
       failed_when: false
@@ -150,7 +153,7 @@
     - name: Check ArgoCD Deployment Status
       ansible.builtin.command: k3s kubectl get deployment -n argocd -o json
       register: _argocd_deployment_status
-      run_once: true
+      run_once: true # noqa: run-once
       delegate_to: "{{ groups['server'][0] }}"
       changed_when: false
       failed_when: false
@@ -201,7 +204,7 @@
         src: "../../templates/health_summary_k3s_infra.j2"
         dest: /tmp/cluster-health-report-k3s-infra.txt
         mode: '0644'
-      run_once: true
+      run_once: true # noqa: run-once
       delegate_to: localhost
       vars:
         ansible_connection: local
@@ -209,7 +212,7 @@
     - name: Show health report # noqa: run-once
       ansible.builtin.pause:
         prompt: "{{ lookup('file', '/tmp/cluster-health-report-k3s-infra.txt') }}"
-      run_once: true
+      run_once: true # noqa: run-once
       delegate_to: localhost
       vars:
         ansible_connection: local
@@ -222,9 +225,15 @@
     - name: Assert K3s Platform Health
       ansible.builtin.assert:
         that:
-          - (groups['postgres'] | map('extract', hostvars, '_etcd_node_health') | select('defined') | map(attribute='status', default=0) | select('equalto', 200) | list | length) >= ((groups['postgres'] | length / 2) | round(0, 'ceil') | int)
+          - (groups['postgres'] | map('extract', hostvars, '_etcd_node_health') |
+             select('defined') | map(attribute='status', default=0) |
+             select('equalto', 200) | list | length) >=
+             ((groups['postgres'] | length / 2) | round(0, 'ceil') | int)
           - hostvars['localhost']._postgres_vip_check.state | default('skipped') in ['started', 'skipped']
-          - (groups['server'] | map('extract', hostvars, '_k3s_vip_status') | select('defined') | map(attribute='status', default=0) | intersect([200, 401]) | list | length) > 0
+          - (groups['server'] | map('extract', hostvars, '_k3s_vip_status') |
+             select('defined') | map(attribute='status', default=0) |
+             intersect([200, 401]) | list | length) > 0
         fail_msg: "CRITICAL: K3s Platform Infrastructure (Etcd, Postgres, or K3s VIP) is DOWN. Cannot proceed to workloads."
         success_msg: "K3s Platform is healthy. Proceeding to K3s Workloads layer."
+      # noqa: ignore-errors
       ignore_errors: "{{ 'k3s_apps' not in ansible_run_tags and 'all' not in ansible_run_tags }}"

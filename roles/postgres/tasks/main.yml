@@ -13,7 +13,7 @@
     uid: "{{ postgres_uid }}"
     group: "{{ postgres_group }}"
     home: "{{ postgres_home }}"
-    create_home: yes
+    create_home: true
     state: present
     system: true
     shell: /bin/bash
@@ -111,7 +111,7 @@
   register: _haproxy_dropin
   notify: Reload systemd
 
-- name: Force systemd reload if drop-in changed
+- name: Force systemd reload if drop-in changed # noqa: no-handler
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
@@ -146,7 +146,7 @@
   become: true
   register: _haproxy_start
 
-- name: Verify HAProxy is actually running
+- name: Verify HAProxy is actually running # noqa: no-handler command-instead-of-module
   ansible.builtin.command: "systemctl is-active {{ postgres_haproxy_service }}"
   register: _haproxy_status
   retries: 5
@@ -182,7 +182,8 @@
       scope: "{{ postgres_cluster_name }}"
       name: "{{ inventory_hostname }}"
       etcd3:
-        hosts: "{{ groups['postgres'] | sort | map('extract', hostvars, 'ansible_host') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
+        hosts: "{{ groups['postgres'] | sort | map('extract', hostvars, 'ansible_host') |
+                  join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
       postgresql:
         port: "{{ postgres_port | int }}"
         listen: "0.0.0.0:{{ postgres_port }}"
@@ -262,9 +263,13 @@
       PATRONI_RESTAPI_CONNECT_ADDRESS: "{{ hostvars[inventory_hostname].ansible_host }}:{{ postgres_patroni_port }}"
 
       # Etcd Configuration
-      ETCD_HOSTS: "{{ groups['etcd_cluster'] | sort | map('extract', hostvars, 'ansible_host') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
-      PATRONI_ETCD3_HOSTS: "{{ groups['etcd_cluster'] | sort | map('extract', hostvars, 'ansible_host') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
-      ETCD3_ENDPOINTS: "{{ groups['etcd_cluster'] | sort | map('extract', hostvars, 'ansible_host') | map('regex_replace', '^', 'http://') | join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
+      ETCD_HOSTS: "{{ groups['etcd_cluster'] | sort | map('extract', hostvars, 'ansible_host') |
+                     join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
+      PATRONI_ETCD3_HOSTS: "{{ groups['etcd_cluster'] | sort | map('extract', hostvars, 'ansible_host') |
+                            join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
+      ETCD3_ENDPOINTS: "{{ groups['etcd_cluster'] | sort | map('extract', hostvars, 'ansible_host') |
+                        map('regex_replace', '^', 'http://') |
+                        join(':' ~ (global_etcd_port | default(2379)) ~ ',') }}:{{ global_etcd_port | default(2379) }}"
       DCS_ENABLE_INTERNAL_ETCD: "false"
 
       # Authentication
@@ -292,13 +297,13 @@
   become: true
   register: _postgres_container
 
-- name: Wait for Postgres container to stabilize
+- name: Wait for Postgres container to stabilize # noqa: no-handler
   ansible.builtin.pause:
     seconds: 5
   become: false
   when: _postgres_container.changed
 
-- name: Verify Postgres container is running
+- name: Verify Postgres container is running # noqa: no-handler
   ansible.builtin.command: podman inspect {{ postgres_container_name }} --format '{{ '{{' }} .State.Running {{ '}}' }}'
   register: _postgres_running
   retries: 5
@@ -308,7 +313,7 @@
   become: true
   when: _postgres_container.changed
 
-- name: Ensure Patroni API is responding
+- name: Ensure Patroni API is responding # noqa: no-handler
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ postgres_patroni_port }}/health"
     status_code: 200
@@ -340,7 +345,14 @@
   ansible.builtin.shell:
     cmd: >
       podman exec {{ postgres_container_name }}
-      patronictl edit-config --force --set "postgresql.pg_hba=['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'local replication replicator trust', 'host replication replicator {{ lan_subnet }} md5', 'host {{ postgres_db_name }} {{ postgres_db_user }} {{ lan_subnet }} md5', 'host {{ postgres_db_name }} {{ postgres_db_user }} {{ k3s_cluster_cidr }} md5', 'host {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ lan_subnet }} md5', 'host {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ k3s_cluster_cidr }} md5', 'local all postgres trust', 'host all postgres {{ lan_subnet }} md5']"
+      patronictl edit-config --force
+      --set "postgresql.pg_hba=['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5',
+      'local replication replicator trust', 'host replication replicator {{ lan_subnet }} md5',
+      'host {{ postgres_db_name }} {{ postgres_db_user }} {{ lan_subnet }} md5',
+      'host {{ postgres_db_name }} {{ postgres_db_user }} {{ k3s_cluster_cidr }} md5',
+      'host {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ lan_subnet }} md5',
+      'host {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ k3s_cluster_cidr }} md5',
+      'local all postgres trust', 'host all postgres {{ lan_subnet }} md5']"
   become: true
   when: is_postgres_leader
   changed_when: true
@@ -362,6 +374,8 @@
   changed_when: _patroni_reload_res.rc == 0
 
 - name: Administrative tasks (Leader only)
+  when: is_postgres_leader
+  become: true
   block:
     - name: Ensure postgres database user has the correct password
       ansible.builtin.command:
@@ -459,8 +473,7 @@
       retries: 5
       delay: 5
       until: _alter_superuser.rc == 0
-  when: is_postgres_leader
-  become: true
+
 
 - name: Verify database connectivity with password (internal network)
   ansible.builtin.command:

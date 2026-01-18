@@ -6,7 +6,7 @@
       - min
   when: ansible_distribution is not defined
 
-- name: Check if NetworkManager is installed
+- name: Check if NetworkManager is installed # noqa: command-instead-of-module
   ansible.builtin.command: systemctl is-active NetworkManager
   register: nm_check
   failed_when: false
@@ -128,6 +128,7 @@
 
 - name: Force immediate time sync (HTTP fallback via Google)
   ansible.builtin.shell: |
+    set -o pipefail
     HTTP_DATE=$(curl -s --head --connect-timeout 5 http://google.com | grep ^Date: | sed 's/Date: //g')
     if [ -n "$HTTP_DATE" ]; then
       date -s "$HTTP_DATE"
@@ -148,6 +149,7 @@
 
 - name: Trigger another chrony sync if HTTP was used
   ansible.builtin.command: chronyc -a makestep
+  changed_when: true
   become: true
   when: is_arch and _http_sync is changed
   failed_when: false

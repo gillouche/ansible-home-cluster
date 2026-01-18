@@ -14,7 +14,7 @@
   become: true
   when: devices_manage_hostsfile | default(true) | bool
 
-- name: Check if NetworkManager is installed
+- name: Check if NetworkManager is installed # noqa: command-instead-of-module
   ansible.builtin.command: systemctl is-active NetworkManager
   register: nm_check
   failed_when: false

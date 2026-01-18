@@ -18,7 +18,7 @@
   become: true
   register: _etcd_dir_stat
 
-- name: Debug etcd directory existence
+- name: Debug etcd directory existence # noqa: no-handler
   ansible.builtin.debug:
     msg: "Directory {{ etcd_data_dir }} created/verified."
   when: _etcd_dir_stat.changed
@@ -40,7 +40,9 @@
       - --listen-peer-urls=http://0.0.0.0:{{ etcd_peer_port }}
       - --advertise-client-urls=http://{{ ansible_host | default(ansible_facts.default_ipv4.address) }}:{{ etcd_client_port }}
       - --listen-client-urls=http://0.0.0.0:{{ etcd_client_port }}
-      - --initial-cluster={{ groups['etcd_cluster'] | sort | map('extract', hostvars, ['ansible_host']) | zip(groups['etcd_cluster'] | sort) | map('format_etcd_peer', etcd_peer_port) | join(',') }}
+      - >-
+          --initial-cluster={{ groups['etcd_cluster'] | sort | map('extract', hostvars, ['ansible_host']) |
+          zip(groups['etcd_cluster'] | sort) | map('format_etcd_peer', etcd_peer_port) | join(',') }}
       - --initial-cluster-state=new
       - --initial-cluster-token={{ etcd_initial_cluster_token }}
     volumes:

@@ -32,6 +32,7 @@
 
     - name: Remove Homelab Root CA from macOS keychain
       ansible.builtin.command: security delete-certificate -c "Homelab Root CA"
+      changed_when: true
       failed_when: false
       when: ansible_facts['os_family'] == 'Darwin'
 

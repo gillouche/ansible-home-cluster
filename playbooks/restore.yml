@@ -32,6 +32,7 @@
 
     - name: Force immediate time sync (HTTP fallback via Google)
       ansible.builtin.shell: |
+        set -o pipefail
         HTTP_DATE=$(curl -s --head --connect-timeout 5 http://google.com | grep ^Date: | sed 's/Date: //g')
         if [ -n "$HTTP_DATE" ]; then
           date -s "$HTTP_DATE"
@@ -48,10 +49,11 @@
       changed_when: _http_sync.rc == 0
       failed_when: false
 
-    - name: Trigger another chrony sync if HTTP was used
+    - name: Trigger another chrony sync if HTTP was used # noqa: no-handler
       ansible.builtin.command: chronyc -a makestep
       when: _http_sync is changed
       failed_when: false
+      changed_when: true # It does change state if run
 
 # 1. Vault Transit (CRITICAL: Must be first to allow auto-unseal)
 - name: "Restore Vault Transit"
@@ -146,12 +148,12 @@
       register: _keepalived_start
 
     - name: Verify Keepalived is active
-      ansible.builtin.command: systemctl is-active keepalived
+      ansible.builtin.systemd:
+        name: keepalived
       register: _keepalived_status
       retries: 5
       delay: 2
-      until: _keepalived_status.rc == 0
-      changed_when: false
+      until: _keepalived_status.status.ActiveState == "active"
 
 - name: "Restore Internal Load Balancer"
   hosts: internal_lb_cluster
@@ -166,12 +168,12 @@
       register: _haproxy_start
 
     - name: Verify HAProxy is active
-      ansible.builtin.command: systemctl is-active haproxy
+      ansible.builtin.systemd:
+        name: haproxy
       register: _haproxy_status
       retries: 5
       delay: 2
-      until: _haproxy_status.rc == 0
-      changed_when: false
+      until: _haproxy_status.status.ActiveState == "active"
 
     - name: Start Keepalived
       ansible.builtin.systemd:
@@ -180,12 +182,12 @@
       register: _keepalived_start
 
     - name: Verify Keepalived is active
-      ansible.builtin.command: systemctl is-active keepalived
+      ansible.builtin.systemd:
+        name: keepalived
       register: _keepalived_status
       retries: 5
       delay: 2
-      until: _keepalived_status.rc == 0
-      changed_when: false
+      until: _keepalived_status.status.ActiveState == "active"
 
 - name: "Restore Edge Proxy (Caddy)"
   hosts: edge_proxy_cluster
@@ -208,12 +210,12 @@
       register: _keepalived_start
 
     - name: Verify Keepalived is active
-      ansible.builtin.command: systemctl is-active keepalived
+      ansible.builtin.systemd:
+        name: keepalived
       register: _keepalived_status
       retries: 5
       delay: 2
-      until: _keepalived_status.rc == 0
-      changed_when: false
+      until: _keepalived_status.status.ActiveState == "active"
 
 - name: "Restore Etcd (Postgres coordination)"
   hosts: etcd_cluster
@@ -230,7 +232,7 @@
         - "'already' not in _etcd_start.stderr"
 
     - name: Ensure Etcd container is running
-      ansible.builtin.command: podman inspect etcd --format '{{"{{"}}.State.Running{{"}}"}}'
+      ansible.builtin.command: podman inspect etcd --format '{{ "{{" }}.State.Running{{ "}}" }}'
       register: _etcd_running
       until: _etcd_running.stdout == 'true'
       retries: 10
@@ -265,12 +267,12 @@
       register: _haproxy_start
 
     - name: Verify HAProxy is active
-      ansible.builtin.command: "systemctl is-active {{ postgres_haproxy_service | default('haproxy') }}"
+      ansible.builtin.systemd:
+        name: "{{ postgres_haproxy_service | default('haproxy') }}"
       register: _haproxy_status
       retries: 5
       delay: 2
-      until: _haproxy_status.rc == 0
-      changed_when: false
+      until: _haproxy_status.status.ActiveState == "active"
 
     - name: Start Keepalived
       ansible.builtin.systemd:
@@ -279,12 +281,12 @@
       register: _keepalived_start
 
     - name: Verify Keepalived is active
-      ansible.builtin.command: systemctl is-active keepalived
+      ansible.builtin.systemd:
+        name: keepalived
       register: _keepalived_status
       retries: 5
       delay: 2
-      until: _keepalived_status.rc == 0
-      changed_when: false
+      until: _keepalived_status.status.ActiveState == "active"
 
     - name: Start Postgres container
       ansible.builtin.command: podman start postgres
@@ -295,7 +297,7 @@
         - "'already' not in _postgres_start.stderr"
 
     - name: Ensure Postgres container is running
-      ansible.builtin.command: podman inspect postgres --format '{{"{{"}}.State.Running{{"}}"}}'
+      ansible.builtin.command: podman inspect postgres --format '{{ "{{" }}.State.Running{{ "}}" }}'
       register: _pg_running
       until: _pg_running.stdout == 'true'
       retries: 10
@@ -311,8 +313,10 @@
       changed_when: false
 
     - name: Fix Kine sequence
+      changed_when: _kine_fix.rc == 0
       ansible.builtin.shell: |
         set -e
+        set -o pipefail
         # Identify the Patroni leader
         if ! command -v jq >/dev/null 2>&1; then
           echo "jq is missing, attempting to install it..."
@@ -320,14 +324,16 @@
         fi
 
         # We connect to the VIP to find the leader
-        LEADER_NAME=$(podman exec postgres patronictl -c /config/patroni.yml list -f json | jq -r '.[] | select(.Role == "Leader") | .Member')
+        LEADER_NAME=$(podman exec postgres patronictl -c /config/patroni.yml list -f json |
+                     jq -r '.[] | select(.Role == "Leader") | .Member')
         if [ "$LEADER_NAME" != "{{ inventory_hostname }}" ]; then
           echo "Current host is not the Patroni leader ($LEADER_NAME). Skipping Kine fix."
           exit 0
         fi
 
         podman exec -e PGPASSWORD='{{ global_k3s_db_password }}' postgres \
-        psql -h {{ postgres_virtual_ip | default('192.168.0.247') }} -p {{ postgres_proxy_port | default(15432) }} -U {{ global_k3s_db_user | default('k3s') }} \
+        psql -h {{ postgres_virtual_ip | default('192.168.0.247') }} \
+        -p {{ postgres_proxy_port | default(15432) }} -U {{ global_k3s_db_user | default('k3s') }} \
         -d {{ global_k3s_db_name | default('kubernetes') }} \
         -c "SELECT setval('kine_id_seq', (SELECT MAX(id) FROM kine));"
       when: inventory_hostname in groups['postgres']
@@ -337,6 +343,7 @@
     - name: Ensure Authelia database exists (Postgres Leader)
       ansible.builtin.shell: |
         set -e
+        set -o pipefail
         # Identify the Patroni leader
         if ! command -v jq >/dev/null 2>&1; then
           echo "jq is missing, attempting to install it..."
@@ -359,17 +366,24 @@
         fi
 
         # Check if database exists
-        DB_EXISTS=$(podman exec postgres psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '{{ postgres_authelia_db_name | default('authelia') }}';")
+        DB_EXISTS=$(podman exec postgres psql -U postgres -d postgres -tAc \
+                    "SELECT 1 FROM pg_database WHERE datname = '{{ postgres_authelia_db_name | default('authelia') }}';")
         if [ "$DB_EXISTS" != "1" ]; then
           echo "Creating Authelia database and user..."
           # Ensure user exists (ignore error if already exists)
-          podman exec postgres psql -U postgres -d postgres -c "CREATE USER {{ postgres_authelia_db_user | default('authelia') }} WITH PASSWORD '{{ postgres_authelia_db_password | default('changeme') }}';" || true
+          podman exec postgres psql -U postgres -d postgres -c \
+          "CREATE USER {{ postgres_authelia_db_user | default('authelia') }} WITH PASSWORD \
+          '{{ postgres_authelia_db_password | default('changeme') }}';" || true
           # Create database
-          podman exec postgres psql -U postgres -d postgres -c "CREATE DATABASE {{ postgres_authelia_db_name | default('authelia') }} OWNER {{ postgres_authelia_db_user | default('authelia') }};"
+          podman exec postgres psql -U postgres -d postgres -c \
+          "CREATE DATABASE {{ postgres_authelia_db_name | default('authelia') }} OWNER \
+          {{ postgres_authelia_db_user | default('authelia') }};"
           echo "Database {{ postgres_authelia_db_name | default('authelia') }} created"
         else
           # Ensure password is correct even if DB exists
-          podman exec postgres psql -U postgres -d postgres -c "ALTER USER {{ postgres_authelia_db_user | default('authelia') }} WITH PASSWORD '{{ postgres_authelia_db_password | default('changeme') }}';"
+          podman exec postgres psql -U postgres -d postgres -c \
+          "ALTER USER {{ postgres_authelia_db_user | default('authelia') }} WITH PASSWORD \
+          '{{ postgres_authelia_db_password | default('changeme') }}';"
           echo "Database {{ postgres_authelia_db_name | default('authelia') }} already exists, password updated"
         fi
 
@@ -382,7 +396,12 @@
         LAN_SUBNET="{{ lan_subnet | default('192.168.0.0/24') }}"
         K3S_CLUSTER_CIDR="{{ k3s_cluster_cidr | default('10.42.0.0/16') }}"
 
-        PG_HBA="['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'local replication replicator trust', 'host replication replicator $LAN_SUBNET md5', 'host $K3S_DB_NAME $K3S_DB_USER $LAN_SUBNET md5', 'host $K3S_DB_NAME $K3S_DB_USER $K3S_CLUSTER_CIDR md5', 'host $AUTHELIA_DB_NAME $AUTHELIA_DB_USER $LAN_SUBNET md5', 'host $AUTHELIA_DB_NAME $AUTHELIA_DB_USER $K3S_CLUSTER_CIDR md5', 'local all postgres trust', 'host all postgres $LAN_SUBNET md5']"
+        PG_HBA="['local all all trust', 'host all all 127.0.0.1/32 md5', 'host all all ::1/128 md5', 'local replication replicator trust', "
+        PG_HBA+="'host replication replicator $LAN_SUBNET md5', 'host $K3S_DB_NAME $K3S_DB_USER $LAN_SUBNET md5', "
+        PG_HBA+="'host $K3S_DB_NAME $K3S_DB_USER $K3S_CLUSTER_CIDR md5', "
+        PG_HBA+="'host $AUTHELIA_DB_NAME $AUTHELIA_DB_USER $LAN_SUBNET md5', "
+        PG_HBA+="'host $AUTHELIA_DB_NAME $AUTHELIA_DB_USER $K3S_CLUSTER_CIDR md5', "
+        PG_HBA+="'local all postgres trust', 'host all postgres $LAN_SUBNET md5']"
 
         podman exec postgres patronictl -c /config/patroni.yml edit-config --force --set "postgresql.pg_hba=$PG_HBA"
         # Force Patroni to reload the config and apply HBA changes
@@ -402,8 +421,11 @@
       args:
         executable: /bin/bash
       register: _authelia_restore_cmd
-      changed_when: "'created' in _authelia_restore_cmd.stdout or 'updated' in _authelia_restore_cmd.stdout or 'Creating' in _authelia_restore_cmd.stdout"
-      when: inventory_hostname in groups['postgres']
+      changed_when: >
+        'created' in _authelia_restore_cmd.stdout or
+        'updated' in _authelia_restore_cmd.stdout or
+        'Creating' in _authelia_restore_cmd.stdout
+      when: inventory_hostname in groups['postgres'] # noqa: yaml[line-length]
       no_log: true
 
 - name: "Restore Nexus"
@@ -467,7 +489,7 @@
       retries: 60
       delay: 5
       # Run only on the first node to avoid thundering herd on API
-      run_once: true
+      run_once: true # noqa: run-once
       delegate_to: "{{ groups['server'] | first }}"
       changed_when: false
 
@@ -518,7 +540,8 @@
   tasks:
     - name: Test K3s Vault API endpoint (Kubernetes Auth)
       ansible.builtin.uri:
-        url: "https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:{{ global_vault_api_port | default(8200) }}/v1/auth/kubernetes"
+        url: >-
+          https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:{{ global_vault_api_port | default(8200) }}/v1/auth/kubernetes
         method: GET
         validate_certs: false # Changed to false because /etc/tls/ca-bundle.pem might not exist yet if k3s is not installed
         status_code: [200, 429, 405, 403] # 405 or 403 are expected for GET on this endpoint without proper auth
@@ -529,7 +552,8 @@
 
     - name: Fetch current CA bundle from Vault
       ansible.builtin.uri:
-        url: "https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:{{ global_vault_api_port | default(8200) }}/v1/pki_int/ca/pem"
+        url: >-
+          https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:{{ global_vault_api_port | default(8200) }}/v1/pki_int/ca/pem
         method: GET
         validate_certs: false
         return_content: true

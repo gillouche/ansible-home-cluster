@@ -32,7 +32,9 @@
 
 - name: Set vault_root_token from controller file
   ansible.builtin.set_fact:
-    vault_root_token: "{{ (_cluster_init_loaded.content | b64decode | default('{}', true) | from_json).root_token | default(vault_root_token | default('')) }}"
+    vault_root_token: >-
+      {{ (_cluster_init_loaded.content | b64decode | default('{}', true) | from_json).root_token |
+         default(vault_root_token | default('')) }}
   when:
     - _cluster_init_loaded.content is defined
     - (_cluster_init_loaded.content | b64decode | regex_search('^\s*[\[{]')) != ''
@@ -47,6 +49,7 @@
   become: true
 
 - name: Load Transit Token for Followers
+  when: vault_enable_transit_seal | default(false) | bool
   block:
     - name: Locate bootstrap transit token
       ansible.builtin.stat:
@@ -68,8 +71,7 @@
         vault_transit_token: >-
           {{ (_bootstrap_transit_token.content | b64decode | trim)
              if (_bootstrap_transit_token is defined and _bootstrap_transit_token.content is defined) else '' }}
-      run_once: true
-  when: vault_enable_transit_seal | default(false) | bool
+      when: vault_enable_transit_seal | default(false) | bool
 
 - name: Render Vault configuration (followers)
   ansible.builtin.template:

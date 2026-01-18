@@ -68,7 +68,9 @@
       block:
         - name: Request wildcard certificate from Vault
           ansible.builtin.uri:
-            url: "https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/pki_int/issue/{{ vault_pki_int_role_name }}"
+            url: >-
+              https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}
+              /v1/pki_int/issue/{{ vault_pki_int_role_name }}
             method: POST
             body_format: json
             body:
@@ -104,13 +106,22 @@
             - _vault_wildcard_cert_raw.status != 200
             - _vault_wildcard_cert_raw.status != 403
 
+        - name: Identify source host for wildcard certificate propagation
+          ansible.builtin.set_fact:
+            _wildcard_source_host: "{{ groups['edge_proxy_cluster'] | intersect(ansible_play_hosts) | first }}"
+          when: (groups['edge_proxy_cluster'] | intersect(ansible_play_hosts) | length) > 0
+
         - name: Propagate wildcard certificate data to all hosts
           ansible.builtin.set_fact:
-            _tls_wildcard_cert_content: "{{ (([hostvars[groups['edge_proxy_cluster'] | intersect(ansible_play_hosts) | first]._vault_wildcard_cert_raw.json.data.certificate] + hostvars[groups['edge_proxy_cluster'] | intersect(ansible_play_hosts) | first]._vault_wildcard_cert_raw.json.data.ca_chain) | join('\n')) | trim }}"
-            _tls_wildcard_key_content: "{{ hostvars[groups['edge_proxy_cluster'] | intersect(ansible_play_hosts) | first]._vault_wildcard_cert_raw.json.data.private_key | trim }}"
+            _tls_wildcard_cert_content: >-
+              {{ (([hostvars[_wildcard_source_host]._vault_wildcard_cert_raw.json.data.certificate] +
+              hostvars[_wildcard_source_host]._vault_wildcard_cert_raw.json.data.ca_chain) | join('\n')) | trim }}
+            _tls_wildcard_key_content: >-
+              {{ hostvars[_wildcard_source_host]._vault_wildcard_cert_raw.json.data.private_key | trim }}
           when:
-            - hostvars[groups['edge_proxy_cluster'] | intersect(ansible_play_hosts) | first]._vault_wildcard_cert_raw is defined
-            - hostvars[groups['edge_proxy_cluster'] | intersect(ansible_play_hosts) | first]._vault_wildcard_cert_raw.json is defined
+            - _wildcard_source_host is defined
+            - hostvars[_wildcard_source_host]._vault_wildcard_cert_raw is defined
+            - hostvars[_wildcard_source_host]._vault_wildcard_cert_raw.json is defined
 
         - name: Fix literal newlines in certificate and key
           ansible.builtin.set_fact:

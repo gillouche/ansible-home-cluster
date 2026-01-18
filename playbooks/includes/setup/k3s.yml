@@ -147,12 +147,12 @@
   become: true
   tags: [k3s, vault, k3s_vault_config]
   pre_tasks:
-    - name: Load cluster init JSON # noqa: run-once
+    - name: "Load cluster init JSON" # noqa: run-once[task]
       ansible.builtin.slurp:
         src: "{{ vault_init_export_path | expanduser }}"
       register: _cluster_init_content
       delegate_to: localhost
-      run_once: true
+      run_once: true # noqa: run-once
       become: false
 
     - name: Set vault_root_token fact
@@ -215,7 +215,7 @@
         - _leader_token_slurp.content is defined
         - (_local_token_verify.status | default(0) != 200)
 
-    - name: Update local cluster init JSON if token was recovered from leader and is valid
+    - name: "Update local cluster init JSON if token was recovered from leader and is valid" # noqa: run-once[task]
       ansible.builtin.copy:
         dest: "{{ vault_init_export_path | expanduser }}"
         mode: '0600'
@@ -226,7 +226,7 @@
             | to_nice_json
           }}
       delegate_to: localhost
-      run_once: true
+      run_once: true # noqa: run-once
       become: false
       when:
         - _recovered_token_verify.status | default(0) == 200

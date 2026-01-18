@@ -102,7 +102,7 @@
   become: true
   register: _haproxy_start
 
-- name: Verify HAProxy is actually running
+- name: Verify HAProxy is actually running # noqa: command-instead-of-module no-handler
   ansible.builtin.command: systemctl is-active haproxy
   register: _haproxy_status
   retries: 5

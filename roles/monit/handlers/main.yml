@@ -1,12 +1,12 @@
 ---
-- name: restart monit
-  systemd:
+- name: Restart Monit
+  ansible.builtin.systemd:
     name: monit
     state: restarted
   become: true
 
-- name: restart NetworkManager
-  systemd:
+- name: Restart NetworkManager
+  ansible.builtin.systemd:
     name: NetworkManager
     state: restarted
   become: true

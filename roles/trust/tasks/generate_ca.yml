@@ -96,7 +96,8 @@
 
     - name: Install Homelab Root CA into macOS keychain
       ansible.builtin.command: >-
-        security add-trusted-cert -r trustRoot -k /Users/{{ hostvars['localhost'].ansible_facts['user_id'] }}/Library/Keychains/login.keychain-db
+        security add-trusted-cert -r trustRoot -k
+        /Users/{{ hostvars['localhost'].ansible_facts['user_id'] }}/Library/Keychains/login.keychain-db
         "{{ homelab_root_ca_cert_path }}"
       become: false
       changed_when: true

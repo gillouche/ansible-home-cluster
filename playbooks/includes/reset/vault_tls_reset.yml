@@ -20,14 +20,14 @@
         path: "{{ vault_cluster_ca_dir_controller }}"
         state: absent
       delegate_to: localhost
-      run_once: true
+      run_once: true # noqa: run-once
 
     - name: Reset Vault transit artifacts on controller
       ansible.builtin.file:
         path: "~/.local/share/ansible-home-cluster/vault-transit"
         state: absent
       delegate_to: localhost
-      run_once: true
+      run_once: true # noqa: run-once
 
     - name: Recreate controller Vault directories after reset
       ansible.builtin.file:
@@ -38,7 +38,7 @@
         - "{{ vault_cluster_ca_dir_controller }}"
         - "~/.local/share/ansible-home-cluster/vault-transit"
       delegate_to: localhost
-      run_once: true
+      run_once: true # noqa: run-once
 
     # Host-side cleanup
     - name: Stop and remove Vault container if present (host)
