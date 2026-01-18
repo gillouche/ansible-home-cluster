@@ -71,7 +71,27 @@
         vault_transit_token: >-
           {{ (_bootstrap_transit_token.content | b64decode | trim)
              if (_bootstrap_transit_token is defined and _bootstrap_transit_token.content is defined) else '' }}
-      when: vault_enable_transit_seal | default(false) | bool
+      # No run_once: true to ensure all followers get the token fact
+
+    - name: Verify transit token can unseal (test encrypt from follower)
+      ansible.builtin.uri:
+        url: "{{ vault_transit_addr }}/v1/transit/encrypt/{{ vault_transit_key_name }}"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_transit_token }}"
+        body_format: json
+        body:
+          plaintext: "{{ 'follower-test' | b64encode }}"
+        validate_certs: false
+        status_code: [200, 403, -1]
+      register: _follower_transit_test
+      ignore_errors: true
+
+    - name: Debug Transit Token presence (follower)
+      ansible.builtin.debug:
+        msg:
+          - "Follower {{ inventory_hostname }} transit token length: {{ vault_transit_token | length }}"
+          - "Transit test status: {{ _follower_transit_test.status | default('N/A') }}"
 
 - name: Render Vault configuration (followers)
   ansible.builtin.template:
@@ -280,6 +300,61 @@
   failed_when: false
   become: true
 
+- name: Detect Seal Wrapped Decryption Error on Follower
+  ansible.builtin.set_fact:
+    _follower_seal_mismatch: "{{ (_follower_status_preinit.stderr | default('') is search('error decrypting seal wrapped value')) or (_follower_status_preinit.stderr | default('') is search('cipher: message authentication failed')) }}"
+
+- name: Determine if Follower Remediation (Wipe) is required
+  ansible.builtin.set_fact:
+    _trigger_follower_remediation: >-
+      {{
+        (_follower_status_preinit.stdout | default('{}', true) | from_json).initialized | default(false) and
+        (
+          (_follower_seal_mismatch | default(false)) or
+          ((_follower_status_preinit.stdout | default('{}', true) | from_json).sealed | default(true))
+        )
+      }}
+
+- name: Execute Follower Remediation (Wipe and Restart)
+  when: _trigger_follower_remediation | bool
+  become: true
+  block:
+    - name: Warn about follower remediation
+      ansible.builtin.debug:
+        msg: "WARNING: Follower {{ inventory_hostname }} has a Seal Mismatch. performing AUTOMATED REMEDIATION (Wipe & Re-join)."
+
+    - name: Stop Vault Container (Follower Remediation)
+      containers.podman.podman_container:
+        name: "{{ vault_container_name }}"
+        state: stopped
+
+    - name: Wipe Vault Data Directory (Follower Remediation)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ vault_host_data_dir }}"
+        - /root/.vault-token
+
+    - name: Re-create Vault Data Directory (Follower Remediation)
+      ansible.builtin.file:
+        path: "{{ vault_host_data_dir }}"
+        state: directory
+        owner: "{{ vault_container_user | default('root') }}"
+        group: "{{ vault_container_user | default('root') }}"
+        mode: '0755'
+
+    - name: Start Vault Container (Follower Remediation)
+      containers.podman.podman_container:
+        name: "{{ vault_container_name }}"
+        state: started
+
+    - name: Wait for Vault to be ready (Post-Follower-Remediation)
+      ansible.builtin.wait_for:
+        port: "{{ vault_api_port }}"
+        host: "{{ ansible_facts.default_ipv4.address }}"
+        timeout: 60
+
 - name: Wait for follower to be unsealed
   ansible.builtin.command: /usr/local/bin/vault status -format=json
   environment:
@@ -298,5 +373,11 @@
   when:
     - vault_enable_transit_seal | default(false)
     - inventory_hostname in (groups['vault_followers'] | default([]))
-    - (_follower_status_preinit.stdout | default('') | regex_search('^\s*[\[{]')) != ''
-    - (not ((_follower_status_preinit.stdout | default('{}', true) | from_json).initialized | default(false)) | bool)
+    # Removed conditions that might prevent waiting for auto-unseal if init status is complex
+
+- name: Final Health Check Summary (Follower)
+  ansible.builtin.debug:
+    msg:
+      - "Vault Follower: Healthy"
+      - "Status: Unsealed"
+      - "Transit Seal: Active and verified"

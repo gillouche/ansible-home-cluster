@@ -34,7 +34,7 @@
     state: directory
     owner: "{{ firefly_db_uid }}"
     group: "{{ firefly_db_gid }}"
-    mode: '0755'
+    mode: '0775'
   loop:
     - "{{ firefly_data_dir }}"
     - "{{ firefly_upload_dir }}"
@@ -67,10 +67,24 @@
       APP_URL: "{{ firefly_app_url }}"
       TRUSTED_PROXIES: "**"
       SITE_OWNER: "{{ firefly_site_owner }}"
+      LOG_CHANNEL: errorlog
+      APP_DEBUG: "{{ firefly_app_debug | default('false') }}"
     volumes:
       - "{{ firefly_data_dir }}:/var/www/html/storage/database:rw"
       - "{{ firefly_upload_dir }}:/var/www/html/storage/upload:rw"
   become: true
+
+- name: Wait for Firefly to be ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ firefly_port }}/health"
+    method: GET
+    status_code: 200
+  register: _firefly_health
+  until: _firefly_health.status == 200
+  retries: 30
+  delay: 5
+  become: false
+  when: not ansible_check_mode
 
 - name: Ensure ansible_user is in firefly group for backup access
   ansible.builtin.user:

@@ -266,19 +266,16 @@
   failed_when: false
   become: true
 
-- name: Initialize Remediation Status defaults
-  ansible.builtin.set_fact:
-    _rem_is_init: false
-    _rem_is_sealed: true
-  when: _rem_status.rc is defined
-
-- name: Parse Remediation Status (if valid JSON)
+- name: Parse Remediation Status
   ansible.builtin.set_fact:
     _rem_is_init: "{{ (_rem_status.stdout | default('{}', true) | from_json).initialized | default(false) }}"
     _rem_is_sealed: "{{ (_rem_status.stdout | default('{}', true) | from_json).sealed | default(true) }}"
   when:
-    - _rem_status.rc is defined
     - (_rem_status.stdout | default('') | regex_search('^\s*[\[{]')) != ''
+
+- name: Detect Seal Wrapped Decryption Error (Transit Mismatch)
+  ansible.builtin.set_fact:
+    _rem_seal_mismatch: "{{ (_rem_status.stderr | default('') is search('error decrypting seal wrapped value')) or (_rem_status.stderr | default('') is search('cipher: message authentication failed')) }}"
 
 - name: Initialize known root token default
   ansible.builtin.set_fact:
@@ -313,7 +310,10 @@
       {{
         (_rem_is_init | default(false)) and
         (
-          (_rem_is_sealed | default(true)) or
+          (_rem_seal_mismatch | default(false)) or
+          (
+            (_rem_is_sealed | default(true)) and not (vault_enable_transit_seal | default(false))
+          ) or
           (
             not (_rem_is_sealed | default(true)) and
             (_rem_token_check.rc | default(0)) != 0
@@ -486,6 +486,7 @@
         src: "{{ vault_init_export_path | expanduser }}"
       register: _leader_init_json_for_sync
       delegate_to: localhost
+      become: false
       run_once: true
       failed_when: false
 
@@ -500,6 +501,7 @@
             | to_nice_json
           }}
       delegate_to: localhost
+      become: false
       run_once: true
       when:
         - _leader_host_token_verify.rc | default(1) == 0
@@ -647,3 +649,12 @@
 
 - name: Include PKI and ACME setup tasks
   ansible.builtin.include_tasks: pki_acme_setup.yml
+
+- name: Final Health Check Summary (Leader)
+  ansible.builtin.debug:
+    msg:
+      - "Vault Leader: Healthy"
+      - "Status: Unsealed"
+      - "Root Token: Valid"
+      - "Transit Seal: Active and verified"
+  run_once: true

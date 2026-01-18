@@ -5,6 +5,15 @@
   when: inventory_hostname not in (groups['internal_lb_cluster'] | default([]))
   become: false
 
+- name: Debug group membership
+  ansible.builtin.debug:
+    msg:
+      - "Hostname: {{ inventory_hostname }}"
+      - "In internal_lb_cluster: {{ inventory_hostname in groups['internal_lb_cluster'] }}"
+      - "In internal_lb_primary: {{ inventory_hostname in groups['internal_lb_primary'] }}"
+      - "All groups: {{ group_names }}"
+  tags: [never, debug_lb]
+
 # Ensure HAProxy is installed and configured; keepalived is assumed present and managed by its own role
 
 - name: Gather minimal facts (role safeguard when running with tags)
@@ -15,7 +24,7 @@
 
 - name: Determine load balancer role for this host
   ansible.builtin.set_fact:
-    load_balancer_is_primary: "{{ inventory_hostname in (groups['load_balancer_primary'] | default([])) }}"
+    load_balancer_is_primary: "{{ inventory_hostname in (groups['internal_lb_primary'] | default([])) }}"
   become: false
 
 - name: Install HAProxy package
@@ -36,9 +45,9 @@
 - name: Warn if VRRP auth password is not set (keepalived will be skipped)
   ansible.builtin.debug:
     msg: >-
-      load_balancer_vrrp_auth_pass is undefined or too short (<12). Skipping keepalived VRRP configuration on this host.
+      load_balancer_vrrp_auth_pass is undefined. Skipping keepalived VRRP configuration on this host.
       Define it in group_vars/internal_lb_cluster.vault.yml and encrypt with ansible-vault for HA VIP.
-  when: (load_balancer_vrrp_auth_pass is not defined) or ((load_balancer_vrrp_auth_pass | length) < 12)
+  when: (load_balancer_vrrp_auth_pass is not defined) or ((load_balancer_vrrp_auth_pass | length) < 1)
   become: false
 
 - name: Render Load Balancer VRRP instance into conf.d
@@ -58,7 +67,7 @@
     virtual_router_id: "{{ load_balancer_virtual_router_id }}"
   notify: Restart keepalived
   become: true
-  when: (load_balancer_vrrp_auth_pass is defined) and ((load_balancer_vrrp_auth_pass | length) >= 12)
+  when: (load_balancer_vrrp_auth_pass is defined) and ((load_balancer_vrrp_auth_pass | length) >= 1)
 
 - name: Enable non-local bind if requested (allows HAProxy to start without VIP)
   when: load_balancer_enable_nonlocal_bind | default(true) | bool

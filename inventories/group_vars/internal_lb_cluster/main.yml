@@ -26,7 +26,7 @@ load_balancer_haproxy_frontends:
       - "acl is_nexus hdr(host) -i nexus.{{ base_domain }}"
 
       # ACLs for Firefly
-      - "acl is_firefly hdr(host) -i firefly.{{ base_domain }}"
+      - "acl is_firefly hdr_dom(host) -i firefly"
 
       # ACLs for Loki
       - "acl is_loki hdr(host) -i loki.{{ base_domain }}"
@@ -89,15 +89,15 @@ load_balancer_haproxy_backends:
 
     servers:
       - name: vault1
-        addr: "{{ hostvars['homeserver'].ansible_host }}"
+        addr: "{{ hostvars[groups['vault_leader'][0]].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
         opts: "check check-ssl verify none sni str({{ load_balancer_virtual_ip }})"
       - name: vault2
-        addr: "{{ hostvars['rpi5b16g1ssd'].ansible_host }}"
+        addr: "{{ hostvars[groups['vault_followers'][0]].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
         opts: "check check-ssl verify none sni str({{ load_balancer_virtual_ip }})"
       - name: vault3
-        addr: "{{ hostvars['rpi5b16g2ssd'].ansible_host }}"
+        addr: "{{ hostvars[groups['vault_followers'][1]].ansible_host }}"
         port: "{{ global_vault_api_port | default(18200) }}"
         opts: "check check-ssl verify none sni str({{ load_balancer_virtual_ip }})"
 
@@ -107,10 +107,10 @@ load_balancer_haproxy_backends:
     default_server: "check inter 5s fall 2 rise 1"
     servers:
       - name: k3s_server1
-        addr: "{{ hostvars['homeserver'].ansible_host }}"
+        addr: "{{ hostvars[groups['server'][0]].ansible_host }}"
         port: 9000
       - name: k3s_server2
-        addr: "{{ hostvars['homeserver2'].ansible_host }}"
+        addr: "{{ hostvars[groups['server'][1]].ansible_host }}"
         port: 9000
 
   # Nexus Backend
@@ -139,11 +139,11 @@ load_balancer_haproxy_backends:
     http_check_expect: "status 401"
     servers:
       - name: k3s_server1
-        addr: "{{ hostvars['homeserver'].ansible_host }}"
+        addr: "{{ hostvars[groups['server'][0]].ansible_host }}"
         port: "{{ global_k3s_api_port }}"
         opts: "check check-ssl verify none ssl"
       - name: k3s_server2
-        addr: "{{ hostvars['homeserver2'].ansible_host }}"
+        addr: "{{ hostvars[groups['server'][1]].ansible_host }}"
         port: "{{ global_k3s_api_port }}"
         opts: "check check-ssl verify none ssl"
 
@@ -152,7 +152,7 @@ load_balancer_haproxy_backends:
     mode: http
     servers:
       - name: pihole_primary
-        addr: "{{ hostvars['homeserver'].ansible_host }}"
+        addr: "{{ hostvars[groups['dns_primary'][0]].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"
 
@@ -160,7 +160,7 @@ load_balancer_haproxy_backends:
     mode: http
     servers:
       - name: pihole_replica1
-        addr: "{{ hostvars['homeserver2'].ansible_host }}"
+        addr: "{{ hostvars[groups['dns_replicas'][0]].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"
 
@@ -169,10 +169,10 @@ load_balancer_haproxy_backends:
     balance: roundrobin
     servers:
       - name: pihole1
-        addr: "{{ hostvars['homeserver'].ansible_host }}"
+        addr: "{{ hostvars[groups['dns_primary'][0]].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"
       - name: pihole2
-        addr: "{{ hostvars['homeserver2'].ansible_host }}"
+        addr: "{{ hostvars[groups['dns_replicas'][0]].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"

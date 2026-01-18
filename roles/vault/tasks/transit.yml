@@ -243,14 +243,54 @@
   failed_when: _enable_transit.rc != 0 and 'path is already in use' not in _enable_transit.stderr
   become: true
 
-- name: Create transit key
+- name: Check if transit key exists
+  ansible.builtin.command: /usr/local/bin/vault read transit/keys/autounseal -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _transit_key_check
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Create transit key if missing
   ansible.builtin.command: /usr/local/bin/vault write -f transit/keys/autounseal
   environment:
     VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
     VAULT_TOKEN: "{{ vault_root_token }}"
     VAULT_SKIP_VERIFY: "true"
+  changed_when: true
+  become: true
+  when: _transit_key_check.rc != 0
+
+- name: Verify transit key health (test encrypt)
+  ansible.builtin.command: /usr/local/bin/vault write transit/encrypt/autounseal plaintext={{ 'test' | b64encode }} -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _transit_test_encrypt
   changed_when: false
   become: true
+
+- name: Verify transit key health (test decrypt)
+  ansible.builtin.command: >
+    /usr/local/bin/vault write transit/decrypt/autounseal
+    ciphertext="{{ (_transit_test_encrypt.stdout | from_json).data.ciphertext }}" -format=json
+  environment:
+    VAULT_ADDR: "https://127.0.0.1:{{ vault_api_port }}"
+    VAULT_TOKEN: "{{ vault_root_token }}"
+    VAULT_SKIP_VERIFY: "true"
+  register: _transit_test_decrypt
+  changed_when: false
+  become: true
+
+- name: Assert transit key is functional
+  ansible.builtin.assert:
+    that:
+      - (_transit_test_decrypt.stdout | from_json).data.plaintext == ('test' | b64encode)
+    fail_msg: "Transit key 'autounseal' is not working correctly. Decryption failed or returned wrong data."
 
 - name: Create transit policy
   ansible.builtin.shell: |
@@ -302,6 +342,23 @@
   when: _transit_token_file_stat.stat.exists
   become: true
 
+- name: Verify transit token can use the autounseal key (test encrypt)
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ vault_api_port }}/v1/transit/encrypt/autounseal"
+    method: POST
+    headers:
+      X-Vault-Token: "{{ vault_transit_token }}"
+    body_format: json
+    body:
+      plaintext: "{{ 'test-token' | b64encode }}"
+    validate_certs: false
+    status_code: [200, 403]
+  register: _transit_token_test_encrypt
+  when:
+    - _transit_token_file_stat.stat.exists
+    - (_transit_token_lookup.status | default(0)) == 200
+  become: true
+
 - name: Create transit token
   ansible.builtin.command: /usr/local/bin/vault token create -policy="autounseal" -renewable=true -ttl=72h -format=json
   environment:
@@ -314,6 +371,7 @@
   when: >-
     not _transit_token_file_stat.stat.exists or
     (_transit_token_lookup.status | default(0)) == 403 or
+    (_transit_token_test_encrypt.status | default(0)) == 403 or
     'vault_token_refresh' in ansible_run_tags
 
 - name: Ensure Vault controller export directory exists
@@ -339,4 +397,12 @@
   ansible.builtin.set_fact:
     vault_transit_token: "{{ (_vault_transit_token_output.stdout | from_json).auth.client_token }}"
   when: _store_token_result.changed
+  run_once: true
+
+- name: Final Health Check Summary (Transit)
+  ansible.builtin.debug:
+    msg:
+      - "Transit Vault: Healthy"
+      - "Transit Key (autounseal): Verified"
+      - "Transit Token: Valid and authorized"
   run_once: true

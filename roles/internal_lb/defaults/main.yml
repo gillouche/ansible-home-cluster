@@ -15,7 +15,7 @@ load_balancer_haproxy_service: haproxy
 load_balancer_keepalived_service: keepalived
 
 # VRRP Defaults
-load_balancer_vrrp_auth_pass: "secret-lb"
+load_balancer_vrrp_auth_pass: "secret-lb-password"
 
 load_balancer_haproxy_frontends: []
 load_balancer_haproxy_backends: []

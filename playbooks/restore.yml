@@ -141,6 +141,17 @@
         - _pihole_start.rc != 0
         - "'already' not in _pihole_start.stderr"
 
+    - name: Wait for Pi-hole to be ready
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ global_pihole_http_port | default(8080) }}/admin/index.php"
+        method: GET
+        status_code: [200, 302]
+      register: _pihole_health
+      until: _pihole_health.status in [200, 302]
+      retries: 30
+      delay: 5
+      become: false
+
     - name: Start Keepalived
       ansible.builtin.systemd:
         name: keepalived
@@ -202,6 +213,13 @@
       failed_when:
         - _caddy_start.rc != 0
         - "'already' not in _caddy_start.stderr"
+
+    - name: Wait for Caddy to be ready
+      ansible.builtin.wait_for:
+        port: 80
+        host: 127.0.0.1
+        timeout: 30
+      become: false
 
     - name: Start Keepalived
       ansible.builtin.systemd:
@@ -315,43 +333,124 @@
     - name: Fix Kine sequence
       changed_when: _kine_fix.rc == 0
       ansible.builtin.shell: |
-        set -e
         set -o pipefail
         # Identify the Patroni leader
         if ! command -v jq >/dev/null 2>&1; then
           echo "jq is missing, attempting to install it..."
-          sudo pacman -Sy --noconfirm jq
+          if ! sudo pacman -Sy --noconfirm jq; then
+            echo "Failed to install jq. Cannot proceed with leader detection."
+            exit 1
+          fi
         fi
 
-        # We connect to the VIP to find the leader
-        LEADER_NAME=$(podman exec postgres patronictl -c /config/patroni.yml list -f json |
-                     jq -r '.[] | select(.Role == "Leader") | .Member')
+        # Get patronictl list output
+        # Use a loop as patronictl might fail if etcd is just starting or network is transient
+        MAX_RETRIES=5
+        for i in $(seq 1 $MAX_RETRIES); do
+          # Try different config locations for Spilo/Patroni
+          CONFIG_PATH=""
+          if [ -f "/config/patroni.yml" ]; then
+            CONFIG_PATH="/config/patroni.yml"
+          elif [ -f "/home/postgres/patroni.yml" ]; then
+            CONFIG_PATH="/home/postgres/patroni.yml"
+          fi
+
+          if [ -n "$CONFIG_PATH" ]; then
+            PATRONI_LIST=$(podman exec postgres patronictl -c "$CONFIG_PATH" list -f json 2>/dev/null)
+          else
+            # Fallback to default if no config file found by shell (might be due to permission in shell)
+            PATRONI_LIST=$(podman exec postgres patronictl list -f json 2>/dev/null)
+          fi
+
+          if echo "$PATRONI_LIST" | jq -e . >/dev/null 2>&1; then
+            break
+          fi
+          echo "Waiting for patronictl to return valid JSON (attempt $i/$MAX_RETRIES)..."
+          sleep 5
+          if [ $i -eq $MAX_RETRIES ]; then
+            echo "Failed to get valid JSON from patronictl. Output was: $PATRONI_LIST"
+            exit 1
+          fi
+        done
+
+        LEADER_NAME=$(echo "$PATRONI_LIST" | jq -r '.[] | select(.Role == "Leader") | .Member')
+
+        if [ -z "$LEADER_NAME" ] || [ "$LEADER_NAME" = "null" ]; then
+          echo "Could not identify Patroni leader. Full output of patronictl list:"
+          echo "$PATRONI_LIST"
+          exit 1
+        fi
+
         if [ "$LEADER_NAME" != "{{ inventory_hostname }}" ]; then
           echo "Current host is not the Patroni leader ($LEADER_NAME). Skipping Kine fix."
           exit 0
         fi
 
+        # Check if kine table exists before attempting fix
+        KINE_EXISTS=$(podman exec postgres psql -U postgres -d {{ global_k3s_db_name | default('kubernetes') }} -tAc \
+                      "SELECT 1 FROM information_schema.tables WHERE table_name = 'kine';" 2>/dev/null || echo "0")
+
+        if [ "$KINE_EXISTS" != "1" ]; then
+          echo "Kine table does not exist in database {{ global_k3s_db_name | default('kubernetes') }}. Skipping."
+          exit 0
+        fi
+
+        # Run the fix
         podman exec -e PGPASSWORD='{{ global_k3s_db_password }}' postgres \
-        psql -h {{ postgres_virtual_ip | default('192.168.0.247') }} \
-        -p {{ postgres_proxy_port | default(15432) }} -U {{ global_k3s_db_user | default('k3s') }} \
-        -d {{ global_k3s_db_name | default('kubernetes') }} \
-        -c "SELECT setval('kine_id_seq', (SELECT MAX(id) FROM kine));"
+             psql -h 127.0.0.1 \
+             -p {{ postgres_port | default(5432) }} -U {{ global_k3s_db_user | default('k3s') }} \
+             -d {{ global_k3s_db_name | default('kubernetes') }} \
+             -c "SELECT setval('kine_id_seq', (SELECT MAX(id) FROM kine));" || {
+          echo "Failed to reset Kine sequence."
+          exit 1
+        }
+      args:
+        executable: /bin/bash
       when: inventory_hostname in groups['postgres']
       no_log: true
       register: _kine_fix
 
     - name: Ensure Authelia database exists (Postgres Leader)
       ansible.builtin.shell: |
-        set -e
         set -o pipefail
         # Identify the Patroni leader
         if ! command -v jq >/dev/null 2>&1; then
           echo "jq is missing, attempting to install it..."
-          sudo pacman -Sy --noconfirm jq
+          if ! sudo pacman -Sy --noconfirm jq; then
+            echo "Failed to install jq. Cannot proceed with leader detection."
+            exit 1
+          fi
         fi
 
-        # Get patronictl list output once to avoid multiple execs
-        PATRONI_LIST=$(podman exec postgres patronictl -c /config/patroni.yml list -f json)
+        # Get patronictl list output
+        MAX_RETRIES=5
+        for i in $(seq 1 $MAX_RETRIES); do
+          # Try different config locations for Spilo/Patroni
+          CONFIG_PATH=""
+          if [ -f "/config/patroni.yml" ]; then
+            CONFIG_PATH="/config/patroni.yml"
+          elif [ -f "/home/postgres/patroni.yml" ]; then
+            CONFIG_PATH="/home/postgres/patroni.yml"
+          fi
+
+          if [ -n "$CONFIG_PATH" ]; then
+            PATRONI_LIST=$(podman exec postgres patronictl -c "$CONFIG_PATH" list -f json 2>/dev/null)
+          else
+            # Fallback to default if no config file found by shell (might be due to permission in shell)
+            PATRONI_LIST=$(podman exec postgres patronictl list -f json 2>/dev/null)
+          fi
+
+          if echo "$PATRONI_LIST" | jq -e . >/dev/null 2>&1; then
+            break
+          fi
+          echo "Waiting for patronictl to return valid JSON (attempt $i/$MAX_RETRIES)..."
+          sleep 5
+          if [ $i -eq $MAX_RETRIES ]; then
+            echo "Failed to get valid JSON from patronictl. Output was: $PATRONI_LIST"
+            exit 1
+          fi
+        done
+
         LEADER_NAME=$(echo "$PATRONI_LIST" | jq -r '.[] | select(.Role == "Leader") | .Member')
 
         if [ -z "$LEADER_NAME" ] || [ "$LEADER_NAME" = "null" ]; then
@@ -367,7 +466,7 @@
 
         # Check if database exists
         DB_EXISTS=$(podman exec postgres psql -U postgres -d postgres -tAc \
-                    "SELECT 1 FROM pg_database WHERE datname = '{{ postgres_authelia_db_name | default('authelia') }}';")
+                    "SELECT 1 FROM pg_database WHERE datname = '{{ postgres_authelia_db_name | default('authelia') }}';" 2>/dev/null || echo "0")
         if [ "$DB_EXISTS" != "1" ]; then
           echo "Creating Authelia database and user..."
           # Ensure user exists (ignore error if already exists)
@@ -388,7 +487,6 @@
         fi
 
         # Update Patroni DCS with pg_hba rules
-        # Using variables with defaults for better robustness
         K3S_DB_NAME="{{ global_k3s_db_name | default('kubernetes') }}"
         K3S_DB_USER="{{ global_k3s_db_user | default('k3s') }}"
         AUTHELIA_DB_NAME="{{ postgres_authelia_db_name | default('authelia') }}"
@@ -403,11 +501,10 @@
         PG_HBA+="'host $AUTHELIA_DB_NAME $AUTHELIA_DB_USER $K3S_CLUSTER_CIDR md5', "
         PG_HBA+="'local all postgres trust', 'host all postgres $LAN_SUBNET md5']"
 
-        podman exec postgres patronictl -c /config/patroni.yml edit-config --force --set "postgresql.pg_hba=$PG_HBA"
+        podman exec postgres patronictl -c "$CONFIG_PATH" edit-config --force --set "postgresql.pg_hba=$PG_HBA"
         # Force Patroni to reload the config and apply HBA changes
-        # Added retries because networking might be unstable during restore (No route to host errors)
         for i in {1..5}; do
-          if podman exec postgres patronictl -c /config/patroni.yml reload {{ postgres_cluster_name | default('k3scluster') }} --force; then
+          if podman exec postgres patronictl -c "$CONFIG_PATH" reload {{ postgres_cluster_name | default('k3scluster') }} --force; then
             echo "Patroni cluster reloaded successfully"
             break
           else
@@ -442,6 +539,17 @@
         - _nexus_start.rc != 0
         - "'already' not in _nexus_start.stderr"
 
+    - name: Wait for Nexus to be ready
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ global_nexus_port | default(8081) }}/service/rest/v1/status"
+        method: GET
+        status_code: 200
+      register: _nexus_health
+      until: _nexus_health.status == 200
+      retries: 120
+      delay: 5
+      become: false
+
 - name: "Restore Firefly III"
   hosts: firefly
   gather_facts: false
@@ -455,6 +563,17 @@
       failed_when:
         - _firefly_start.rc != 0
         - "'already' not in _firefly_start.stderr"
+
+    - name: Wait for Firefly to be ready
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ global_firefly_port | default(8082) }}/health"
+        method: GET
+        status_code: 200
+      register: _firefly_health
+      until: _firefly_health.status == 200
+      retries: 60
+      delay: 5
+      become: false
 
 - name: "Restore K3s Cluster"
   hosts: server
