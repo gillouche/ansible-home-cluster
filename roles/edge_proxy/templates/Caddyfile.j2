@@ -1,35 +1,18 @@
 {
     # Global options
-    email {{ reverse_proxy_acme_email | default('noreply@gillouche.homelab') }}
-
-    # Disable auto-HTTPS. We manage certificates externally via Vault Agent/Script
-    # and simply load them. This avoids ACME complexity and wildcard limitations.
+    # Disable auto-HTTPS. We manage certificates externally via Ansible.
     auto_https off
-}
-
-vault.{{ base_domain }} {
-    bind {{ reverse_proxy_bind_ip | default('0.0.0.0') }}
-
-    # Load certificates from the shared/synced directory
-    tls /data/caddy/certificates/wildcard/wildcard.crt /data/caddy/certificates/wildcard/wildcard.key
-
-    reverse_proxy https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:8200 {
-        header_up Host {host}
-        header_up X-Forwarded-Proto https
-        header_up X-Forwarded-For {remote}
-        transport http {
-            tls_server_name {{ load_balancer_virtual_ip | default('192.168.0.253') }}
-            tls_trust_pool file /etc/ssl/certs/internal-ca-bundle.pem
-        }
-    }
 }
 
 {% if reverse_proxy_domains | default([]) | length > 0 %}
 {{ reverse_proxy_domains | join(', ') }} {
     bind {{ reverse_proxy_bind_ip | default('0.0.0.0') }}
 
-    # Load certificates from the shared/synced directory
-    tls /data/caddy/certificates/wildcard/wildcard.crt /data/caddy/certificates/wildcard/wildcard.key
+    # Load certificates from the host mount (container needs to mount these)
+    # The role mount logic must match these paths.
+    # We assume 'tls_target_dir' on host is mounted to /etc/tls/ in container or similar.
+    # For now, let's use the explicit paths defined in defaults.
+    tls {{ reverse_proxy_tls_cert_path }} {{ reverse_proxy_tls_key_path }}
 
     reverse_proxy {{ load_balancer_virtual_ip | default('192.168.0.253') }}:80 {
         header_up Host {host}
@@ -41,7 +24,7 @@ vault.{{ base_domain }} {
 :443 {
     bind {{ reverse_proxy_bind_ip | default('0.0.0.0') }}
 
-    tls /data/caddy/certificates/wildcard/wildcard.crt /data/caddy/certificates/wildcard/wildcard.key
+    tls {{ reverse_proxy_tls_cert_path }} {{ reverse_proxy_tls_key_path }}
 
     reverse_proxy {{ load_balancer_virtual_ip | default('192.168.0.253') }}:80 {
         header_up Host {host}

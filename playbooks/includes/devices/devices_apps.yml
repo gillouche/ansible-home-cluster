@@ -3,7 +3,6 @@
   hosts: firefly
   gather_facts: true
   become: false
-  tags: [apps, firefly]
   roles:
     - role: firefly
-      tags: [apps, firefly]
+      tags: [devices, devices_apps, firefly]

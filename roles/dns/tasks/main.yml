@@ -61,8 +61,8 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ pihole_user }}"
-    group: "{{ pihole_group }}"
+    owner: "1000"
+    group: "1000"
     mode: "0755"
   loop:
     - "{{ pihole_host_etc_dir }}"
@@ -295,14 +295,15 @@
     name: "{{ pihole_container_name }}"
     image: "{{ pihole_image }}"
     state: created
-    recreate: true
+    recreate: false
+    restart_policy: "no"
     hostname: "{{ inventory_hostname }}"
-    restart_policy: always
-    cap_add:
-      - NET_BIND_SERVICE
-      - CHOWN
-      - DAC_OVERRIDE
-      - SETFCAP
+    generate_systemd:
+      path: /etc/systemd/system/
+      restart_policy: always
+      names: true
+      container_prefix: container
+    # cap_add removed to fix idempotency (rootful podman covers this)
     published_ports:
       - "53:53/tcp"
       - "53:53/udp"
@@ -318,20 +319,12 @@
       FTLCONF_webserver_interface: "0.0.0.0"
       FTLCONF_dns_interface: "0.0.0.0"
     volumes:
-      - "{{ pihole_host_etc_dir }}/:/etc/pihole/"
-      - "{{ pihole_host_dnsmasq_dir }}/:/etc/dnsmasq.d/"
+      - "{{ pihole_host_etc_dir }}:/etc/pihole/"
+      - "{{ pihole_host_dnsmasq_dir }}:/etc/dnsmasq.d/"
   become: true
   notify: Restart pihole systemd
 
-- name: Install Pi-hole systemd service unit
-  ansible.builtin.template:
-    src: pihole.service.j2
-    dest: "/etc/systemd/system/container-{{ pihole_container_name }}.service"
-    owner: root
-    group: root
-    mode: '0644'
-  become: true
-  notify: Restart pihole systemd
+
 
 - name: Enable and start Pi-hole systemd service
   ansible.builtin.systemd:

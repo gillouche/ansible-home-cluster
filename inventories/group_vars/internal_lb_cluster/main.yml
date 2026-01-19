@@ -4,10 +4,7 @@
 # This keeps HAProxy generic and Vault-specific wiring in inventory/group vars.
 
 load_balancer_haproxy_frontends:
-  - name: vault_front
-    bind: "{{ load_balancer_virtual_ip }}:8200"
-    default_backend: vault_back
-    mode: tcp
+
 
   - name: http_in
     bind: "{{ load_balancer_virtual_ip }}:80"
@@ -70,36 +67,7 @@ load_balancer_haproxy_frontends:
     default_backend: traefik_http_back
 
 load_balancer_haproxy_backends:
-  - name: vault_back
-    mode: tcp
-    balance: roundrobin
 
-    # Session Persistence (Stickiness)
-    stick_table: "type ip size 200k expire 30m"
-    stick_on: "src"
-
-    # Use HTTP check (over SSL because servers have check-ssl)
-    # This prevents "TLS handshake error ... connection reset by peer" logs in Vault
-    # caused by HAProxy doing just TCP connect+SSL handshake and closing.
-    extra:
-      - "option httpchk GET /v1/sys/health"
-      - "http-check send meth GET uri /v1/sys/health hdr Host {{ load_balancer_virtual_ip }}"
-
-    default_server: "check inter 5s fall 2 rise 1"
-
-    servers:
-      - name: vault1
-        addr: "{{ hostvars[groups['vault_leader'][0]].ansible_host }}"
-        port: "{{ global_vault_api_port | default(18200) }}"
-        opts: "check check-ssl verify none sni str({{ load_balancer_virtual_ip }})"
-      - name: vault2
-        addr: "{{ hostvars[groups['vault_followers'][0]].ansible_host }}"
-        port: "{{ global_vault_api_port | default(18200) }}"
-        opts: "check check-ssl verify none sni str({{ load_balancer_virtual_ip }})"
-      - name: vault3
-        addr: "{{ hostvars[groups['vault_followers'][1]].ansible_host }}"
-        port: "{{ global_vault_api_port | default(18200) }}"
-        opts: "check check-ssl verify none sni str({{ load_balancer_virtual_ip }})"
 
   - name: traefik_http_back
     mode: http

@@ -44,8 +44,13 @@
   containers.podman.podman_container:
     name: "{{ artifactory_nexus_container_name }}"
     image: "{{ artifactory_nexus_image }}"
-    state: started
-    restart_policy: unless-stopped
+    state: created
+    generate_systemd:
+      path: /etc/systemd/system/
+      restart_policy: always
+      names: true
+      container_prefix: container
+    restart_policy: "no"
     user: "{{ artifactory_nexus_uid }}:{{ artifactory_nexus_gid }}"
     env:
       INSTALL4J_ADD_VM_PARAMS: "-Dnexus.wizard.enabled=false -Djava.util.prefs.userRoot=/nexus-data/javaprefs"
@@ -56,10 +61,19 @@
       - "{{ artifactory_nexus_port }}:8081"
       - "5000:5000"
   become: true
+  notify: Restart Nexus
+
+- name: Enable and start Nexus systemd service
+  ansible.builtin.systemd:
+    name: "container-{{ artifactory_nexus_container_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
 
 - name: Wait for Nexus to be ready
   ansible.builtin.uri:
-    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/status"
+    url: "http://127.0.0.1:{{ artifactory_nexus_port }}/service/rest/v1/status"
     status_code: 200
     validate_certs: false
   register: _nexus_status
@@ -93,7 +107,7 @@
 
 - name: Try to authenticate with current password
   ansible.builtin.uri:
-    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    url: "http://127.0.0.1:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password_current }}"
     force_basic_auth: true
@@ -113,7 +127,7 @@
 
 - name: Try to authenticate with default password
   ansible.builtin.uri:
-    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    url: "http://127.0.0.1:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password_current }}"
     force_basic_auth: true
@@ -136,7 +150,7 @@
 
 - name: Final attempt to authenticate
   ansible.builtin.uri:
-    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    url: "http://127.0.0.1:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password_current }}"
     force_basic_auth: true

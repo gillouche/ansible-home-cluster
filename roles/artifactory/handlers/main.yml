@@ -1,0 +1,7 @@
+---
+- name: Restart Nexus
+  ansible.builtin.systemd:
+    name: "container-{{ artifactory_nexus_container_name }}"
+    state: restarted
+    daemon_reload: true
+  become: true

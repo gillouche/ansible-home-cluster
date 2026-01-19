@@ -21,12 +21,13 @@
 
 - name: Install Legacy NVIDIA drivers (550xx) from AUR (1080Ti)
   ansible.builtin.command:
-    cmd: yay -S --noconfirm nvidia-550xx-dkms nvidia-550xx-utils nvidia-550xx-settings opencl-nvidia-550xx
+    cmd: yay -S --noconfirm --needed nvidia-550xx-dkms nvidia-550xx-utils nvidia-550xx-settings opencl-nvidia-550xx
   become: true
   become_user: aur_builder
   when: >
     nvidia_packages_check.results | map(attribute='rc') | select('ne', 0) | list | length > 0
-  changed_when: true
+  register: yay_install
+  changed_when: "'Packages (' in yay_install.stdout"
 
 - name: Check if NVIDIA runtime is already configured in containerd
   ansible.builtin.command: grep -q "nvidia-container-runtime" /etc/containerd/config.toml
@@ -39,5 +40,4 @@
   ansible.builtin.command:
     cmd: nvidia-ctk runtime configure --runtime containerd
   when: nvidia_runtime_check.rc != 0
-  notify: Restart containerd
   become: true

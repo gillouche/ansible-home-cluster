@@ -1,56 +1,81 @@
-- name: Fetch Intermediate CAs to controller for bundle creation
-  ansible.builtin.get_url:
-    url: >-
-      https://{{ hostvars[groups['vault_leader'][0]].ansible_host }}:{{ vault_api_port }}/v1/{{ item.path }}/ca/pem
-    dest: "{{ tls_cluster_ca_dir_controller | expanduser }}/{{ item.name }}.pem"
-    mode: '0644'
-    validate_certs: false
-    force: true
-  loop:
-    - { path: 'pki_int', name: 'intermediate-ca' }
-    - { path: 'pki', name: 'middle-ca' }
+---
+- name: Ensure PKI directory exists
+  ansible.builtin.file:
+    path: "{{ tls_controller_pki_dir }}"
+    state: directory
+    mode: '0700'
 
-- name: Create CA bundle on controller
-  ansible.builtin.shell: |
-    for f in "{{ tls_cluster_ca_dir_controller | expanduser }}/intermediate-ca.pem" \
-             "{{ tls_cluster_ca_dir_controller | expanduser }}/middle-ca.pem" \
-             "{{ root_ca_cert_controller | expanduser }}"; do
-      cat "$f"
-      echo ""
-    done > "{{ tls_cluster_ca_dir_controller | expanduser }}/ca-bundle.pem"
-  changed_when: false
+# --- Root CA ---
 
-- name: Browser and System Trust (macOS)
-  when:
-    - hostvars['localhost'].ansible_facts['os_family'] == 'Darwin'
-    - tls_trust_ca_on_controller | default(false) | bool
-  become: false
-  block:
-    - name: Get local certificate fingerprint
-      ansible.builtin.command: openssl x509 -noout -fingerprint -sha256 -in "{{ root_ca_cert_controller | expanduser }}"
-      register: _local_cert_fingerprint
-      changed_when: false
+- name: Check for existing Root CA key
+  ansible.builtin.stat:
+    path: "{{ tls_root_ca_key_path }}"
+  register: _root_ca_key_stat
 
-    - name: Check if Homelab Root CA is in macOS keychain
-      ansible.builtin.shell: |
-        set -o pipefail
-        security find-certificate -c "Homelab Root CA" -p | openssl x509 -noout -fingerprint -sha256
-      register: _macos_cert_check
-      failed_when: false
-      changed_when: false
+- name: Generate Root CA Private Key
+  community.crypto.openssl_privatekey:
+    path: "{{ tls_root_ca_key_path }}"
+    type: RSA
+    size: 4096
+  when: not _root_ca_key_stat.stat.exists
 
-    - name: Remove old Homelab Root CA from macOS keychain if fingerprint mismatch
-      ansible.builtin.command: security delete-certificate -c "Homelab Root CA"
-      when:
-        - _macos_cert_check.rc == 0
-        - _local_cert_fingerprint.stdout not in _macos_cert_check.stdout
-      changed_when: true
 
-    - name: Trust Root CA in macOS keychain (controller)
-      ansible.builtin.command: >-
-        security add-trusted-cert -r trustRoot
-        -k /Users/{{ hostvars['localhost'].ansible_facts['user_id'] }}/Library/Keychains/login.keychain-db
-        "{{ root_ca_cert_controller | expanduser }}"
-      become: false
-      when: _macos_cert_check.rc != 0 or _local_cert_fingerprint.stdout not in _macos_cert_check.stdout
-      changed_when: true
+- name: Generate Root CA CSR
+  community.crypto.openssl_csr:
+    path: "{{ tls_controller_pki_dir }}/root_ca.csr"
+    privatekey_path: "{{ tls_root_ca_key_path }}"
+    common_name: "{{ tls_root_ca_common_name }}"
+    basic_constraints:
+      - "CA:TRUE"
+    key_usage:
+      - keyCertSign
+      - cRLSign
+
+- name: Check for existing Root CA cert
+  ansible.builtin.stat:
+    path: "{{ tls_root_ca_crt_path }}"
+  register: _root_ca_crt_stat
+
+- name: Generate Root CA Certificate
+  community.crypto.x509_certificate:
+    path: "{{ tls_root_ca_crt_path }}"
+    csr_path: "{{ tls_controller_pki_dir }}/root_ca.csr"
+    privatekey_path: "{{ tls_root_ca_key_path }}"
+    provider: selfsigned
+    selfsigned_not_after: "+{{ tls_root_ca_validity_days }}d"
+  when: not _root_ca_crt_stat.stat.exists
+
+
+
+# --- Wildcard Cert ---
+
+- name: Generate Wildcard Private Key
+  community.crypto.openssl_privatekey:
+    path: "{{ tls_wildcard_key_path }}"
+    type: RSA
+    size: 2048
+
+- name: Generate Wildcard CSR
+  community.crypto.openssl_csr:
+    path: "{{ tls_wildcard_csr_path }}"
+    privatekey_path: "{{ tls_wildcard_key_path }}"
+    common_name: "{{ tls_wildcard_common_name }}"
+    subject_alt_name: "{{ tls_wildcard_sans }}"
+    basic_constraints:
+      - "CA:FALSE"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    extended_key_usage:
+      - serverAuth
+      - clientAuth
+
+- name: Sign Wildcard Certificate with Root CA
+  community.crypto.x509_certificate:
+    path: "{{ tls_wildcard_crt_path }}"
+    csr_path: "{{ tls_wildcard_csr_path }}"
+    ownca_path: "{{ tls_root_ca_crt_path }}"
+    ownca_privatekey_path: "{{ tls_root_ca_key_path }}"
+    provider: ownca
+    ownca_not_after: "+{{ tls_wildcard_validity_days }}d"
+    ownca_not_before: "-1d"

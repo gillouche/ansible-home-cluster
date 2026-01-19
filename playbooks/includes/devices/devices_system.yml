@@ -3,37 +3,36 @@
   hosts: all
   gather_facts: true
   become: false
-  tags: [system]
   roles:
     - role: facts
-      tags: [system, facts]
+      tags: [devices, devices_system, facts]
     - role: ntp
-      tags: [system, ntp]
+      tags: [devices, devices_system, ntp]
     - role: devices_os
-      tags: [system, os]
+      tags: [devices, devices_system, os]
     - role: utils
-      tags: [system, utils]
+      tags: [devices, devices_system, utils]
     - role: aur
-      tags: [system, aur, aur_rebuild_yay]
+      tags: [devices, devices_system, aur]
     - role: firewall
-      tags: [system, firewall]
+      tags: [devices, devices_system, firewall]
     - role: containers
-      tags: [system, containers]
+      tags: [devices, devices_system, containers]
     - role: monit
-      tags: [system, monit]
+      tags: [devices, devices_system, monit]
 
 - name: "Setup AMD GPU"
   hosts: homeserver
   gather_facts: true
   become: false
-  tags: [system, gpu]
   roles:
     - role: gpu_amd
+      tags: [devices, devices_system, gpu_amd]
 
 - name: "Setup Nvidia GPU"
   hosts: homeserver2
   gather_facts: true
   become: false
-  tags: [system, gpu]
   roles:
     - role: gpu_nvidia
+      tags: [devices, devices_system, gpu_nvidia]

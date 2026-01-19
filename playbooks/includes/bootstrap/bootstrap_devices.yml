@@ -3,10 +3,6 @@
   hosts: all
   gather_facts: false
   become: false
-  tags:
-    - never
-    - bootstrap_devices
-
   vars:
     devices_bootstrap_user: alarm
     devices_bootstrap_pubkey: "{{ lookup('env','HOME') + '/.ssh/id_ed25519_local.pub' }}"
@@ -66,4 +62,6 @@
 
   roles:
     - role: devices_ssh
+      tags: [bootstrap, bootstrap_devices, bootstrap_devices_ssh]
     - role: devices_network
+      tags: [bootstrap, bootstrap_devices, bootstrap_devices_network]

@@ -8,9 +8,6 @@ reverse_proxy_virtual_ip: "192.168.0.252"
 reverse_proxy_bind_ip: "{{ reverse_proxy_virtual_ip }}"
 reverse_proxy_primary_host: "homeserver2"
 
-# Default ACME email if not provided in group_vars
-reverse_proxy_acme_email: "noreply@{{ base_domain | default('gillouche.homelab') }}"
-
 # Resolver IP to prefer on reverse proxy hosts when managing /etc/resolv.conf.
 reverse_proxy_resolver_ip: "{{ pihole_virtual_ip | default('192.168.0.251') }}"
 
@@ -21,8 +18,9 @@ reverse_proxy_public_resolver: "1.1.1.1"
 # Domains to serve (list of hostnames/FQDNs)
 reverse_proxy_domains: []
 
-# Vault ACME directory URL consumed by Caddy.
-# Defaults to localhost since Caddy runs in host network mode to reach the local Vault.
-reverse_proxy_acme_ca_url: "https://127.0.0.1:{{ vault_api_port | default(18200) }}/v1/pki_int/acme/directory"
+# Static TLS paths (pushed by tls role)
+reverse_proxy_tls_cert_path: "/etc/tls/live/wildcard.pem"
+reverse_proxy_tls_key_path: "/etc/tls/live/wildcard.key"
+
 reverse_proxy_root_dir: "{{ user_home_root | default('/home') }}/reverse_proxy"
 reverse_proxy_data_dir: "{{ reverse_proxy_root_dir }}/data"

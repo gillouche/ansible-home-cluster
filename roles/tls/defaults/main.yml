@@ -1,29 +1,28 @@
 ---
+# TLS Role Defaults - Controller PKI
 
-# Controller Cluster CA paths (source of truth)
-tls_cluster_ca_dir_controller: "{{ vault_cluster_ca_dir_controller }}"
-tls_cluster_ca_cert_controller: "{{ root_ca_cert_controller }}"
-tls_cluster_ca_key_controller: "{{ root_ca_key_controller }}"
+# Controller Paths
+tls_controller_pki_dir: "{{ lookup('env', 'HOME') }}/.local/share/ansible-home-cluster/pki"
+tls_root_ca_key_path: "{{ tls_controller_pki_dir }}/root-ca.key"
+tls_root_ca_crt_path: "{{ tls_controller_pki_dir }}/root-ca.crt"
+tls_wildcard_key_path: "{{ tls_controller_pki_dir }}/wildcard.key"
+tls_wildcard_csr_path: "{{ tls_controller_pki_dir }}/wildcard.csr"
+tls_wildcard_crt_path: "{{ tls_controller_pki_dir }}/wildcard.pem"
 
-# SAN customization (added to hostnames, FQDN and local IP/127.0.0.1)
-tls_additional_san_ips: []
-tls_additional_san_dns: []
+# Root CA Configuration
+tls_root_ca_common_name: "Homelab Root CA"
+tls_root_ca_validity_days: 3650
 
-# Cert validity (days)
-tls_server_cert_days: 1825
+# Wildcard Configuration
+tls_wildcard_common_name: "*.gillouche.homelab"
+tls_wildcard_sans:
+  - "DNS:*.gillouche.homelab"
+  - "DNS:gillouche.homelab"
+  - "DNS:*.k3s.gillouche.homelab"
+  - "DNS:*.pihole.gillouche.homelab"
+tls_wildcard_validity_days: 365
 
-# Toggle to generate server certificate for the host
-tls_generate_server_cert: false
-
-# Wildcard certificate configuration (for edge proxy)
-tls_wildcard_cert_enabled: false
-tls_wildcard_cert_name: "wildcard"
-tls_wildcard_domains: []
-tls_wildcard_vault_token: ""
-tls_wildcard_dest_dir: "/etc/tls/wildcard"
-
-# Group to allow non-root read access to private keys (optional)
-tls_group_name: "tls"
-
-# Vault API Port (defaults to global setting)
-vault_api_port: "{{ global_vault_api_port | default(18200) }}"
+# Target Node Paths
+tls_target_dir: "/etc/tls"
+tls_target_live_dir: "{{ tls_target_dir }}/live"
+tls_ca_bundle_path: "{{ tls_target_dir }}/ca-bundle.pem"

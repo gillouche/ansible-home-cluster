@@ -5,11 +5,10 @@
   become: true
 
 - name: Restart Postgres
-  containers.podman.podman_container:
-    name: "{{ postgres_container_name }}"
-    image: "{{ postgres_image }}"
-    state: started
-    restart: true
+  ansible.builtin.systemd:
+    name: "container-{{ postgres_container_name }}"
+    state: restarted
+    daemon_reload: true
   become: true
 
 - name: Restart haproxy

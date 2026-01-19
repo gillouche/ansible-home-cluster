@@ -5,15 +5,6 @@
   when: inventory_hostname not in (groups['internal_lb_cluster'] | default([]))
   become: false
 
-- name: Debug group membership
-  ansible.builtin.debug:
-    msg:
-      - "Hostname: {{ inventory_hostname }}"
-      - "In internal_lb_cluster: {{ inventory_hostname in groups['internal_lb_cluster'] }}"
-      - "In internal_lb_primary: {{ inventory_hostname in groups['internal_lb_primary'] }}"
-      - "All groups: {{ group_names }}"
-  tags: [never, debug_lb]
-
 # Ensure HAProxy is installed and configured; keepalived is assumed present and managed by its own role
 
 - name: Gather minimal facts (role safeguard when running with tags)

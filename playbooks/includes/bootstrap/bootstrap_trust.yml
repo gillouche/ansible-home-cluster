@@ -1,0 +1,32 @@
+- name: "Generate Homelab Root CA (Controller)"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  tags: [bootstrap, bootstrap_trust]
+  tasks:
+    - name: Generate PKI Artifacts
+      ansible.builtin.include_role:
+        name: tls
+        tasks_from: controller
+        public: true
+
+    - name: Determine Keychain Path and Privileges
+      ansible.builtin.set_fact:
+        _keychain_path: >-
+          {{ (lookup('env', 'HOME') + '/Library/Keychains/login.keychain-db')
+             if tls_controller_install_keychain | default('login') == 'login'
+             else '/Library/Keychains/System.keychain' }}
+        _keychain_become: "{{ tls_controller_install_keychain | default('login') != 'login' }}"
+      when: ansible_os_family == "Darwin"
+
+    - name: Trust Root CA (macOS Controller)
+      ansible.builtin.command: >-
+        security add-trusted-cert -d -r trustRoot -k "{{ _keychain_path }}" "{{ tls_root_ca_crt_path }}"
+      become: "{{ _keychain_become }}"
+      when: ansible_os_family == "Darwin"
+      register: _trust_ca
+      failed_when:
+        - _trust_ca.rc != 0
+        - "'The specified item already exists' not in _trust_ca.stderr"
+      changed_when: _trust_ca.rc == 0

@@ -3,7 +3,7 @@
   hosts: all
   gather_facts: false
   become: false
-  tags: [base, container_status]
+  tags: [health_base, container_status]
   tasks:
     - name: Get User Podman Containers
       ansible.builtin.command: >
@@ -24,7 +24,7 @@
   hosts: localhost
   gather_facts: true
   become: false
-  tags: [base, health_local]
+  tags: [health_base, health_local]
   vars:
     ansible_connection: local
   tasks:
@@ -45,7 +45,7 @@
 - name: "System Clock Health Check"
   hosts: all
   gather_facts: false
-  tags: [base, health_time]
+  tags: [health_base, health_time]
   tasks:
     - name: Check Device System Clock
       ansible.builtin.command: date +%s
@@ -75,41 +75,12 @@
         success_msg: "Chrony tracking is normal."
       when: _chrony_tracking.rc == 0
 
-- name: "Vault Cluster Health Check"
-  hosts: vault_cluster
-  gather_facts: true
-  become: false
-  tags: [base, health_vault]
-  vars_files:
-    - ../../../roles/vault/defaults/main.yml
-  pre_tasks:
-    - name: Load cluster init JSON # noqa: run-once
-      ansible.builtin.slurp:
-        src: "{{ vault_init_export_path | expanduser }}"
-      register: _cluster_init_content
-      delegate_to: localhost
-      run_once: true
-      failed_when: false
-
-    - name: Set vault_root_token fact
-      ansible.builtin.set_fact:
-        vault_root_token: "{{ (_cluster_init_content.content | b64decode | from_json).root_token }}"
-      when: _cluster_init_content.content is defined
-  tasks:
-    - name: Query Vault health status (Individual Nodes)
-      ansible.builtin.uri:
-        url: "https://{{ ansible_host }}:{{ vault_api_port }}/v1/sys/health"
-        method: GET
-        status_code: [200, 429, 501, 503]
-        validate_certs: false
-      register: _vault_node_health
-      failed_when: false
 
 - name: "TLS Health Check"
   hosts: all
   gather_facts: true
   become: false
-  tags: [base, health_tls]
+  tags: [health_base, health_tls]
   tasks:
     - name: Check for api.crt
       ansible.builtin.stat:
@@ -137,11 +108,46 @@
       become: true
       when: _tls_cert_stat.stat.exists
 
+- name: "Certificate Expiration Check"
+  hosts: all
+  gather_facts: true
+  become: true
+  tags: [health_base, health_certs]
+  vars:
+    day_seconds: 86400
+  tasks:
+    - name: Check Root CA Expiration
+      ansible.builtin.shell: |
+        openssl x509 -enddate -noout -in /etc/tls/ca-bundle.pem | cut -d= -f2 | xargs -I{} date -d "{}" +%s
+      register: _root_ca_expiry_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Calculate Root CA Days Remaining
+      ansible.builtin.set_fact:
+        _root_ca_days_remaining: "{{ ((_root_ca_expiry_cmd.stdout | int) - (ansible_date_time.epoch | int)) // day_seconds }}"
+      when: _root_ca_expiry_cmd.rc == 0
+
+    - name: Check Wildcard Cert Expiration (Edge Proxy Only)
+      ansible.builtin.shell: |
+        openssl x509 -enddate -noout -in /etc/tls/live/wildcard.pem | cut -d= -f2 | xargs -I{} date -d "{}" +%s
+      register: _wildcard_cert_expiry_cmd
+      changed_when: false
+      failed_when: false
+      when: inventory_hostname in groups['edge_proxy_cluster']
+
+    - name: Calculate Wildcard Cert Days Remaining
+      ansible.builtin.set_fact:
+        _wildcard_cert_days_remaining: "{{ ((_wildcard_cert_expiry_cmd.stdout | int) - (ansible_date_time.epoch | int)) // day_seconds }}"
+      when:
+        - inventory_hostname in groups['edge_proxy_cluster']
+        - _wildcard_cert_expiry_cmd.rc == 0
+
 - name: "Pi-hole Health Check"
   hosts: dns_cluster
   gather_facts: true
   become: false
-  tags: [base, health_dns]
+  tags: [health_base, health_dns]
   tasks:
     - name: Verify DNS resolution via Pi-hole VIP
       ansible.builtin.command: "dig +short @{{ pihole_virtual_ip }} google.com"
@@ -165,42 +171,22 @@
           - "STDERR: {{ _pihole_local_dns_check.stderr }}"
       when: _pihole_local_dns_check.rc != 0 or _pihole_local_dns_check.stdout == ""
 
-- name: "Internal Load Balancer Health Check (Infrastructure)"
-  hosts: internal_lb_cluster
-  gather_facts: true
-  become: false
-  tags: [base, health_lb, health_lb_base]
-  tasks:
-    - name: Verify Vault Health via Load Balancer VIP
-      ansible.builtin.uri:
-        url: "https://{{ load_balancer_virtual_ip }}:{{ vault_api_port }}/v1/sys/health"
-        method: GET
-        status_code: [200, 429]
-        validate_certs: false
-      register: _lb_vault_health_check
-      failed_when: false
+
 
 
 - name: "Reverse Proxy Health Check"
   hosts: edge_proxy_cluster
   gather_facts: true
   become: false
-  tags: [base, health_proxy]
+  tags: [health_base, health_proxy]
   vars_files:
     - ../../../roles/edge_proxy/defaults/main.yml
   tasks:
     - name: Check Wildcard Certificate Presence
       ansible.builtin.stat:
-        path: "{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard/wildcard.crt"
+        path: "/etc/tls/live/wildcard.pem"
       register: _proxy_wildcard_stat
-
-    - name: Verify Backend Reachability (HAProxy) from Proxy
-      ansible.builtin.uri:
-        url: "https://{{ load_balancer_virtual_ip }}:{{ vault_api_port }}/v1/sys/health"
-        method: GET
-        validate_certs: false
-      register: _proxy_backend_check
-      failed_when: false
+      become: true
 
     - name: Check Keepalived VIP Status (Edge Proxy)
       ansible.builtin.command: ip addr show
@@ -222,7 +208,7 @@
   hosts: artifactory
   gather_facts: true
   become: false
-  tags: [base, health_nexus]
+  tags: [health_base, health_nexus]
   vars_files:
     - ../../../inventories/group_vars/artifactory/vault.yml
     - ../../../roles/artifactory/defaults/main.yml
@@ -250,7 +236,7 @@
   hosts: firefly
   gather_facts: true
   become: false
-  tags: [base, health_firefly]
+  tags: [health_base, health_firefly]
   vars_files:
     - ../../../roles/firefly/defaults/main.yml
   tasks:
@@ -266,30 +252,8 @@
   hosts: localhost
   gather_facts: false
   become: false
-  tags: [base, health_external]
+  tags: [health_base, health_external]
   tasks:
-    - name: Verify Vault via External Proxy (HTTPS) # noqa: command-instead-of-module
-      ansible.builtin.command: >-
-        curl -v -k --silent --output /dev/null --write-out "%{http_code}"
-        --resolve vault.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
-        https://vault.{{ base_domain }}/v1/sys/health
-      register: _external_vault_ready_cmd
-      changed_when: false
-      failed_when: false
-
-    - name: Debug External Vault
-      ansible.builtin.debug:
-        msg:
-          - "RC: {{ _external_vault_ready_cmd.rc }}"
-          - "STDOUT: {{ _external_vault_ready_cmd.stdout }}"
-          - "STDERR: {{ _external_vault_ready_cmd.stderr }}"
-      when: _external_vault_ready_cmd.stdout | int not in [200, 429]
-
-    - name: Set Vault status fact
-      ansible.builtin.set_fact:
-        _external_vault_ready:
-          status: "{{ _external_vault_ready_cmd.stdout | int if _external_vault_ready_cmd.stdout | length > 0 else 0 }}"
-
     - name: Verify Pi-hole Primary via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
         curl -v -k -L --silent --output /dev/null --write-out "%{http_code}"
@@ -371,7 +335,7 @@
 - name: "Base Infrastructure Health Report"
   hosts: localhost
   gather_facts: false
-  tags: [base, health_summary]
+  tags: [health_base, health_summary]
   vars_files:
     - ../../../inventories/group_vars/all/main.yml
   tasks:
@@ -396,16 +360,14 @@
 - name: "Layer 1 Checkpoint: Base Infrastructure"
   hosts: localhost
   gather_facts: false
-  tags: [base, health_checkpoint]
+  tags: [health_base, health_checkpoint]
   tasks:
     - name: Assert Base Infrastructure Health
       ansible.builtin.assert:
         that:
           - (groups['dns_cluster'] | map('extract', hostvars, '_pihole_vip_dns_check') |
              select('defined') | map(attribute='rc', default=-1) | select('equalto', 0) | list | length) > 0
-          - (groups['vault_cluster'] | map('extract', hostvars, '_vault_node_health') |
-             select('defined') | map(attribute='status', default=0) | intersect([200, 429]) | list | length) > 0
-        fail_msg: "CRITICAL: Base Infrastructure (DNS or Vault) is DOWN. Cannot proceed to K3s layer."
+        fail_msg: "CRITICAL: Base Infrastructure (DNS) is DOWN. Cannot proceed to K3s layer."
         success_msg: "Base Infrastructure is healthy. Proceeding to K3s Platform layer."
       # noqa: ignore-errors
       ignore_errors: >-

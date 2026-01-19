@@ -1,0 +1,23 @@
+---
+- name: "Restore DNS Cluster (Pi-hole)"
+  hosts: dns_cluster
+  gather_facts: false
+  become: true
+  tags: [restore_base, restore_dns]
+  tasks:
+    - name: Start Pi-hole container
+      ansible.builtin.command: podman start pihole
+      register: _pihole_start
+      changed_when: _pihole_start.rc == 0
+      failed_when:
+        - _pihole_start.rc != 0
+        - "'already' not in _pihole_start.stderr"
+
+    - name: Wait for Pi-hole DNS to be ready (Local)
+      ansible.builtin.command: dig +short @127.0.0.1 google.com
+      register: _pihole_check
+      until: _pihole_check.rc == 0 and _pihole_check.stdout != ""
+      retries: 30
+      delay: 2
+      failed_when: false
+      changed_when: false

@@ -5,25 +5,20 @@
 
 # 1. System: Facts, NTP, OS, Utils, AUR, Firewall, Containers
 - name: System Setup
-  import_playbook: includes/setup/system.yml
-  tags: [system]
+  import_playbook: includes/devices/devices_system.yml
+  tags: [devices_system]
 
-# 2. Vault: Init, Transit, Leader, Followers
-- name: Vault Setup
-  import_playbook: includes/setup/vault.yml
-  tags: [vault]
+# 2. Trust: Distribute Root CA to All Devices
+- name: Trust Distribution
+  import_playbook: includes/devices/devices_trust.yml
+  tags: [devices_trust]
 
 # 3. Infrastructure: TLS Provisioning, DNS, Load Balancer, Edge Proxy
 - name: Infrastructure Setup
-  import_playbook: includes/setup/infrastructure.yml
-  tags: [infra]
+  import_playbook: includes/devices/devices_infrastructure.yml
+  tags: [devices_infrastructure]
 
-# 4. Trust: Distribute Root CA to All Devices
-- name: Trust Distribution
-  import_playbook: includes/setup/trust.yml
-  tags: [trust, tls, root_ca_dist]
-
-# 5. Applications: Firefly
+# 4. Applications: Firefly
 - name: Applications Setup
-  import_playbook: includes/setup/apps.yml
-  tags: [apps]
+  import_playbook: includes/devices/devices_apps.yml
+  tags: [devices_apps]

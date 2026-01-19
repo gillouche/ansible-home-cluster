@@ -4,13 +4,13 @@
 # ==============================================================================
 
 - name: Run base health checks
-  import_playbook: includes/health/base.yml
-  tags: base
+  import_playbook: includes/health/health_base.yml
+  tags: [health_base]
 
 - name: Run k3s infra health checks
-  import_playbook: includes/health/k3s_infra.yml
-  tags: [k3s, k3s_infra]
+  import_playbook: includes/health/health_k3s_infra.yml
+  tags: [health_k3s, health_k3s_infra]
 
 - name: Run k3s apps health checks
-  import_playbook: includes/health/k3s_apps.yml
-  tags: [k3s, k3s_apps]
+  import_playbook: includes/health/health_k3s_apps.yml
+  tags: [health_k3s, health_k3s_apps]

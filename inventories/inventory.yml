@@ -76,10 +76,10 @@ all:
         homeserver2:
     dns_primary:
       hosts:
-        homeserver:
+        homeserver2:
     dns_replicas:
       hosts:
-        homeserver2:
+        homeserver:
     edge_proxy_cluster:
       hosts:
         homeserver:
@@ -90,32 +90,16 @@ all:
     edge_proxy_replicas:
       hosts:
         homeserver:
-    vault_cluster:
-      hosts:
-        rpi5b16g1ssd:
-        rpi5b16g2ssd:
-        homeserver:
-        homeserver2:
-    vault_transit:
-      hosts:
-        homeserver2:
-    vault_leader:
-      hosts:
-        homeserver:
-    vault_followers:
-      hosts:
-        rpi5b16g1ssd:
-        rpi5b16g2ssd:
     internal_lb_cluster:
       hosts:
         homeserver:
         homeserver2:
     internal_lb_primary:
       hosts:
-        homeserver:
+        homeserver2:
     internal_lb_replicas:
       hosts:
-        homeserver2:
+        homeserver:
     artifactory:
       hosts:
         homeserver2:

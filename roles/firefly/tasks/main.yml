@@ -54,8 +54,13 @@
   containers.podman.podman_container:
     name: "{{ firefly_container_name }}"
     image: "{{ firefly_image }}"
-    state: started
-    restart_policy: always
+    state: created
+    generate_systemd:
+      path: /etc/systemd/system/
+      restart_policy: always
+      names: true
+      container_prefix: container
+    restart_policy: "no"
     ports:
       - "{{ firefly_port }}:8080"
     env:
@@ -70,8 +75,16 @@
       LOG_CHANNEL: errorlog
       APP_DEBUG: "{{ firefly_app_debug | default('false') }}"
     volumes:
-      - "{{ firefly_data_dir }}:/var/www/html/storage/database:rw"
       - "{{ firefly_upload_dir }}:/var/www/html/storage/upload:rw"
+  become: true
+  notify: Restart Firefly
+
+- name: Enable and start Firefly systemd service
+  ansible.builtin.systemd:
+    name: "container-{{ firefly_container_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
   become: true
 
 - name: Wait for Firefly to be ready

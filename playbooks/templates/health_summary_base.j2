@@ -20,35 +20,29 @@
 {% endfor %}
 {% endif %}
 
-{{ macros.BOLD }}[ VAULT CLUSTER ]{{ macros.RESET }}
-{% if groups['vault_cluster'] | map('extract', hostvars, '_vault_node_health') | select('defined') | list | length > 0 %}
-{% for host in groups['vault_cluster'] | sort %}
+
+
+{{ macros.BOLD }}[ CERTIFICATES ]{{ macros.RESET }}
+{% if groups['all'] | map('extract', hostvars, '_root_ca_days_remaining') | select('defined') | list | length > 0 %}
+{% for host in groups['all'] | sort %}
+{% if hostvars[host]['_root_ca_days_remaining'] is defined %}
   {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
-    Type:          {{ 'TRANSIT' if host in groups['vault_transit'] else 'MAIN' }}
-    Status:        {% set h = hostvars[host]._vault_node_health | default({}) -%}
-                   {%- set s = h.status | default(0) -%}
-                   {%- set j = h.json | default({}) -%}
-                   {%- if s == 200 -%}
-                     {{ macros.ok('HEALTHY (Leader)') }}
-                   {%- elif s == 429 -%}
-                     {%- if j.standby | default(false) -%}
-                       {{ macros.ok('HEALTHY (Follower)') }}
-                     {%- elif j.performance_standby | default(false) -%}
-                       {{ macros.ok('HEALTHY (Perf Standby)') }}
-                     {%- else -%}
-                       {{ macros.ok('HEALTHY (Follower)') }}
-                     {%- endif -%}
-                   {%- elif s == 501 -%}
-                     {{ macros.warn('NOT INITIALIZED') }}
-                   {%- elif s == 503 -%}
-                     {{ macros.warn('SEALED') }}
-                   {%- else -%}
-                     {{ macros.bad('DOWN / ERROR') }}
-                   {%- endif %}
-    Code:          {{ s if s != 0 else 'N/A' }}
-    Version:       {{ j.version | default('N/A') }}
+    Root CA Trust: {{
+      macros.ok(hostvars[host]['_root_ca_days_remaining'] ~ ' days')
+      if (hostvars[host]['_root_ca_days_remaining'] | int) > 90
+      else (macros.cyan(hostvars[host]['_root_ca_days_remaining'] ~ ' days') if (hostvars[host]['_root_ca_days_remaining'] | int) > 30 else macros.bad(hostvars[host]['_root_ca_days_remaining'] ~ ' days'))
+    }}
+{% endif %}
+{% if hostvars[host]['_wildcard_cert_days_remaining'] is defined %}
+    Wildcard Cert: {{
+      macros.ok(hostvars[host]['_wildcard_cert_days_remaining'] ~ ' days')
+      if (hostvars[host]['_wildcard_cert_days_remaining'] | int) > 90
+      else (macros.cyan(hostvars[host]['_wildcard_cert_days_remaining'] ~ ' days') if (hostvars[host]['_wildcard_cert_days_remaining'] | int) > 30 else macros.bad(hostvars[host]['_wildcard_cert_days_remaining'] ~ ' days'))
+    }}
+{% endif %}
 {% endfor %}
 {% endif %}
+
 
 {{ macros.BOLD }}[ PI-HOLE DNS ]{{ macros.RESET }}
 {% if groups['dns_cluster'] | map('extract', hostvars, '_pihole_vip_dns_check') | select('defined') | list | length > 0 %}
@@ -77,7 +71,7 @@
 {% for host in groups['edge_proxy_cluster'] | sort %}
   {{ macros.CYAN }}> Edge Proxy: {{ host }}{{ macros.RESET }}
     Wildcard Cert:     {{ macros.ok('PRESENT') if hostvars[host]._proxy_wildcard_stat.stat.exists | default(false) else macros.bad('MISSING') }}
-    Backend (LB) Reach:{{ macros.ok('YES') if hostvars[host]._proxy_backend_check.status is defined else macros.bad('NO') }}
+
     VIP Active:        {{ macros.ok('YES') if hostvars[host]._proxy_has_vip | default(false) else macros.cyan('NO (Backup)') }}
 {% endfor %}
 {% for host in groups['artifactory'] | sort %}
@@ -90,14 +84,7 @@
 {% endfor %}
 {% endif %}
 
-{{ macros.BOLD }}[ INTERNAL LOAD BALANCER (Base) ]{{ macros.RESET }}
-{% set lb_base_data = groups['internal_lb_cluster'] | map('extract', hostvars, '_lb_vault_health_check') | select('defined') | list %}
-{% if lb_base_data | length > 0 %}
-{% for host in groups['internal_lb_cluster'] | sort %}
-  {{ macros.CYAN }}> {{ host }} (Base Infrastructure){{ macros.RESET }}
-    Vault:         {{ macros.ok('UP') if (hostvars[host]._lb_vault_health_check.status | default(0)) in [200, 429] else macros.bad('DOWN') }}
-{% endfor %}
-{% endif %}
+
 
 ################################################################################
 {{ macros.BOLD }}[ EXTERNAL ACCESS & SERVICES (Base) ]{{ macros.RESET }}
@@ -105,14 +92,14 @@
 
 {{ macros.BOLD }}[ EXTERNAL ACCESS (via {{ reverse_proxy_virtual_ip }}) ]{{ macros.RESET }}
   {{ macros.CYAN }}-- Base Infrastructure --{{ macros.RESET }}
-  Vault (HTTPS):         {{ macros.ok('UP') if (_external_vault_ready.status | default(-1)) in [200, 429] else macros.bad('DOWN') }}
+
   Firefly (HTTPS):      {{ macros.ok('UP') if (_external_firefly_ready.status | default(-1)) == 200 or (_external_firefly_login_ready.status | default(-1)) in [200, 302] else macros.bad('DOWN') }}
   Nexus (HTTPS):        {{ macros.ok('UP') if (_external_nexus_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
   Pi-hole Pri (HTTPS):  {{ macros.ok('UP') if (_external_pihole_primary_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
   Pi-hole Rep1 (HTTPS): {{ macros.ok('UP') if (_external_pihole_replica1_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
 
 {{ macros.BOLD }}[ SERVICE URLS ]{{ macros.RESET }}
-  Vault:           {{ macros.CYAN }}https://vault.{{ base_domain }}{{ macros.RESET }}
+
   Firefly:         {{ macros.CYAN }}https://firefly.{{ base_domain }}{{ macros.RESET }}
   Nexus:           {{ macros.CYAN }}https://nexus.{{ base_domain }}{{ macros.RESET }}
   Pi-hole Pri:     {{ macros.CYAN }}https://primary.pihole.{{ base_domain }}{{ macros.RESET }}

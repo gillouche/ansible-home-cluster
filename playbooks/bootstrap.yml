@@ -6,14 +6,14 @@
 # 1. Bootstrap controller host (SSH, Network)
 - name: Bootstrap controller host
   import_playbook: includes/bootstrap/bootstrap_controller.yml
-  tags: [bootstrap_controller]
+  tags: [bootstrap, bootstrap_controller]
 
 # 2. Bootstrap devices (Initial SSH access, Network)
 - name: Bootstrap devices
   import_playbook: includes/bootstrap/bootstrap_devices.yml
-  tags: [bootstrap_devices]
+  tags: [bootstrap, bootstrap_devices]
 
 # 3. Root CA Generation (Homelab Root CA)
 - name: Root CA Generation
-  import_playbook: includes/setup/trust.yml
-  tags: [root_ca_gen]
+  import_playbook: includes/bootstrap/bootstrap_trust.yml
+  tags: [bootstrap, bootstrap_trust]

@@ -1,0 +1,10 @@
+---
+- name: "Distribute Homelab Root CA to All Devices"
+  hosts: all
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Run TLS role for CA distribution
+      ansible.builtin.include_role:
+        name: tls
+      tags: [devices, devices_trust]

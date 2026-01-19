@@ -1,0 +1,60 @@
+---
+- name: "Restore Internal Load Balancer"
+  hosts: internal_lb_cluster
+  gather_facts: false
+  become: true
+  tags: [restore_base, restore_infra]
+  tasks:
+    - name: Start Keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: started
+        enabled: true
+
+    - name: Start HAProxy
+      ansible.builtin.systemd:
+        name: haproxy
+        state: started
+        enabled: true
+
+    - name: Wait for VIP to be present on at least one node
+      ansible.builtin.shell: ip addr show | grep {{ load_balancer_virtual_ip | default('192.168.0.253') }}
+      register: _lb_vip_check
+      until: _lb_vip_check.rc == 0
+      retries: 30
+      delay: 2
+      failed_when: false
+      run_once: true
+      changed_when: false
+
+- name: "Restore Edge Proxy"
+  hosts: edge_proxy_cluster
+  gather_facts: false
+  become: true
+  tags: [restore_base, restore_infra]
+  tasks:
+    - name: Start Keepalived (Edge)
+      ansible.builtin.systemd:
+        name: keepalived
+        state: started
+        enabled: true
+
+    - name: Start Caddy container
+      ansible.builtin.command: podman start edge-proxy
+      register: _caddy_start
+      changed_when: _caddy_start.rc == 0
+      failed_when:
+        - _caddy_start.rc != 0
+        - "'already' not in _caddy_start.stderr"
+
+    - name: Wait for Caddy to be ready
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:80/"
+        method: GET
+        status_code: [200, 301, 302, 303, 307, 308]
+        follow_redirects: "none"
+      register: _caddy_health
+      until: _caddy_health.status in [200, 301, 302, 303, 307, 308]
+      retries: 30
+      delay: 5
+      become: false

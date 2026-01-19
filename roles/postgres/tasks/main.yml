@@ -241,9 +241,14 @@
   containers.podman.podman_container:
     name: "{{ postgres_container_name }}"
     image: "{{ postgres_image }}"
-    state: started
+    state: created
     recreate: "{{ _postgres_container_recreate | default(false) }}"
-    restart_policy: always
+    generate_systemd:
+      path: /etc/systemd/system/
+      restart_policy: always
+      names: true
+      container_prefix: container
+    restart_policy: "no"
     published_ports:
       - "{{ postgres_port }}:{{ postgres_port }}"
       - "{{ postgres_patroni_port }}:{{ postgres_patroni_port }}"
@@ -296,6 +301,15 @@
       - "{{ postgres_data_dir }}:/home/postgres/pgdata:Z"
   become: true
   register: _postgres_container
+  notify: Restart Postgres
+
+- name: Enable and start Postgres systemd service
+  ansible.builtin.systemd:
+    name: "container-{{ postgres_container_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
 
 - name: Wait for Postgres container to stabilize # noqa: no-handler
   ansible.builtin.pause:

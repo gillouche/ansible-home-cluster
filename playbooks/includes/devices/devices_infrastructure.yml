@@ -1,0 +1,32 @@
+---
+- name: "Setup Pi-hole Cluster"
+  hosts: dns_cluster
+  gather_facts: true
+  become: false
+  roles:
+    - role: dns
+      tags: [devices, devices_infrastructure, dns]
+
+- name: "Setup Internal Load Balancer"
+  hosts: internal_lb_cluster
+  gather_facts: true
+  become: false
+  roles:
+    - role: internal_lb
+      tags: [devices, devices_infrastructure, lb]
+
+- name: "Setup Edge Proxy"
+  hosts: edge_proxy_cluster
+  gather_facts: true
+  become: false
+  roles:
+    - role: edge_proxy
+      tags: [devices, devices_infrastructure, proxy]
+
+- name: "Setup Artifactory"
+  hosts: artifactory
+  gather_facts: true
+  become: false
+  roles:
+    - role: artifactory
+      tags: [devices, devices_infrastructure, artifactory]

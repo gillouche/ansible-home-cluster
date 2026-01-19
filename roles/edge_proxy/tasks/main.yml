@@ -1,5 +1,4 @@
 ---
-
 - name: Ensure reverse_proxy system user exists with home
   become: true
   block:
@@ -91,7 +90,7 @@
         mode: '0644'
       when: _edge_proxy_resolv_conf_check.rc != 0
 
-- name: Ensure reverse proxy host directories exist
+- name: Ensure reverse proxy directories exist
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -100,35 +99,13 @@
     mode: "{{ item.mode }}"
   loop:
     - {path: "{{ reverse_proxy_root_dir }}", mode: '0755'}
-    - {path: "{{ reverse_proxy_config_dir }}", mode: '0755'}
     - {path: "{{ reverse_proxy_data_dir }}", mode: '0755'}
-    - {path: "{{ reverse_proxy_certs_dir }}", mode: '0755'}
-  become: true
-
-- name: Ensure Caddy certificates directory exists
-  ansible.builtin.file:
-    path: "{{ reverse_proxy_data_dir }}/caddy/certificates"
-    state: directory
-    owner: "reverse_proxy"
-    group: "reverse_proxy"
-    mode: '0755'
   become: true
 
 - name: Render Caddyfile
   ansible.builtin.template:
     src: "Caddyfile.j2"
-    dest: "{{ reverse_proxy_config_dir }}/Caddyfile"
-    owner: "reverse_proxy"
-    group: "reverse_proxy"
-    mode: '0644'
-  become: true
-  notify: Restart reverse proxy
-
-- name: Copy Vault Cluster CA to reverse proxy trust path
-  ansible.builtin.copy:
-    src: "{{ tls_bundle_anchor_path }}"
-    remote_src: true
-    dest: "{{ reverse_proxy_certs_dir }}/ca-bundle.pem"
+    dest: "{{ reverse_proxy_root_dir }}/Caddyfile"
     owner: "reverse_proxy"
     group: "reverse_proxy"
     mode: '0644'
@@ -139,26 +116,22 @@
   containers.podman.podman_container:
     name: "{{ reverse_proxy_container_name }}"
     image: "{{ reverse_proxy_image }}"
-    state: started
-    restart_policy: unless-stopped
-    recreate: true
+    state: created
+    recreate: false
     user: 0
     network_mode: host
-    env: >-
-      {{ {'VAULT_TOKEN': tls_wildcard_vault_token}
-         if (tls_wildcard_vault_token is defined and (tls_wildcard_vault_token | length > 0))
-         else {}
-      }}
     volumes:
-      - "{{ reverse_proxy_config_dir }}/Caddyfile:/etc/caddy/Caddyfile"
+      - "{{ reverse_proxy_root_dir }}/Caddyfile:/etc/caddy/Caddyfile"
       - "{{ reverse_proxy_data_dir }}:/data"
-      - "{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard:/data/caddy/certificates/wildcard:ro"
-      - "{{ reverse_proxy_certs_dir }}/ca-bundle.pem:/etc/ssl/certs/internal-ca-bundle.pem"
+      # Mount the static certificates from the host
+      - "/etc/tls/live:/etc/tls/live:ro"
+      # Mount the Trust Store so Caddy trusts backends (LBs)
+      - "/etc/tls/ca-bundle.pem:/etc/ssl/certs/internal-ca-bundle.pem"
     generate_systemd:
       path: /etc/systemd/system/
-      restart_policy: always
       names: true
       container_prefix: container
+    restart_policy: "no"
   become: true
   notify: Restart reverse proxy
 
@@ -185,10 +158,3 @@
   retries: 30
   delay: 5
   become: false
-
-- name: Restart Reverse Proxy if certificates were updated
-  ansible.builtin.systemd:
-    name: "container-{{ reverse_proxy_container_name }}"
-    state: restarted
-  become: true
-  when: tls_wildcard_certs_updated | default(false) | bool

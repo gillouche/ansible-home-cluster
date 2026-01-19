@@ -1,0 +1,30 @@
+---
+# 6. Post-Restore Verification
+- name: "Post-Restore Verification"
+  hosts: localhost
+  gather_facts: false
+  become: false
+  tags: [always, restore_verify]
+  vars_files:
+    - ../../../inventories/group_vars/all/main.yml
+  tasks:
+    - name: Test K3s API endpoint
+      ansible.builtin.uri:
+        url: "https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:6443/healthz"
+        method: GET
+        validate_certs: false
+        status_code: [200, 401, 403]
+      register: _k3s_health
+      ignore_errors: true
+      when: "'restore_k3s' in ansible_run_tags"
+      tags: [restore_k3s]
+
+    - name: Check Edge Proxy Health
+      ansible.builtin.uri:
+        url: "https://{{ reverse_proxy_virtual_ip | default('192.168.0.252') }}"
+        method: GET
+        validate_certs: false
+        status_code: [200, 301, 302, 404]
+      register: _proxy_health
+      when: "'restore_infra' in ansible_run_tags"
+      ignore_errors: true

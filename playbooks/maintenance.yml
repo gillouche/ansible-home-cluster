@@ -6,14 +6,14 @@
 # 1. Connectivity check
 - name: Check connectivity
   import_playbook: includes/maintenance/ping.yml
-  tags: [ping]
+  tags: [maintenance_ping]
 
 # 2. System updates (Pacman)
 - name: Update system
   import_playbook: includes/maintenance/update.yml
-  tags: [update]
+  tags: [maintenance_update]
 
 # 3. Sequential staggered reboot
 - name: Reboot hosts
   import_playbook: includes/maintenance/reboot.yml
-  tags: [reboot]
+  tags: [maintenance_reboot]

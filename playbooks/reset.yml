@@ -3,15 +3,12 @@
 # Homelab Cluster Reset Orchestrator (Devices Only)
 # ==============================================================================
 
-# 1. Nuclear reset for Vault (host directories)
-- name: Reset Vault
-  import_playbook: includes/reset/vault_tls_reset.yml
-  tags: [vault_reset]
+
 
 # 2. Maintenance - Clean devices (SSH config, known_hosts, /etc/hosts)
 - name: Clean Devices
   import_playbook: includes/reset/clean_devices.yml
-  tags: [clean_devices]
+  tags: [reset_devices]
 
 # 3. Flush firewall rules
 - name: Flush Firewall
@@ -21,19 +18,19 @@
 # 4. Reset DNS (Pi-hole, local resolv.conf, keepalived)
 - name: Reset DNS
   import_playbook: includes/reset/dns_reset.yml
-  tags: [dns_reset]
+  tags: [reset_dns]
 
 # 5. Reset Proxy (Edge Proxy, reverse_proxy user, keepalived)
 - name: Reset Proxy
   import_playbook: includes/reset/proxy_reset.yml
-  tags: [proxy_reset]
+  tags: [reset_proxy]
 
 # 6. Reset Load Balancer (HAProxy, keepalived)
 - name: Reset Load Balancer
   import_playbook: includes/reset/lb_reset.yml
-  tags: [lb_reset, reset_lb]
+  tags: [reset_lb]
 
 # 7. Reset K3s Cluster (Nodes, DB, Storage)
 - name: Reset K3s
   import_playbook: includes/reset/k3s_reset.yml
-  tags: [k3s_reset]
+  tags: [reset_k3s]

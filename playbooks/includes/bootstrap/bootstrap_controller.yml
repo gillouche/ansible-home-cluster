@@ -3,12 +3,9 @@
   hosts: localhost
   gather_facts: true
   become: false
-  tags:
-    - never
-    - bootstrap_controller_host
-
-  pre_tasks: []
 
   roles:
     - role: controller_network
+      tags: [bootstrap, bootstrap_controller, bootstrap_controller_network]
     - role: controller_ssh
+      tags: [bootstrap, bootstrap_controller, bootstrap_controller_ssh]

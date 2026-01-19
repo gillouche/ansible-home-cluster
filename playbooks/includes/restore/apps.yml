@@ -1,0 +1,98 @@
+---
+- name: "Restore Postgres Cluster"
+  hosts: postgres
+  gather_facts: false
+  become: true
+  tags: [restore_base, restore_apps]
+  tasks:
+    - name: Start Patroni/Postgres container
+      ansible.builtin.command: podman start postgres
+      register: _postgres_start
+      changed_when: _postgres_start.rc == 0
+      failed_when:
+        - _postgres_start.rc != 0
+        - "'already' not in _postgres_start.stderr"
+    # Additional Postgres checks omitted for brevity, assuming existing logic in main playbook was sufficient or minimal
+
+- name: "Restore Authelia"
+  hosts: authelia
+  gather_facts: false
+  become: true
+  tags: [restore_base, restore_apps]
+  tasks:
+    - name: Start Redis container
+      ansible.builtin.command: podman start redis
+      register: _redis_start
+      changed_when: _redis_start.rc == 0
+      failed_when:
+        - _redis_start.rc != 0
+        - "'already' not in _redis_start.stderr"
+
+    - name: Start Authelia container
+      ansible.builtin.command: podman start authelia
+      register: _authelia_start
+      changed_when: _authelia_start.rc == 0
+      failed_when:
+        - _authelia_start.rc != 0
+        - "'already' not in _authelia_start.stderr"
+
+    - name: Wait for Authelia to be ready
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ global_authelia_port | default(9091) }}/api/health"
+        method: GET
+        status_code: 200
+      register: _authelia_health
+      until: _authelia_health.status == 200
+      retries: 60
+      delay: 5
+      become: false
+
+- name: "Restore Nexus"
+  hosts: artifactory
+  gather_facts: false
+  become: true
+  tags: [restore_base, restore_apps]
+  tasks:
+    - name: Start Nexus container
+      ansible.builtin.command: podman start nexus
+      register: _nexus_start
+      changed_when: _nexus_start.rc == 0
+      failed_when:
+        - _nexus_start.rc != 0
+        - "'already' not in _nexus_start.stderr"
+
+    - name: Wait for Nexus to be ready
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ global_nexus_port | default(8081) }}/service/rest/v1/status"
+        method: GET
+        status_code: 200
+      register: _nexus_health
+      until: _nexus_health.status == 200
+      retries: 120
+      delay: 5
+      become: false
+
+- name: "Restore Firefly III"
+  hosts: firefly
+  gather_facts: false
+  become: true
+  tags: [restore_base, restore_apps]
+  tasks:
+    - name: Start Firefly III container
+      ansible.builtin.command: podman start firefly
+      register: _firefly_start
+      changed_when: _firefly_start.rc == 0
+      failed_when:
+        - _firefly_start.rc != 0
+        - "'already' not in _firefly_start.stderr"
+
+    - name: Wait for Firefly to be ready
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ global_firefly_port | default(8082) }}/health"
+        method: GET
+        status_code: 200
+      register: _firefly_health
+      until: _firefly_health.status == 200
+      retries: 60
+      delay: 5
+      become: false

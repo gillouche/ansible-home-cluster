@@ -1,0 +1,30 @@
+---
+- name: Reset TLS Controller (Homelab Root CA)
+  hosts: localhost
+  gather_facts: true
+  become: true
+  tags: [reset_controller_tls]
+  tasks:
+    - name: Load TLS role defaults to get paths
+      ansible.builtin.include_role:
+        name: tls
+        tasks_from: controller # Actually controller generates them, but we need the vars.
+                               # Ideally we just include the vars file or role defaults.
+                               # But 'include_role' is easiest to get defaults + vars.
+
+    - name: Remove Homelab Root CA artifacts from controller
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ tls_root_ca_crt_path }}"
+        - "{{ tls_root_ca_key_path }}"
+        - "{{ tls_controller_pki_dir }}/wildcard.key"
+        - "{{ tls_controller_pki_dir }}/wildcard.csr"
+        - "{{ tls_controller_pki_dir }}/wildcard.pem"
+
+    - name: Remove Homelab Root CA from macOS keychain
+      ansible.builtin.command: security delete-certificate -c "{{ tls_root_ca_common_name }}"
+      changed_when: true
+      failed_when: false
+      when: ansible_os_family == "Darwin"

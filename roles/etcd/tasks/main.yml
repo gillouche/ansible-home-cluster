@@ -27,8 +27,13 @@
   containers.podman.podman_container:
     name: "{{ etcd_container_name }}"
     image: "quay.io/coreos/etcd:{{ etcd_version }}"
-    state: started
-    restart_policy: always
+    state: created
+    generate_systemd:
+      path: /etc/systemd/system/
+      restart_policy: always
+      names: true
+      container_prefix: container
+    restart_policy: "no"
     published_ports:
       - "{{ etcd_client_port }}:{{ etcd_client_port }}"
       - "{{ etcd_peer_port }}:{{ etcd_peer_port }}"
@@ -47,4 +52,13 @@
       - --initial-cluster-token={{ etcd_initial_cluster_token }}
     volumes:
       - "{{ etcd_data_dir }}:/etcd-data:Z"
+  become: true
+  notify: Restart Etcd
+
+- name: Enable and start Etcd systemd service
+  ansible.builtin.systemd:
+    name: "container-{{ etcd_container_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
   become: true
