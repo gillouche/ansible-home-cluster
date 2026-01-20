@@ -23,7 +23,7 @@
         url: "https://{{ k3s_api_vip }}:6443/healthz"
         method: GET
         status_code: [200, 401, 301, 302, 308]
-        follow_redirects: no
+        follow_redirects: false
         validate_certs: false
       register: _lb_k3s_api_health_check
       failed_when: false
@@ -35,7 +35,7 @@
         headers:
           Host: "prometheus.k3s.{{ base_domain }}"
         status_code: [200, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_prometheus_health_check
       failed_when: false
 
@@ -46,7 +46,7 @@
         headers:
           Host: "alertmanager.k3s.{{ base_domain }}"
         status_code: [200, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_alertmanager_health_check
       failed_when: false
 
@@ -57,7 +57,7 @@
         headers:
           Host: "grafana.k3s.{{ base_domain }}"
         status_code: [200, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_grafana_health_check
       failed_when: false
 
@@ -68,7 +68,7 @@
         headers:
           Host: "loki.k3s.{{ base_domain }}"
         status_code: [200, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_loki_health_check
       failed_when: false
 
@@ -79,7 +79,7 @@
         headers:
           Host: "ksm.k3s.{{ base_domain }}"
         status_code: [200, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_ksm_health_check
       failed_when: false
 
@@ -88,7 +88,7 @@
         url: "http://{{ load_balancer_virtual_ip }}:9000"
         method: GET
         status_code: [200, 404, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_traefik_health_check
       failed_when: false
 
@@ -99,7 +99,7 @@
         headers:
           Host: "goldilocks.k3s.{{ base_domain }}"
         status_code: [200, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_goldilocks_health_check
       failed_when: false
 
@@ -110,7 +110,7 @@
         headers:
           Host: "homepage.k3s.{{ base_domain }}"
         status_code: [200, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_homepage_health_check
       failed_when: false
 
@@ -121,7 +121,7 @@
         headers:
           Host: "seaweedfs-filer.k3s.{{ base_domain }}"
         status_code: [200, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_seaweedfs_filer_health_check
       failed_when: false
 
@@ -132,7 +132,7 @@
         headers:
           Host: "seaweedfs-s3.k3s.{{ base_domain }}"
         status_code: [200, 301, 302, 308, 401, 403]
-        follow_redirects: no
+        follow_redirects: false
       register: _lb_seaweedfs_s3_health_check
       failed_when: false
 

@@ -117,6 +117,7 @@
   tasks:
     - name: Check Root CA Expiration
       ansible.builtin.shell: |
+        set -o pipefail
         openssl x509 -enddate -noout -in /etc/tls/ca-bundle.pem | cut -d= -f2 | xargs -I{} date -d "{}" +%s
       register: _root_ca_expiry_cmd
       changed_when: false
@@ -129,6 +130,7 @@
 
     - name: Check Wildcard Cert Expiration (Edge Proxy Only)
       ansible.builtin.shell: |
+        set -o pipefail
         openssl x509 -enddate -noout -in /etc/tls/live/wildcard.pem | cut -d= -f2 | xargs -I{} date -d "{}" +%s
       register: _wildcard_cert_expiry_cmd
       changed_when: false

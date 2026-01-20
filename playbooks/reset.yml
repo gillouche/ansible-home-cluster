@@ -3,8 +3,6 @@
 # Homelab Cluster Reset Orchestrator (Devices Only)
 # ==============================================================================
 
-
-
 # 2. Maintenance - Clean devices (SSH config, known_hosts, /etc/hosts)
 - name: Clean Devices
   import_playbook: includes/reset/clean_devices.yml

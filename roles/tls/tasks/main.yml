@@ -1,6 +1,6 @@
 ---
 # 1. Controller Side Generation (Run Once)
-- name: ensure controller PKI artifacts exist
+- name: Ensure controller PKI artifacts exist
   ansible.builtin.include_tasks: controller.yml
   args:
     apply:
@@ -21,7 +21,7 @@
         mode: '0755'
       become: true
 
-    - name: install CA into system trust anchors (Arch Linux)
+    - name: Install CA into system trust anchors (Arch Linux)
       ansible.builtin.copy:
         src: "{{ tls_root_ca_crt_path }}"
         dest: /etc/ca-certificates/trust-source/anchors/homelab-root.crt
@@ -32,7 +32,7 @@
       become: true
       notify: refresh system trust store
 
-    - name: install CA bundle (Root CA) - Legacy/App Bundle
+    - name: Install CA bundle (Root CA) - Legacy/App Bundle
       ansible.builtin.copy:
         src: "{{ tls_root_ca_crt_path }}"
         dest: "{{ tls_ca_bundle_path }}"

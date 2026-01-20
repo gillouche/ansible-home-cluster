@@ -41,3 +41,4 @@
     cmd: nvidia-ctk runtime configure --runtime containerd
   when: nvidia_runtime_check.rc != 0
   become: true
+  changed_when: true

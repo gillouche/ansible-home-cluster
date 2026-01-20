@@ -119,7 +119,7 @@
       ansible.builtin.uri:
         url: "http://{{ k3s_lb_vip }}?msg=traefik_ping"
         validate_certs: false
-        follow_redirects: no
+        follow_redirects: false
         status_code: [200, 404, 301, 308] # 404/301/308 are fine (Traefik default backend or redirect)
       register: _k3s_lb_vip_status
       failed_when: false
@@ -132,7 +132,7 @@
       failed_when: false
 
     - name: Verify AMD GPU Status (homeserver)
-      ansible.builtin.shell: "lspci | grep -i vga"
+      ansible.builtin.shell: "set -o pipefail && lspci | grep -i vga"
       register: _amd_gpu_status
       when: inventory_hostname == 'homeserver'
       changed_when: false

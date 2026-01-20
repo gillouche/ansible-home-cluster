@@ -17,7 +17,7 @@
         state: started
         enabled: true
 
-    - name: Wait for VIP to be reachable (Port 6443)
+    - name: Wait for VIP to be reachable (Port 6443) # noqa: run-once[task]
       ansible.builtin.wait_for:
         host: "{{ load_balancer_virtual_ip | default('192.168.0.253') }}"
         port: 6443

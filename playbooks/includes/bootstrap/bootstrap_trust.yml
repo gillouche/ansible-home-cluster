@@ -1,3 +1,4 @@
+---
 - name: "Generate Homelab Root CA (Controller)"
   hosts: localhost
   connection: local

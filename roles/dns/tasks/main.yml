@@ -324,8 +324,6 @@
   become: true
   notify: Restart pihole systemd
 
-
-
 - name: Enable and start Pi-hole systemd service
   ansible.builtin.systemd:
     name: "container-{{ pihole_container_name }}"
