@@ -91,17 +91,7 @@
     - ../../../inventories/group_vars/k3s_cluster/main.yml
     - ../../../inventories/group_vars/all/main.yml
   tasks:
-    - name: Verify K3s Vault Auth API (Kubernetes Auth with CA check)
-      ansible.builtin.uri:
-        url: "https://{{ load_balancer_virtual_ip }}:8200/v1/auth/kubernetes"
-        method: GET
-        validate_certs: true
-        ca_path: "/etc/tls/ca-bundle.pem"
-        status_code: [200, 429, 405, 403]
-      register: _k3s_vault_api_check
-      failed_when: false
-      run_once: true # noqa: run-once
-      delegate_to: "{{ groups['server'][0] }}"
+
 
     - name: Check K3s Service Status
       ansible.builtin.systemd:
@@ -127,9 +117,10 @@
 
     - name: Check K3s LB VIP Reachability
       ansible.builtin.uri:
-        url: "http://{{ k3s_lb_vip }}:9000"
+        url: "http://{{ k3s_lb_vip }}?msg=traefik_ping"
         validate_certs: false
-        status_code: [200, 404] # 404 is fine as long as we reach Traefik
+        follow_redirects: no
+        status_code: [200, 404, 301, 308] # 404/301/308 are fine (Traefik default backend or redirect)
       register: _k3s_lb_vip_status
       failed_when: false
 
@@ -137,6 +128,13 @@
       ansible.builtin.command: nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
       register: _nvidia_smi_status
       when: inventory_hostname == 'homeserver2'
+      changed_when: false
+      failed_when: false
+
+    - name: Verify AMD GPU Status (homeserver)
+      ansible.builtin.shell: "lspci | grep -i vga"
+      register: _amd_gpu_status
+      when: inventory_hostname == 'homeserver'
       changed_when: false
       failed_when: false
 

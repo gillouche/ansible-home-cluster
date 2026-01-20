@@ -17,15 +17,14 @@
         state: started
         enabled: true
 
-    - name: Wait for VIP to be present on at least one node
-      ansible.builtin.shell: ip addr show | grep {{ load_balancer_virtual_ip | default('192.168.0.253') }}
-      register: _lb_vip_check
-      until: _lb_vip_check.rc == 0
-      retries: 30
-      delay: 2
-      failed_when: false
+    - name: Wait for VIP to be reachable (Port 6443)
+      ansible.builtin.wait_for:
+        host: "{{ load_balancer_virtual_ip | default('192.168.0.253') }}"
+        port: 6443
+        state: started
+        timeout: 60
+      delegate_to: localhost
       run_once: true
-      changed_when: false
 
 - name: "Restore Edge Proxy"
   hosts: edge_proxy_cluster

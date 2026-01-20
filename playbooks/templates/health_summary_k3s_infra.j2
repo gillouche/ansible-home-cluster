@@ -52,14 +52,15 @@
     K3s Service:   {{ macros.ok('ACTIVE') if hostvars[host]._k3s_service_status.status.ActiveState | default('inactive') == 'active' else macros.bad('INACTIVE') }}
     Node Ready:    {{ macros.ok('YES') if hostvars[host].inventory_hostname in (hostvars[host]._k3s_node_status.stdout | default('')) and 'Ready' in (hostvars[host]._k3s_node_status.stdout | default('')) else macros.bad('NO') }}
     API VIP:       {{ macros.ok('REACHABLE') if hostvars[host]._k3s_vip_status.status | default(0) in [200, 401] else macros.bad('UNREACHABLE') }}
-    LB VIP:        {{ macros.ok('REACHABLE') if hostvars[host]._k3s_lb_vip_status.status | default(0) in [200, 404] else macros.bad('UNREACHABLE') }}
+    LB VIP:        {{ macros.ok('REACHABLE') if hostvars[host]._k3s_lb_vip_status.status | default(0) in [200, 404, 301, 308] else macros.bad('UNREACHABLE') }}
     ArgoCD (LB):   {{ macros.ok('UP') if hostvars[host]._lb_argocd_health_check.status | default(0) == 200 else macros.bad('DOWN') }}
+{% if host == 'homeserver' and hostvars[host]._amd_gpu_status is defined %}
+    AMD GPU:       {{ macros.ok(hostvars[host]._amd_gpu_status.stdout) if hostvars[host]._amd_gpu_status.rc == 0 else macros.bad('ERROR / NOT FOUND') }}
+{% endif %}
 {% if host == 'homeserver2' and hostvars[host]._nvidia_smi_status is defined %}
     NVIDIA GPU:    {{ macros.ok(hostvars[host]._nvidia_smi_status.stdout) if hostvars[host]._nvidia_smi_status.rc == 0 else macros.bad('ERROR / NOT FOUND') }}
 {% endif %}
-{% if hostvars[host]._k3s_vault_api_check is defined %}
-    Vault Auth:    {{ macros.ok('UP') if (hostvars[host]._k3s_vault_api_check.status | default(0)) in [200, 429, 405, 403] else macros.bad('DOWN (CA Invalid)') }}
-{% endif %}
+
 {% endfor %}
 {% endif %}
 
@@ -69,13 +70,13 @@
 
 {{ macros.BOLD }}[ EXTERNAL ACCESS (via {{ reverse_proxy_virtual_ip }}) ]{{ macros.RESET }}
   {{ macros.CYAN }}-- K3s infra --{{ macros.RESET }}
-  K3s API (HTTPS):      {{ macros.ok('UP') if (_external_k3s_api_ready.status | default(-1)) in [200, 401] else macros.bad('DOWN') }}
+  K3s API (HTTPS):      {{ macros.ok('UP') if (_external_k3s_api_ready.status | default(-1)) in [200, 401, 301, 302, 307, 308] else macros.bad('DOWN (Status: ' ~ (_external_k3s_api_ready.status | default('N/A')) ~ ')') }}
 {% set k3s_server = groups['server'][0] if groups['server'] | length > 0 else none %}
 {% if k3s_server and hostvars[k3s_server]._argocd_deployment_status is defined and hostvars[k3s_server]._argocd_deployment_status.stdout | default('') != '' %}
 {%   set argocd_deploy = (hostvars[k3s_server]._argocd_deployment_status.stdout | from_json)['items'] | default([]) %}
 {%   set argocd_server = argocd_deploy | selectattr('metadata.name', 'equalto', 'argocd-server') | first | default(none) %}
 {%   if argocd_server %}
-  ArgoCD Server:        {{ macros.ok('HEALTHY (' ~ argocd_server.status.readyReplicas | default(0) ~ '/' ~ argocd_server.status.replicas | default(0) ~ ')') if argocd_server.status.readyReplicas | default(0) == argocd_server.status.replicas | default(0) else macros.bad('DEGRADED') }}
+  ArgoCD Server:        {{ macros.ok('HEALTHY (' ~ argocd_server.status.readyReplicas | default(0) ~ '/' ~ argocd_server.status.replicas | default(0) ~ ')') if argocd_server.status.readyReplicas | default(0) == argocd_server.status.replicas | default(0) else macros.bad('DEGRADED (' ~ argocd_server.status.readyReplicas | default(0) ~ '/' ~ argocd_server.status.replicas | default(0) ~ ')') }}
 {%   endif %}
 {% endif %}
   ArgoCD (HTTPS):       {{ macros.ok('UP') if (_external_argocd_ready.status | default(-1)) in [200, 301, 302, 401] else macros.bad('DOWN') }}

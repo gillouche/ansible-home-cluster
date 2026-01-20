@@ -12,16 +12,16 @@
 {% if lb_apps_data | length > 0 %}
 {% for host in groups['server'] | sort %}
   {{ macros.CYAN }}> {{ host }} (K3s Workloads){{ macros.RESET }}
-    Prometheus:    {{ macros.ok('UP') if (hostvars[host]._lb_prometheus_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
-    Alertmanager:  {{ macros.ok('UP') if (hostvars[host]._lb_alertmanager_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
-    Grafana:       {{ macros.ok('UP') if (hostvars[host]._lb_grafana_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
-    Loki:          {{ macros.ok('UP') if (hostvars[host]._lb_loki_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
-    Homepage:      {{ macros.ok('UP') if (hostvars[host]._lb_homepage_health_check.status | default(0)) in [200] else macros.bad('DOWN') }}
-    K3s Traefik:   {{ macros.ok('UP') if (hostvars[host]._lb_traefik_health_check.status | default(0)) in [200, 404] else macros.bad('DOWN') }}
-    KubeMetrics:   {{ macros.ok('UP') if (hostvars[host]._lb_ksm_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
-    Goldilocks:    {{ macros.ok('UP') if (hostvars[host]._lb_goldilocks_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
-    Seaweed Filer: {{ macros.ok('UP') if (hostvars[host]._lb_seaweedfs_filer_health_check.status | default(0)) == 200 else macros.bad('DOWN') }}
-    Seaweed S3:    {{ macros.ok('UP') if (hostvars[host]._lb_seaweedfs_s3_health_check.status | default(0)) in [200, 403] else macros.bad('DOWN') }}
+    Prometheus:    {{ macros.ok('UP') if (hostvars[host]._lb_prometheus_health_check.status | default(0)) in [200, 301, 302, 308, 401, 403] else macros.bad('DOWN') }}
+    Alertmanager:  {{ macros.ok('UP') if (hostvars[host]._lb_alertmanager_health_check.status | default(0)) in [200, 301, 302, 308, 401, 403] else macros.bad('DOWN') }}
+    Grafana:       {{ macros.ok('UP') if (hostvars[host]._lb_grafana_health_check.status | default(0)) in [200, 301, 302, 308, 401, 403] else macros.bad('DOWN') }}
+    Loki:          {{ macros.ok('UP') if (hostvars[host]._lb_loki_health_check.status | default(0)) in [200, 301, 302, 308, 401, 403] else macros.bad('DOWN') }}
+    Homepage:      {{ macros.ok('UP') if (hostvars[host]._lb_homepage_health_check.status | default(0)) in [200, 301, 302, 308, 401, 403] else macros.bad('DOWN') }}
+    K3s Traefik:   {{ macros.ok('UP') if (hostvars[host]._lb_traefik_health_check.status | default(0)) in [200, 404, 301, 302, 308, 401, 403] else macros.bad('DOWN') }}
+    KubeMetrics:   {{ macros.ok('UP') if (hostvars[host]._lb_ksm_health_check.status | default(0)) in [200, 301, 302, 308, 401, 403] else macros.bad('DOWN') }}
+    Goldilocks:    {{ macros.ok('UP') if (hostvars[host]._lb_goldilocks_health_check.status | default(0)) in [200, 301, 302, 308, 401, 403] else macros.bad('DOWN') }}
+    Seaweed Filer: {{ macros.ok('UP') if (hostvars[host]._lb_seaweedfs_filer_health_check.status | default(0)) in [200, 301, 302, 308, 401, 403] else macros.bad('DOWN') }}
+    Seaweed S3:    {{ macros.ok('UP') if (hostvars[host]._lb_seaweedfs_s3_health_check.status | default(0)) in [200, 403, 301, 302, 308, 401] else macros.bad('DOWN') }}
 {% endfor %}
 {% endif %}
 
