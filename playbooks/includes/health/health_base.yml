@@ -18,7 +18,7 @@
       register: _root_podman_ps
       changed_when: false
       failed_when: false
-      become: true # Use Ansible privilege escalation instead of manual sudo
+      become: true
 
 - name: "Gather facts for localhost"
   hosts: localhost
@@ -74,7 +74,6 @@
         fail_msg: "Chrony is not synchronized or in an unstable state!"
         success_msg: "Chrony tracking is normal."
       when: _chrony_tracking.rc == 0
-
 
 - name: "TLS Health Check"
   hosts: all
@@ -170,9 +169,6 @@
           - "STDOUT: {{ _pihole_local_dns_check.stdout }}"
           - "STDERR: {{ _pihole_local_dns_check.stderr }}"
       when: _pihole_local_dns_check.rc != 0 or _pihole_local_dns_check.stdout == ""
-
-
-
 
 - name: "Reverse Proxy Health Check"
   hosts: edge_proxy_cluster
@@ -371,7 +367,6 @@
         success_msg: "Base Infrastructure is healthy. Proceeding to K3s Platform layer."
       # noqa: ignore-errors
       ignore_errors: >-
-        {{ 'k3s_infra' not in ansible_run_tags and
-           'k3s_apps' not in ansible_run_tags and
-           'k3s' not in ansible_run_tags and
+        {{ 'health_k3s_infra' not in ansible_run_tags and
+           'health_k3s_apps' not in ansible_run_tags and
            'all' not in ansible_run_tags }}

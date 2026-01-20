@@ -344,6 +344,19 @@
 # Spilo/Patroni only sets the password during the INITIAL bootstrap of the cluster.
 # If the database already exists (on the NVME SSD), changing environment variables will NOT update the password in the DB.
 # We must explicitly sync the password to ensure it matches what Ansible/K3s expects.
+  # otherwise the 'is_postgres_leader' check might return false for everyone (race condition), and no DBs get created.
+- name: Wait for Patroni Leader election to complete
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ postgres_patroni_port }}/cluster"
+    return_content: true
+  register: _patroni_cluster_status
+  until:
+    - _patroni_cluster_status.status == 200
+    - (_patroni_cluster_status.json.members | default([]) | selectattr('role', 'equalto', 'leader') | list | length) > 0
+  retries: 30
+  delay: 2
+  become: false
+
 - name: Check if current node is Patroni leader
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ postgres_patroni_port }}/leader"
@@ -354,6 +367,16 @@
 - name: Set leader status fact
   ansible.builtin.set_fact:
     is_postgres_leader: "{{ _patroni_leader_check.status == 200 }}"
+
+- name: Check current Patroni DCS configuration
+  ansible.builtin.shell:
+    cmd: >
+      podman exec {{ postgres_container_name }}
+      patronictl show-config
+  become: true
+  when: is_postgres_leader
+  changed_when: false
+  register: _patroni_current_config
 
 - name: Update Patroni DCS configuration with new pg_hba rules (Leader only)
   ansible.builtin.shell:
@@ -368,7 +391,9 @@
       'host {{ postgres_authelia_db_name }} {{ postgres_authelia_db_user }} {{ k3s_cluster_cidr }} md5',
       'local all postgres trust', 'host all postgres {{ lan_subnet }} md5']"
   become: true
-  when: is_postgres_leader
+  when:
+    - is_postgres_leader
+    - "'host ' + postgres_authelia_db_name + ' ' + postgres_authelia_db_user + ' ' + k3s_cluster_cidr + ' md5' not in _patroni_current_config.stdout"
   changed_when: true
   register: _patroni_config_update
 
@@ -391,6 +416,15 @@
   when: is_postgres_leader
   become: true
   block:
+    - name: Check if postgres database user has correct password
+      ansible.builtin.command:
+        cmd: >
+          podman exec -e PGPASSWORD="{{ postgres_db_password }}" {{ postgres_container_name }}
+          psql -h 127.0.0.1 -U {{ postgres_db_user }} -d postgres -c "SELECT 1;"
+      register: _check_user_auth
+      failed_when: false
+      changed_when: false
+
     - name: Ensure postgres database user has the correct password
       ansible.builtin.command:
         cmd: >
@@ -401,6 +435,7 @@
         - _alter_user.rc != 0
         - '"role \"" + postgres_db_user + "\" does not exist" not in _alter_user.stderr'
       changed_when: "'ALTER ROLE' in _alter_user.stdout"
+      when: _check_user_auth.rc != 0
       retries: 5
       delay: 5
       until: _alter_user.rc == 0 or ("role \"" + postgres_db_user + "\" does not exist") in _alter_user.stderr
@@ -410,7 +445,9 @@
         cmd: >
           podman exec {{ postgres_container_name }}
           psql -U postgres -d postgres -c "CREATE USER {{ postgres_db_user }} WITH PASSWORD '{{ postgres_db_password }}';"
-      when: '("role \"" + postgres_db_user + "\" does not exist") in _alter_user.stderr'
+      when:
+        - not _alter_user.skipped | default(false)
+        - '("role \"" + postgres_db_user + "\" does not exist") in _alter_user.stderr'
       register: _create_user
       changed_when: "'CREATE ROLE' in _create_user.stdout"
 
@@ -434,6 +471,15 @@
       register: _create_db
       changed_when: "'CREATE DATABASE' in _create_db.stdout"
 
+    - name: Check if Authelia database user has correct password
+      ansible.builtin.command:
+        cmd: >
+          podman exec -e PGPASSWORD="{{ postgres_authelia_db_password }}" {{ postgres_container_name }}
+          psql -h 127.0.0.1 -U {{ postgres_authelia_db_user }} -d postgres -c "SELECT 1;"
+      register: _check_authelia_auth
+      failed_when: false
+      changed_when: false
+
     - name: Ensure Authelia database user has the correct password
       ansible.builtin.command:
         cmd: >
@@ -444,6 +490,7 @@
         - _alter_authelia_user.rc != 0
         - '"role \"" + postgres_authelia_db_user + "\" does not exist" not in _alter_authelia_user.stderr'
       changed_when: "'ALTER ROLE' in _alter_authelia_user.stdout"
+      when: _check_authelia_auth.rc != 0
       retries: 5
       delay: 5
       until: _alter_authelia_user.rc == 0 or ("role \"" + postgres_authelia_db_user + "\" does not exist") in _alter_authelia_user.stderr
@@ -453,7 +500,9 @@
         cmd: >
           podman exec {{ postgres_container_name }}
           psql -U postgres -d postgres -c "CREATE USER {{ postgres_authelia_db_user }} WITH PASSWORD '{{ postgres_authelia_db_password }}';"
-      when: '("role \"" + postgres_authelia_db_user + "\" does not exist") in _alter_authelia_user.stderr'
+      when:
+        - not _alter_authelia_user.skipped | default(false)
+        - '("role \"" + postgres_authelia_db_user + "\" does not exist") in _alter_authelia_user.stderr'
       register: _create_authelia_user
       changed_when: "'CREATE ROLE' in _create_authelia_user.stdout"
 
@@ -477,6 +526,15 @@
       register: _create_authelia_db
       changed_when: "'CREATE DATABASE' in _create_authelia_db.stdout"
 
+    - name: Check if postgres superuser has correct password
+      ansible.builtin.command:
+        cmd: >
+          podman exec -e PGPASSWORD="{{ postgres_db_password }}" {{ postgres_container_name }}
+          psql -h 127.0.0.1 -U postgres -d postgres -c "SELECT 1;"
+      register: _check_superuser_auth
+      failed_when: false
+      changed_when: false
+
     - name: Ensure postgres superuser has the correct password
       ansible.builtin.command:
         cmd: >
@@ -484,6 +542,7 @@
           psql -U postgres -d postgres -c "ALTER USER postgres WITH PASSWORD '{{ postgres_db_password }}';"
       register: _alter_superuser
       changed_when: "'ALTER ROLE' in _alter_superuser.stdout"
+      when: _check_superuser_auth.rc != 0
       retries: 5
       delay: 5
       until: _alter_superuser.rc == 0

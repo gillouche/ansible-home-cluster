@@ -14,7 +14,7 @@ k3s_db_port: "{{ global_k3s_db_port }}"
 k3s_db_password: "{{ global_k3s_db_password }}"
 
 # K3s Version
-k3s_version: "{{ global_k3s_version | default('v1.31.2+k3s1') }}"
+k3s_version: "{{ global_k3s_version | default('v1.35.0+k3s1') }}"
 
 # Escape $ for systemd unit files
 datastore_endpoint: >-

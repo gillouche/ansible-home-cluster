@@ -1,0 +1,37 @@
+---
+- name: Reset Nexus Artifactory
+  hosts: artifactory
+  become: true
+  gather_facts: false
+  tags: [reset_nexus]
+  vars_files:
+    - ../../../roles/artifactory/defaults/main.yml
+  tasks:
+    - name: Stop and Disable Nexus Service
+      ansible.builtin.systemd:
+        name: "container-{{ artifactory_nexus_container_name }}"
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Remove Nexus Systemd Unit
+      ansible.builtin.file:
+        path: "/etc/systemd/system/container-{{ artifactory_nexus_container_name }}.service"
+        state: absent
+      notify: Reload Systemd
+
+    - name: Remove Nexus Container
+      containers.podman.podman_container:
+        name: "{{ artifactory_nexus_container_name }}"
+        state: absent
+      failed_when: false
+
+    - name: Wipe Nexus Data Directory
+      ansible.builtin.file:
+        path: "{{ artifactory_nexus_data_dir }}"
+        state: absent
+
+  handlers:
+    - name: Reload Systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

@@ -3,7 +3,17 @@
 # K3s Cluster Orchestrator
 # ==============================================================================
 
-# k3s: k3s cluster
-- name: K3s install
-  import_playbook: includes/setup/k3s.yml
-  tags: [k3s]
+# 1. K3s Infrastructure (Databases, Load Balancers)
+- name: K3s Infrastructure
+  import_playbook: includes/k3s/k3s_infrastructure.yml
+  tags: [k3s, k3s_infrastructure]
+
+# 2. K3s Cluster (Node Prep, Install, Config)
+- name: K3s Cluster
+  import_playbook: includes/k3s/k3s_cluster.yml
+  tags: [k3s, k3s_cluster]
+
+# 3. K3s Apps (Sealed Secrets, ArgoCD)
+- name: K3s Apps
+  import_playbook: includes/k3s/k3s_apps.yml
+  tags: [k3s, k3s_apps]

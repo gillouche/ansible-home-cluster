@@ -3,7 +3,7 @@
   hosts: localhost
   gather_facts: true
   become: false
-  tags: [k3s, k3s_infra, health_local]
+  tags: [health_k3s_infra, health_local]
   vars:
     ansible_connection: local
   tasks:
@@ -16,7 +16,7 @@
   hosts: postgres
   gather_facts: true
   become: false
-  tags: [k3s, k3s_infra, health_etcd]
+  tags: [health_k3s_infra, health_etcd]
   tasks:
     - name: Query Etcd health status (Individual Nodes)
       ansible.builtin.uri:
@@ -30,7 +30,7 @@
   hosts: postgres
   gather_facts: true
   become: false
-  tags: [k3s, k3s_infra, health_postgres]
+  tags: [health_k3s_infra, health_postgres]
   vars_files:
     - ../../../roles/postgres/defaults/main.yml
   tasks:
@@ -72,7 +72,7 @@
   hosts: localhost
   gather_facts: false
   become: false
-  tags: [k3s, k3s_infra, health_postgres]
+  tags: [health_k3s_infra, health_postgres]
   tasks:
     - name: Verify Postgres connectivity via VIP
       ansible.builtin.wait_for:
@@ -86,7 +86,7 @@
   hosts: server
   gather_facts: true
   become: true
-  tags: [k3s, k3s_infra, health_k3s]
+  tags: [health_k3s_infra, health_k3s]
   vars_files:
     - ../../../inventories/group_vars/k3s_cluster/main.yml
     - ../../../inventories/group_vars/all/main.yml
@@ -162,7 +162,7 @@
   hosts: localhost
   gather_facts: false
   become: false
-  tags: [k3s, k3s_infra, health_external]
+  tags: [health_k3s_infra, health_external]
   tasks:
     - name: Verify K3s API (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
@@ -195,7 +195,7 @@
 - name: "K3s Platform Health Report"
   hosts: localhost
   gather_facts: false
-  tags: [k3s, k3s_infra, health_summary]
+  tags: [health_k3s_infra, health_summary]
   vars_files:
     - ../../../inventories/group_vars/all/main.yml
   tasks:
@@ -220,7 +220,7 @@
 - name: "Layer 2 Checkpoint: K3s Platform"
   hosts: localhost
   gather_facts: false
-  tags: [k3s, k3s_infra, health_checkpoint]
+  tags: [health_k3s_infra, health_checkpoint]
   tasks:
     - name: Assert K3s Platform Health
       ansible.builtin.assert:
@@ -236,4 +236,4 @@
         fail_msg: "CRITICAL: K3s Platform Infrastructure (Etcd, Postgres, or K3s VIP) is DOWN. Cannot proceed to workloads."
         success_msg: "K3s Platform is healthy. Proceeding to K3s Workloads layer."
       # noqa: ignore-errors
-      ignore_errors: "{{ 'k3s_apps' not in ansible_run_tags and 'all' not in ansible_run_tags }}"
+      ignore_errors: "{{ 'health_k3s_apps' not in ansible_run_tags and 'all' not in ansible_run_tags }}"

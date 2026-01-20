@@ -17,9 +17,9 @@ tls_root_ca_validity_days: 3650
 tls_wildcard_common_name: "*.gillouche.homelab"
 tls_wildcard_sans:
   - "DNS:*.gillouche.homelab"
-  - "DNS:gillouche.homelab"
   - "DNS:*.k3s.gillouche.homelab"
   - "DNS:*.pihole.gillouche.homelab"
+  - "DNS:gillouche.homelab"
 tls_wildcard_validity_days: 365
 
 # Target Node Paths

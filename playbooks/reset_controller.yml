@@ -2,7 +2,7 @@
 # ==============================================================================
 # Controller Reset Playbook (macOS / Localhost)
 # ==============================================================================
-# This playbook cleans up artifacts and settings on the developer's machine.
+# separate playbook because it needs -K, different password than cluster's sudo user
 
 - name: Reset Controller DNS
   import_playbook: includes/reset/reset_controller_dns.yml

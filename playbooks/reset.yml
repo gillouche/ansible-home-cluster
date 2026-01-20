@@ -34,3 +34,13 @@
 - name: Reset K3s
   import_playbook: includes/reset/k3s_reset.yml
   tags: [reset_k3s]
+
+# 8. Reset Firefly III
+- name: Reset Firefly
+  import_playbook: includes/reset/firefly_reset.yml
+  tags: [reset_firefly]
+
+# 9. Reset Nexus Artifactory
+- name: Reset Nexus
+  import_playbook: includes/reset/nexus_reset.yml
+  tags: [reset_nexus]

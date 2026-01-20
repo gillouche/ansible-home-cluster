@@ -1,0 +1,66 @@
+---
+- name: "Setup Etcd for Patroni + keepalived"
+  hosts: etcd_cluster
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_infrastructure, etcd, postgres]
+  roles:
+    - role: etcd
+      tags: [k3s, k3s_infrastructure, etcd]
+
+- name: "Verify Etcd Cluster Health"
+  hosts: postgres
+  gather_facts: false
+  become: false
+  tags: [k3s, k3s_infrastructure, etcd, postgres]
+  tasks:
+    - name: Wait for Etcd health endpoint
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host | default(ansible_facts.default_ipv4.address) }}:2379/health"
+        status_code: 200
+      register: _etcd_health
+      retries: 15
+      delay: 2
+      until: _etcd_health.status == 200
+      tags: [k3s, k3s_infrastructure, etcd]
+
+- name: "Setup Postgres Leader"
+  hosts: postgres_leader
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_infrastructure, postgres]
+  roles:
+    - role: postgres
+      tags: [k3s, k3s_infrastructure, postgres]
+
+- name: "Setup Postgres replicas"
+  hosts: postgres_replica
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_infrastructure, postgres]
+  roles:
+    - role: postgres
+      tags: [k3s, k3s_infrastructure, postgres]
+
+- name: "Verify Postgres VIP and HAProxy Readiness"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [k3s, k3s_infrastructure, postgres]
+  tasks:
+    - name: Wait for Postgres VIP to respond on HAProxy port
+      ansible.builtin.wait_for:
+        host: "{{ global_k3s_db_host }}"
+        port: "{{ global_k3s_db_port }}"
+        state: started
+        timeout: 60
+      tags: [k3s, k3s_infrastructure, postgres]
+
+- name: "Setup K3s Load Balancer"
+  hosts: server
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_infrastructure, k3s_lb]
+  roles:
+    - role: k3s_lb
+      tags: [k3s, k3s_infrastructure, k3s_lb]

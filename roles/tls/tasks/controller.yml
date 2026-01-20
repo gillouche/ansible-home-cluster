@@ -25,6 +25,7 @@
     path: "{{ tls_controller_pki_dir }}/root_ca.csr"
     privatekey_path: "{{ tls_root_ca_key_path }}"
     common_name: "{{ tls_root_ca_common_name }}"
+    use_common_name_for_san: false
     basic_constraints:
       - "CA:TRUE"
     key_usage:

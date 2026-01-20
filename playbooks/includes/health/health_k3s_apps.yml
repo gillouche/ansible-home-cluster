@@ -3,7 +3,7 @@
   hosts: localhost
   gather_facts: true
   become: false
-  tags: [k3s, k3s_apps, health_local]
+  tags: [health_k3s_apps, health_local]
   vars:
     ansible_connection: local
   tasks:
@@ -16,7 +16,7 @@
   hosts: server
   gather_facts: true
   become: false
-  tags: [k3s, k3s_apps, health_lb, health_lb_apps]
+  tags: [health_k3s_apps, health_lb, health_lb_apps]
   tasks:
     - name: Verify K3s API via API VIP (HAProxy)
       ansible.builtin.uri:
@@ -129,7 +129,7 @@
   hosts: server
   gather_facts: false
   become: true
-  tags: [k3s, k3s_apps, health_longhorn]
+  tags: [health_k3s_apps, health_longhorn]
   tasks:
     - name: Gather Longhorn Nodes Status
       ansible.builtin.command: k3s kubectl get nodes.longhorn.io -n longhorn-system -o json
@@ -151,7 +151,7 @@
   hosts: localhost
   gather_facts: false
   become: false
-  tags: [k3s, k3s_apps, health_external]
+  tags: [health_k3s_apps, health_external]
   tasks:
     - name: Verify Prometheus via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
@@ -282,7 +282,7 @@
 - name: "K3s Workloads Health Report"
   hosts: localhost
   gather_facts: false
-  tags: [k3s, k3s_apps, health_summary]
+  tags: [health_k3s_apps, health_summary]
   vars_files:
     - ../../../inventories/group_vars/all/main.yml
   tasks:

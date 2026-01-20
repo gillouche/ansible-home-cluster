@@ -1,0 +1,44 @@
+---
+- name: Reset Firefly III
+  hosts: firefly
+  become: true
+  gather_facts: false
+  tags: [reset_firefly]
+  vars_files:
+    - ../../../roles/firefly/defaults/main.yml
+  tasks:
+    - name: Stop and Disable Firefly Service
+      ansible.builtin.systemd:
+        name: "container-{{ firefly_container_name }}"
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Remove Firefly Systemd Unit
+      ansible.builtin.file:
+        path: "/etc/systemd/system/container-{{ firefly_container_name }}.service"
+        state: absent
+      notify: Reload Systemd
+
+    - name: Remove Firefly Container
+      containers.podman.podman_container:
+        name: "{{ firefly_container_name }}"
+        state: absent
+      failed_when: false
+
+    - name: Wipe Firefly Data Directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ firefly_data_dir }}"
+        - "{{ firefly_upload_dir }}"
+        # Handle case where home dir itself might be dedicated? No, safer to remove specific dirs.
+        # But if the role creates firefly_home, we should consider removing it if it's not /home/firefly.
+        # Based on defaults: /home/firefly/data. So we can remove /home/firefly if the user exists but typically we wipe data.
+        # Let's wipe the data/upload folders as defined in defaults.
+
+  handlers:
+    - name: Reload Systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

@@ -81,6 +81,27 @@
         - /usr/local/bin/k3s-uninstall.sh
         - /usr/local/bin/k3s-agent-uninstall.sh
 
+    - name: Clean up Network Interfaces (CNI)
+      ansible.builtin.shell: |
+        ip link delete cni0 || true
+        ip link delete flannel.1 || true
+      become: true
+      changed_when: false
+      failed_when: false
+
+    - name: Flush K3s Firewall Rules (Safe)
+      ansible.builtin.command: "nft delete table {{ item.family }} {{ item.table }}"
+      loop:
+        - { family: ip, table: filter }
+        - { family: ip, table: nat }
+        - { family: ip, table: mangle }
+        - { family: ip6, table: filter }
+        - { family: ip6, table: nat }
+        - { family: ip6, table: mangle }
+      become: true
+      changed_when: true
+      failed_when: false # Ignore if table doesn't exist
+
     - name: Remove longhorn user and its home directory
       ansible.builtin.user:
         name: longhorn

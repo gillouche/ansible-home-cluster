@@ -1,160 +1,94 @@
 ---
-- name: "Setup Etcd for Patroni + keepalived"
-  hosts: etcd_cluster
-  gather_facts: true
-  become: true
-  tags: [k3s, etcd, postgres]
-  roles:
-    - role: etcd
-      tags: [k3s, etcd]
-
-- name: "Verify Etcd Cluster Health"
-  hosts: postgres
-  gather_facts: false
-  become: false
-  tags: [k3s, etcd, postgres]
-  tasks:
-    - name: Wait for Etcd health endpoint
-      ansible.builtin.uri:
-        url: "http://{{ ansible_host | default(ansible_facts.default_ipv4.address) }}:2379/health"
-        status_code: 200
-      register: _etcd_health
-      retries: 15
-      delay: 2
-      until: _etcd_health.status == 200
-      tags: [k3s, etcd]
-
-- name: "Setup Postgres Leader"
-  hosts: postgres_leader
-  gather_facts: true
-  become: true
-  tags: [k3s, postgres]
-  roles:
-    - role: postgres
-      tags: [k3s, postgres]
-
-- name: "Setup Postgres replicas"
-  hosts: postgres_replica
-  gather_facts: true
-  become: true
-  tags: [k3s, postgres]
-  roles:
-    - role: postgres
-      tags: [k3s, postgres]
-
-- name: "Verify Postgres VIP and HAProxy Readiness"
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  tags: [k3s, postgres]
-  tasks:
-    - name: Wait for Postgres VIP to respond on HAProxy port
-      ansible.builtin.wait_for:
-        host: "{{ global_k3s_db_host }}"
-        port: "{{ global_k3s_db_port }}"
-        state: started
-        timeout: 60
-      tags: [k3s, postgres]
-
-- name: "Setup K3s Load Balancer"
-  hosts: server
-  gather_facts: true
-  become: true
-  tags: [k3s, k3s_lb]
-  roles:
-    - role: k3s_lb
-      tags: [k3s, k3s_lb]
-
 - name: Cluster prep
   hosts: k3s_cluster
   gather_facts: true
   become: true
-  tags: [k3s, k3s_prep]
-  pre_tasks:
+  tags: [k3s, k3s_cluster, k3s_prep]
   roles:
     - role: k3s.orchestration.prereq
-      tags: [k3s, k3s_prep]
+      tags: [k3s, k3s_cluster, k3s_prep]
     - role: k3s.orchestration.raspberrypi
-      tags: [k3s, k3s_prep]
+      tags: [k3s, k3s_cluster, k3s_prep]
 
 - name: Setup K3S server
   hosts: server
   become: true
   serial: 1
-  tags: [k3s, k3s_server]
+  gather_facts: true
+  tags: [k3s, k3s_cluster, k3s_server]
   pre_tasks:
     - name: Set token fact from k3s_cluster_token
       ansible.builtin.set_fact:
         token: "{{ k3s_cluster_token }}"
       when: k3s_cluster_token is defined
-      tags: [k3s, k3s_server]
+      tags: [k3s, k3s_cluster, k3s_server]
   roles:
+    - role: k3s.orchestration.k3s_server
+      tags: [k3s, k3s_cluster, k3s_server]
     - role: k3s_nvidia
       when:
         - k3s_node_labels['accelerator.nvidia.com/gpu.present'] | default('false') | bool
-      tags: [k3s, k3s_server, k3s_nvidia]
-    - role: k3s.orchestration.k3s_server
-      tags: [k3s, k3s_server]
+      tags: [k3s, k3s_cluster, k3s_server, k3s_nvidia]
 
 - name: Fetch K3s Token
   hosts: server
   become: true
   gather_facts: false
-  tags: [k3s, k3s_agent]
+  tags: [k3s, k3s_cluster, k3s_agent]
   tasks:
     - name: Check for node-token
       ansible.builtin.stat:
         path: /var/lib/rancher/k3s/server/node-token
       register: _node_token_stat
-      tags: [k3s, k3s_agent]
+      tags: [k3s, k3s_cluster, k3s_agent]
 
     - name: Read node-token
       ansible.builtin.slurp:
         src: /var/lib/rancher/k3s/server/node-token
       register: _node_token_content
       when: _node_token_stat.stat.exists
-      tags: [k3s, k3s_agent]
+      tags: [k3s, k3s_cluster, k3s_agent]
 
     - name: Set token fact
       ansible.builtin.set_fact:
         token: "{{ _node_token_content.content | b64decode | trim }}"
       when: _node_token_stat.stat.exists
-      tags: [k3s, k3s_agent]
+      tags: [k3s, k3s_cluster, k3s_agent]
 
 - name: Setup K3S agent
   hosts: agent
   become: true
-  tags: [k3s, k3s_agent]
+  tags: [k3s, k3s_cluster, k3s_agent]
   pre_tasks:
     - name: Ensure systemd is reloaded before agent setup
       ansible.builtin.systemd:
         daemon_reload: true
   roles:
     - role: k3s.orchestration.k3s_agent
-      tags: [k3s, k3s_agent]
+      tags: [k3s, k3s_cluster, k3s_agent]
 
 - name: Label K3s nodes
   hosts: server[0]
   become: true
-  tags: [k3s, k3s_labels]
+  tags: [k3s, k3s_cluster, k3s_labels]
   roles:
     - role: k3s_labels
-      tags: [k3s, k3s_labels]
+      tags: [k3s, k3s_cluster, k3s_labels]
 
 - name: Setup Longhorn OS Dependencies
   hosts: k3s_cluster
   gather_facts: true
   become: true
-  tags: [k3s, k3s_longhorn]
+  tags: [k3s, k3s_cluster, k3s_longhorn]
   roles:
     - role: k3s_longhorn
-      tags: [k3s, longhorn]
+      tags: [k3s, k3s_cluster, longhorn]
 
 - name: Fetch K3s Kubeconfig
   hosts: server[0]
   become: true
   gather_facts: false
-  tags: [k3s, k3s_kubeconfig]
+  tags: [k3s, k3s_cluster, k3s_kubeconfig]
   tasks:
     - name: Slurp k3s.yaml
       ansible.builtin.slurp:
@@ -165,7 +99,7 @@
   hosts: localhost
   connection: local
   gather_facts: true
-  tags: [k3s, k3s_kubeconfig]
+  tags: [k3s, k3s_cluster, k3s_kubeconfig]
   vars:
     # URL for external access (Direct to API VIP to support client-cert auth)
     k3s_external_url: "https://{{ hostvars[groups['server'][0]]['k3s_api_vip'] }}:6443"
@@ -216,17 +150,3 @@
           Kubeconfig saved to {{ ansible_env.HOME }}/.kube/k3s.yaml (context: k3s).
           To use it, run: export KUBECONFIG={{ ansible_env.HOME }}/.kube/config:{{ ansible_env.HOME }}/.kube/k3s.yaml
           or add that line to your shell profile.
-
-- name: Install Sealed Secrets
-  hosts: server[0]
-  become: true
-  tags: [k3s, k3s_sealed_secret]
-  roles:
-    - role: k3s_sealed_secret
-
-- name: Deploy ArgoCD (GitOps Bootstrap)
-  hosts: server[0]
-  become: true
-  tags: [k3s, k3s_argocd]
-  roles:
-    - role: k3s_argocd

@@ -1,0 +1,16 @@
+---
+- name: Install Sealed Secrets
+  hosts: server[0]
+  become: true
+  tags: [k3s, k3s_apps, k3s_sealed_secret]
+  roles:
+    - role: k3s_sealed_secret
+      tags: [k3s, k3s_apps, k3s_sealed_secret]
+
+- name: Deploy ArgoCD (GitOps Bootstrap)
+  hosts: server[0]
+  become: true
+  tags: [k3s, k3s_apps, k3s_argocd]
+  roles:
+    - role: k3s_argocd
+      tags: [k3s, k3s_apps, k3s_argocd]
