@@ -25,6 +25,7 @@
         timeout: 60
       delegate_to: localhost
       run_once: true
+      become: false
 
 - name: "Restore Edge Proxy"
   hosts: edge_proxy_cluster
