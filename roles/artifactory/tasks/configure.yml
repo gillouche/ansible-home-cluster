@@ -112,7 +112,7 @@
       docker:
         v1Enabled: false
         forceBasicAuth: true
-        httpPort: 8082
+        # No httpPort specified - uses path-based routing via /repository/docker-hosted
     status_code: [201, 409]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'docker-hosted') | list | length == 0
   become: false
