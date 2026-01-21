@@ -92,6 +92,31 @@
   when: _nexus_repos.json | selectattr('name', 'equalto', 'docker-hub') | list | length == 0
   become: false
 
+- name: Create docker-hosted repository
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/docker/hosted"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    headers:
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: docker-hosted
+      online: true
+      storage:
+        blobStoreName: default
+        strictContentTypeValidation: true
+        writePolicy: ALLOW
+      docker:
+        v1Enabled: false
+        forceBasicAuth: true
+        httpPort: 8082
+    status_code: [201, 409]
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'docker-hosted') | list | length == 0
+  become: false
+
 - name: Create Quay Proxy repository
   ansible.builtin.uri:
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/docker/proxy"
