@@ -112,9 +112,31 @@
       docker:
         v1Enabled: false
         forceBasicAuth: true
-        # No httpPort specified - uses path-based routing via /repository/docker-hosted
+        # No httpPort - subdomain routing via reverse proxy
+        # Access via docker.gillouche.homelab (configured in HAProxy/Caddy)
     status_code: [201, 409]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'docker-hosted') | list | length == 0
+  become: false
+
+# Configure Nexus to accept requests from docker.gillouche.homelab subdomain
+- name: Configure Nexus base URL for Docker subdomain
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/system/http"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    headers:
+      Content-Type: application/json
+    body_format: json
+    body:
+      httpEnabled: true
+      httpPort: "{{ artifactory_nexus_port }}"
+      httpsEnabled: false
+      # Set base URL to allow subdomain routing
+      timeout: 60
+      userAgentSuffix: null
+    status_code: [200, 204]
   become: false
 
 - name: Create Quay Proxy repository

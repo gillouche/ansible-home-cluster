@@ -48,7 +48,7 @@
     mode: '0644'
   vars:
     vip_address: "{{ reverse_proxy_virtual_ip }}"
-    vrrp_interface: "{{ ansible_facts['default_ipv4']['interface'] | default('eth0') }}"
+    vrrp_interface: "{{ monit_network_interface | default('end0') }}"
     vrrp_state: "{{ 'MASTER' if reverse_proxy_is_primary | bool else 'BACKUP' }}"
     vrrp_priority: "{{ 100 if reverse_proxy_is_primary | bool else 90 }}"
     vrrp_auth_pass: "{{ reverse_proxy_vrrp_auth_pass }}"

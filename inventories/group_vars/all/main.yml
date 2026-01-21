@@ -20,6 +20,8 @@ global_k3s_version: "v1.35.0+k3s1"
 # Software Versions (Shared Agents)
 # ----------------------------------------
 
+monit_network_interface: "end0"
+
 # tls trust/CA distribution (controller + hosts)
 tls_trust_ca_on_controller: true
 tls_controller_install_keychain: login

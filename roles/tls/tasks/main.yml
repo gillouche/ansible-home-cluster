@@ -28,7 +28,7 @@
         mode: '0644'
         owner: root
         group: root
-      when: ansible_os_family == "Archlinux"
+      when: ansible_facts['os_family'] | default('') == "Archlinux"
       become: true
       notify: refresh system trust store
 

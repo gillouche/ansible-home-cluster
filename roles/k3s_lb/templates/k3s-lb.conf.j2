@@ -8,7 +8,7 @@ vrrp_script check_k3s_lb {
 
 vrrp_instance VI_K3s_LB {
   state {{ 'MASTER' if inventory_hostname == (groups['server'] | sort)[0] else 'BACKUP' }}
-  interface {{ ansible_facts['default_ipv4']['interface'] | default(k3s_lb_vrrp_interface | default('end0')) }}
+  interface {{ monit_network_interface | default(k3s_lb_vrrp_interface | default('end0')) }}
   virtual_router_id {{ k3s_lb_virtual_router_id }}
   priority {{ 100 if inventory_hostname == (groups['server'] | sort)[0] else 90 }}
   advert_int 1
@@ -27,7 +27,7 @@ vrrp_instance VI_K3s_LB {
   }
 
   track_interface {
-    {{ ansible_facts['default_ipv4']['interface'] | default(k3s_lb_vrrp_interface | default('end0')) }}
+    {{ monit_network_interface | default(k3s_lb_vrrp_interface | default('end0')) }}
   }
 
   track_script {
