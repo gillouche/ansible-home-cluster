@@ -19,6 +19,17 @@
   become: true
   when: (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
 
+- name: Install Podman Build Tools (podman-docker, buildah)
+  community.general.pacman:
+    name:
+      - podman-docker
+      - buildah
+    state: present
+  become: true
+  when:
+    - (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
+    - support_podman_buildx | default(false)
+
 - name: Ensure IPv4 forwarding enabled for container networking
   ansible.posix.sysctl:
     name: net.ipv4.ip_forward
@@ -98,3 +109,48 @@
       # Allow short names like "pihole/pihole" by defining search registries
       unqualified-search-registries = ["docker.io", "quay.io", "ghcr.io"]
   become: true
+  when: support_podman_buildx | default(false)
+
+- name: Ensure podman group exists
+  ansible.builtin.group:
+    name: podman
+    state: present
+  become: true
+  when: support_podman_buildx | default(false)
+
+- name: Add target_user to podman group
+  ansible.builtin.user:
+    name: "{{ target_user }}"
+    groups: podman
+    append: true
+  become: true
+  when: support_podman_buildx | default(false)
+
+- name: Ensure system Podman socket is enabled
+  ansible.builtin.systemd:
+    name: podman.socket
+    state: started
+    enabled: true
+  become: true
+  when: support_podman_buildx | default(false)
+
+- name: Ensure Podman socket permissions via tmpfiles.d
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/podman-socket.conf
+    content: |
+      # Managed by Ansible
+      # Type Path Mode UID GID Age Argument
+      d /run/podman 0750 root podman - -
+      z /run/podman/podman.sock 0660 root podman - -
+    mode: '0644'
+  become: true
+  register: _podman_socket_tmpfiles
+  when: support_podman_buildx | default(false)
+
+- name: Apply tmpfiles for Podman socket
+  ansible.builtin.command: systemd-tmpfiles --create /etc/tmpfiles.d/podman-socket.conf
+  become: true
+  changed_when: true
+  when:
+    - support_podman_buildx | default(false)
+    - _podman_socket_tmpfiles.changed
