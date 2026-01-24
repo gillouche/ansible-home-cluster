@@ -32,3 +32,4 @@ tls_wildcard_validity_days: 365
 tls_target_dir: "/etc/tls"
 tls_target_live_dir: "{{ tls_target_dir }}/live"
 tls_ca_bundle_path: "{{ tls_target_dir }}/ca-bundle.pem"
+upstream_ca_bundle_path: /etc/ssl/cert.pem

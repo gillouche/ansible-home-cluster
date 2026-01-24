@@ -47,6 +47,12 @@
   when: not _root_ca_crt_stat.stat.exists
 
 
+- name: Create combined CA bundle (Homelab Root CA + Upstream Bundle)
+  ansible.builtin.shell: |
+    cat "{{ tls_root_ca_crt_path }}" "{{ upstream_ca_bundle_path }}" > "{{ tls_controller_pki_dir }}/ca-bundle.pem"
+  changed_when: true
+
+
 # --- Wildcard Cert ---
 
 - name: Generate Wildcard Private Key
