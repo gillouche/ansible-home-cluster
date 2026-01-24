@@ -30,7 +30,7 @@
         group: root
       when: ansible_facts['os_family'] | default('') == "Archlinux"
       become: true
-      notify: refresh system trust store
+      notify: Refresh system trust store
 
     - name: Install CA bundle (Root CA) - Legacy/App Bundle
       ansible.builtin.copy:
@@ -41,7 +41,7 @@
         group: root
       # Also trigger trust refresh just in case, though usually this file is for apps targeting it directly
       become: true
-      notify: refresh system trust store
+      notify: Refresh system trust store
 
 # 3. Edge Proxy Certificate Delivery
 - name: Distribute Wildcard Certs to Proxy Nodes
@@ -61,7 +61,7 @@
         mode: '0644'
         owner: root
         group: root
-      notify: restart caddy
+      notify: Restart caddy
 
     - name: Copy Wildcard Private Key
       ansible.builtin.copy:
@@ -70,4 +70,4 @@
         mode: '0600'
         owner: root
         group: root
-      notify: restart caddy
+      notify: Restart caddy

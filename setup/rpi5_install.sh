@@ -26,7 +26,7 @@ umount -R $SDMOUNT
 
 echo "Formatting disks $SDDEV"
 sfdisk --quiet --wipe always $SDDEV << EOF
-,256M,0c,
+,2G,0c,
 ,,,
 EOF
 

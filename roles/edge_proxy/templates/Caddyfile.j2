@@ -5,7 +5,7 @@
 }
 
 {% if reverse_proxy_domains | default([]) | length > 0 %}
-{{ reverse_proxy_domains | join(', ') }} {
+{{ reverse_proxy_domains | join(', ') }}, *.k3s.gillouche.homelab, *.*.k3s.gillouche.homelab, *.*.*.k3s.gillouche.homelab {
     bind {{ reverse_proxy_bind_ip | default('0.0.0.0') }}
 
     # Load certificates from the host mount (container needs to mount these)
