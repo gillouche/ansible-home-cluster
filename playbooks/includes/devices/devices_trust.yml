@@ -7,4 +7,4 @@
     - name: Run TLS role for CA distribution
       ansible.builtin.include_role:
         name: tls
-      tags: [devices, devices_trust]
+      tags: [devices, devices_trust, tls]
