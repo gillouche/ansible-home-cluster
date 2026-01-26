@@ -1,0 +1,11 @@
+---
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reexec: true
+  become: true
+
+- name: Restart watchdog
+  ansible.builtin.service:
+    name: watchdog
+    state: restarted
+  become: true

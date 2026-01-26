@@ -70,6 +70,19 @@ all:
         rpi5b16g6:
         homeserver:
         homeserver2:
+    watchdog:
+      hosts:
+        rpi4b8g1:
+        rpi4b8g2:
+        rpi4b8g3:
+        rpi4b8g4:
+        rpi5b8g1:
+        rpi5b16g1ssd:
+        rpi5b16g2ssd:
+        rpi5b16g3ssd:
+        rpi5b16g4:
+        rpi5b16g5:
+        rpi5b16g6:
     dns_cluster:
       hosts:
         homeserver:

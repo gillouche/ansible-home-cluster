@@ -1,0 +1,14 @@
+# Network monitoring
+{% for host in watchdog_ping_hosts %}
+ping = {{ host }}
+{% endfor %}
+ping-count = {{ watchdog_ping_count }}
+
+# Interface monitoring
+interface = {{ watchdog_interface }}
+
+# Basic settings
+watchdog-device = {{ watchdog_device }}
+retry-timeout = {{ watchdog_retry_timeout }}
+realtime = {{ watchdog_realtime }}
+interval = {{ watchdog_interval }}

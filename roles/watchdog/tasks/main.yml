@@ -1,0 +1,46 @@
+---
+- name: Install watchdog from AUR
+  ansible.builtin.command:
+    cmd: yay -S --noconfirm --needed watchdog
+  become: true
+  become_user: aur_builder
+  when: inventory_hostname in groups['watchdog']
+  changed_when: false
+
+- name: Configure RuntimeWatchdogSec in systemd
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/system.conf
+    regexp: '^#?RuntimeWatchdogSec='
+    line: "RuntimeWatchdogSec={{ watchdog_runtime_timeout }}"
+  notify: Reload systemd daemon
+  become: true
+  when: inventory_hostname in groups['watchdog']
+
+- name: Configure ShutdownWatchdogSec in systemd
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/system.conf
+    regexp: '^#?ShutdownWatchdogSec='
+    line: "ShutdownWatchdogSec={{ watchdog_shutdown_timeout }}"
+  notify: Reload systemd daemon
+  become: true
+  when: inventory_hostname in groups['watchdog']
+
+- name: Configure /etc/watchdog.conf
+  ansible.builtin.template:
+    src: watchdog.conf.j2
+    dest: /etc/watchdog.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart watchdog
+  become: true
+  when: inventory_hostname in groups['watchdog']
+
+- name: Enable and start watchdog service
+  ansible.builtin.systemd:
+    name: watchdog
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: inventory_hostname in groups['watchdog']

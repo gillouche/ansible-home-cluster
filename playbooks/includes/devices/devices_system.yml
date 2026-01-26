@@ -20,6 +20,8 @@
       tags: [devices, devices_system, containers]
     - role: monit
       tags: [devices, devices_system, monit]
+    - role: watchdog
+      tags: [devices, devices_system, watchdog]
 
 - name: "Setup AMD GPU"
   hosts: homeserver
