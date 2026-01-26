@@ -8,5 +8,5 @@ watchdog_ping_count: 5
 watchdog_retry_timeout: 60
 watchdog_interval: 10
 watchdog_realtime: "yes"
-watchdog_device: "none"
+watchdog_device: "/dev/watchdog"
 watchdog_interface: "{{ ansible_default_ipv4.interface | default('end0') }}"
