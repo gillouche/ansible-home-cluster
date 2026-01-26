@@ -1,5 +1,5 @@
 ---
-watchdog_runtime_timeout: "10s"
+watchdog_runtime_timeout: "0"
 watchdog_shutdown_timeout: "10min"
 watchdog_ping_hosts:
   - "8.8.8.8"
