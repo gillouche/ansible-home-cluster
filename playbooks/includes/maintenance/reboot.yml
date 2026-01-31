@@ -1,20 +1,100 @@
 ---
-- name: Reboot devices sequentially (staggered)
-  hosts: all
+- name: Reboot homeserver (Primary Control Plane)
+  hosts: homeserver
   gather_facts: true
   become: true
-  serial: 1
-  tags: [reboot]
+  tags: [reboot, reboot_servers]
   vars:
-    reboot_timeout: 600
-    reboot_connect_timeout: 30
-    reboot_post_reboot_delay: 10
-    reboot_test_command: "true"
+    reboot_timeout: 1200
   tasks:
-    - name: Reboot host and wait for it to become available
+    - name: Stop K3s service gracefully
+      ansible.builtin.service:
+        name: k3s
+        state: stopped
+
+    - name: Reboot host
       ansible.builtin.reboot:
-        msg: "Reboot triggered by ansible-home-cluster"
+        msg: "Rebooting homeserver (Maintenance)"
         reboot_timeout: "{{ reboot_timeout }}"
-        connect_timeout: "{{ reboot_connect_timeout }}"
-        post_reboot_delay: "{{ reboot_post_reboot_delay }}"
-        test_command: "{{ reboot_test_command }}"
+
+    - name: Wait for K3s API port (6443)
+      ansible.builtin.wait_for:
+        port: 6443
+        host: "{{ ansible_host }}"
+        delay: 10
+        timeout: 300
+
+    - name: Validate homeserver is Ready
+      ansible.builtin.command: kubectl get node homeserver --no-headers
+      delegate_to: localhost
+      become: false
+      register: node_status
+      until: "'Ready' in node_status.stdout"
+      retries: 30
+      delay: 10
+      changed_when: false
+
+- name: Reboot homeserver2 (Secondary Control Plane)
+  hosts: homeserver2
+  gather_facts: true
+  become: true
+  tags: [reboot, reboot_servers]
+  vars:
+    reboot_timeout: 1200
+  tasks:
+    - name: Stop K3s service gracefully
+      ansible.builtin.service:
+        name: k3s
+        state: stopped
+
+    - name: Reboot host
+      ansible.builtin.reboot:
+        msg: "Rebooting homeserver2 (Maintenance)"
+        reboot_timeout: "{{ reboot_timeout }}"
+
+    - name: Wait for K3s API port (6443)
+      ansible.builtin.wait_for:
+        port: 6443
+        host: "{{ ansible_host }}"
+        delay: 10
+        timeout: 300
+
+    - name: Validate homeserver2 is Ready
+      ansible.builtin.command: kubectl get node homeserver2 --no-headers
+      delegate_to: localhost
+      become: false
+      register: node_status
+      until: "'Ready' in node_status.stdout"
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Validate Critical Applications are Available
+      ansible.builtin.command: >
+        kubectl wait --for=condition=available --timeout=300s deployment/{{ item.name }} -n {{ item.ns }}
+      delegate_to: localhost
+      become: false
+      loop:
+        - { name: 'coredns', ns: 'kube-system' }
+        - { name: 'traefik', ns: 'kube-system' }
+        - { name: 'argocd-server', ns: 'argocd' }
+        - { name: 'argocd-repo-server', ns: 'argocd' }
+      changed_when: false
+
+- name: Reboot agent devices
+  hosts: agent
+  gather_facts: true
+  become: true
+  tags: [reboot, reboot_agents]
+  vars:
+    reboot_timeout: 1200
+  tasks:
+    - name: Stop K3s Agent service gracefully
+      ansible.builtin.service:
+        name: k3s-agent
+        state: stopped
+
+    - name: Reboot host
+      ansible.builtin.reboot:
+        msg: "Rebooting agent (Maintenance)"
+        reboot_timeout: "{{ reboot_timeout }}"
