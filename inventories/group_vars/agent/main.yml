@@ -1,3 +1,7 @@
 ---
 # Agent Arguments
-extra_agent_args: ""
+agent_config_yaml: |
+  kubelet-arg:
+    - "system-reserved=cpu=300m,memory=512Mi"
+    - "kube-reserved=cpu=100m,memory=256Mi"
+    - "eviction-hard=memory.available<256Mi,nodefs.available<5%"
