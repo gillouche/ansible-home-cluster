@@ -16,7 +16,7 @@
 
 - name: Set macOS DNS server to Pi-hole VIP (networksetup)
   ansible.builtin.command: >-
-    networksetup -setdnsservers {{ controller_dns_network_service | quote }} {{ pihole_virtual_ip | default('192.168.0.251') }} 1.1.1.1
+    networksetup -setdnsservers {{ controller_dns_network_service | quote }} {{ pihole_virtual_ip | default('192.168.0.251') }}
   changed_when: true
   become: true
   when: (ansible_facts.get('os_family', '') | lower) == 'darwin'
