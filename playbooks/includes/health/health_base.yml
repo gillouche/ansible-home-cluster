@@ -288,6 +288,20 @@
         _external_pihole_replica1_ready:
           status: "{{ _external_pihole_replica1_ready_cmd.stdout | int if _external_pihole_replica1_ready_cmd.stdout | length > 0 else 0 }}"
 
+    - name: Verify Pi-hole Replica2 via External Proxy (HTTPS) # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -v -k -L --silent --output /dev/null --write-out "%{http_code}"
+        --resolve replica2.pihole.{{ base_domain }}:443:{{ reverse_proxy_virtual_ip }}
+        https://replica2.pihole.{{ base_domain }}/admin/
+      register: _external_pihole_replica2_ready_cmd
+      changed_when: false
+      failed_when: false
+
+    - name: Set Pi-hole Replica2 status fact
+      ansible.builtin.set_fact:
+        _external_pihole_replica2_ready:
+          status: "{{ _external_pihole_replica2_ready_cmd.stdout | int if _external_pihole_replica2_ready_cmd.stdout | length > 0 else 0 }}"
+
     - name: Verify Nexus via External Proxy (HTTPS) # noqa: command-instead-of-module
       ansible.builtin.command: >-
         curl -v -k -L --silent --output /dev/null --write-out "%{http_code}"

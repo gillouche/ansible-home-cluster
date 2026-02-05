@@ -127,7 +127,7 @@
     - name: Verify NVIDIA GPU Status (homeserver2)
       ansible.builtin.command: nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
       register: _nvidia_smi_status
-      when: inventory_hostname == 'homeserver2'
+      when: inventory_hostname in ['homeserver2', 'homeserver3']
       changed_when: false
       failed_when: false
 

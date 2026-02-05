@@ -53,6 +53,10 @@ all:
       ansible_host: 192.168.0.88
       ansible_ssh_user: alarm
       target_user: alarm
+    homeserver3:
+      ansible_host: 192.168.0.89
+      ansible_ssh_user: alarm
+      target_user: alarm
 
   children:
     devices:
@@ -70,6 +74,7 @@ all:
         rpi5b16g6:
         homeserver:
         homeserver2:
+        homeserver3:
     watchdog:
       hosts:
         rpi4b8g1:
@@ -87,35 +92,41 @@ all:
       hosts:
         homeserver:
         homeserver2:
+        homeserver3:
     dns_primary:
       hosts:
         homeserver2:
     dns_replicas:
       hosts:
         homeserver:
+        homeserver3:
     edge_proxy_cluster:
       hosts:
         homeserver:
         homeserver2:
+        homeserver3:
     edge_proxy_primary:
       hosts:
         homeserver2:
     edge_proxy_replicas:
       hosts:
         homeserver:
+        homeserver3:
     internal_lb_cluster:
       hosts:
         homeserver:
         homeserver2:
+        homeserver3:
     internal_lb_primary:
       hosts:
         homeserver2:
     internal_lb_replicas:
       hosts:
         homeserver:
+        homeserver3:
     artifactory:
       hosts:
-        homeserver2:
+        homeserver3:
     firefly:
       hosts:
         homeserver2:
@@ -123,17 +134,19 @@ all:
       hosts:
         homeserver:
         homeserver2:
-        rpi5b16g3ssd:
+        homeserver3:
     postgres:
       hosts:
         homeserver:
         homeserver2:
+        homeserver3:
     postgres_leader:
       hosts:
         homeserver2:
     postgres_replica:
       hosts:
         homeserver:
+        homeserver3:
     k3s_cluster:
       children:
         server:
@@ -162,6 +175,17 @@ all:
                 accelerator.nvidia.com/gpu.present: "true"
                 kubernetes.io/accelerator: nvidia
                 nvidia.com/gpu.count: "1"
+                workload.tier: critical
+                hardware.reliability: server
+                storage.longhorn.io/eligible: "true"
+                node.longhorn.io/create-default-disk: "true"
+            homeserver3:
+              k3s_node_labels:
+                node-class: homeserver
+                reliability: preferred
+                topology.kubernetes.io/zone: stable
+                node-role.kubernetes.io/control-plane: "true"
+                topology.kubernetes.io/node-group: homeserver
                 workload.tier: critical
                 hardware.reliability: server
                 storage.longhorn.io/eligible: "true"
@@ -293,3 +317,4 @@ all:
           hosts:
             homeserver:
             homeserver2:
+            homeserver3:

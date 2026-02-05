@@ -17,6 +17,7 @@ load_balancer_haproxy_frontends:
       # ACLs for Pi-hole Routing
       - "acl is_pihole_primary hdr(host) -i primary.pihole.{{ base_domain }}"
       - "acl is_pihole_replica1 hdr(host) -i replica1.pihole.{{ base_domain }}"
+      - "acl is_pihole_replica2 hdr(host) -i replica2.pihole.{{ base_domain }}"
       - "acl is_pihole_cluster hdr_end(host) -i pihole.{{ base_domain }}"
 
       # ACLs for Nexus
@@ -34,6 +35,7 @@ load_balancer_haproxy_frontends:
       # Specific routing for Pi-hole
       - "use_backend pihole_primary if is_pihole_primary"
       - "use_backend pihole_replica1 if is_pihole_replica1"
+      - "use_backend pihole_replica2 if is_pihole_replica2"
       - "use_backend pihole_backend if is_pihole_cluster"
 
       # Routing Logic for Nexus
@@ -80,6 +82,9 @@ load_balancer_haproxy_backends:
       - name: k3s_server2
         addr: "{{ hostvars[groups['server'][1]].ansible_host }}"
         port: 9000
+      - name: k3s_server3
+        addr: "{{ hostvars[groups['server'][2]].ansible_host }}"
+        port: 9000
 
   # Nexus Backend
   - name: nexus_backend
@@ -114,6 +119,10 @@ load_balancer_haproxy_backends:
         addr: "{{ hostvars[groups['server'][1]].ansible_host }}"
         port: "{{ global_k3s_api_port }}"
         opts: "check check-ssl verify none ssl"
+      - name: k3s_server3
+        addr: "{{ hostvars[groups['server'][2]].ansible_host }}"
+        port: "{{ global_k3s_api_port }}"
+        opts: "check check-ssl verify none ssl"
 
   # Pi-hole Backends
   - name: pihole_primary
@@ -132,6 +141,14 @@ load_balancer_haproxy_backends:
         port: "{{ pihole_http_host_port }}"
         opts: "check"
 
+  - name: pihole_replica2
+    mode: http
+    servers:
+      - name: pihole_replica2
+        addr: "{{ hostvars[groups['dns_replicas'][1]].ansible_host }}"
+        port: "{{ pihole_http_host_port }}"
+        opts: "check"
+
   - name: pihole_backend
     mode: http
     balance: roundrobin
@@ -142,5 +159,9 @@ load_balancer_haproxy_backends:
         opts: "check"
       - name: pihole2
         addr: "{{ hostvars[groups['dns_replicas'][0]].ansible_host }}"
+        port: "{{ pihole_http_host_port }}"
+        opts: "check"
+      - name: pihole3
+        addr: "{{ hostvars[groups['dns_replicas'][1]].ansible_host }}"
         port: "{{ pihole_http_host_port }}"
         opts: "check"

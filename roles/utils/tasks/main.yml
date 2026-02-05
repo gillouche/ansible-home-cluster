@@ -4,7 +4,7 @@
   ansible.builtin.setup:
     gather_subset:
       - min
-  when: ansible_distribution is not defined
+  when: ansible_facts['distribution'] is not defined
 
 - name: Install diagnostics and common tools (Arch)
   community.general.pacman:

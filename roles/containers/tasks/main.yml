@@ -110,7 +110,6 @@
       # Allow short names like "pihole/pihole" by defining search registries
       unqualified-search-registries = ["docker.io", "quay.io", "ghcr.io"]
   become: true
-  when: support_podman_buildx | default(false)
 
 - name: Ensure podman group exists
   ansible.builtin.group:

@@ -57,7 +57,7 @@
 {% if host == 'homeserver' and hostvars[host]._amd_gpu_status is defined %}
     AMD GPU:       {{ macros.ok(hostvars[host]._amd_gpu_status.stdout) if hostvars[host]._amd_gpu_status.rc == 0 else macros.bad('ERROR / NOT FOUND') }}
 {% endif %}
-{% if host == 'homeserver2' and hostvars[host]._nvidia_smi_status is defined %}
+{% if (host == 'homeserver2' or host == 'homeserver3') and hostvars[host]._nvidia_smi_status is defined %}
     NVIDIA GPU:    {{ macros.ok(hostvars[host]._nvidia_smi_status.stdout) if hostvars[host]._nvidia_smi_status.rc == 0 else macros.bad('ERROR / NOT FOUND') }}
 {% endif %}
 

@@ -22,10 +22,3 @@ reverse_proxy_domains: "{{ wildcard_domains }}"
 tls_wildcard_cert_enabled: true
 tls_wildcard_domains: "{{ reverse_proxy_domains }}"
 tls_wildcard_dest_dir: "{{ reverse_proxy_data_dir }}/caddy/certificates/wildcard"
-
-# Use localhost to contact Vault for ACME.
-# This works because Caddy runs with network_mode: host, so 127.0.0.1 refers to the host loopback where Vault is listening.
-# This ensures:
-# 1. Primary Caddy connects to the Vault Leader securely and directly.
-# 2. Replicas use the same URL string ('127.0.0.1...'), ensuring the certificate directory path matches the one synced from Primary.
-reverse_proxy_acme_ca_url: "https://127.0.0.1:{{ global_vault_api_port | default(18200) }}/v1/pki_int/acme/directory"

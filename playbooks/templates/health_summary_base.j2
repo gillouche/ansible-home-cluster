@@ -97,6 +97,7 @@
   Nexus (HTTPS):        {{ macros.ok('UP') if (_external_nexus_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
   Pi-hole Pri (HTTPS):  {{ macros.ok('UP') if (_external_pihole_primary_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
   Pi-hole Rep1 (HTTPS): {{ macros.ok('UP') if (_external_pihole_replica1_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
+  Pi-hole Rep2 (HTTPS): {{ macros.ok('UP') if (_external_pihole_replica2_ready.status | default(-1)) == 200 else macros.bad('DOWN') }}
 
 {{ macros.BOLD }}[ SERVICE URLS ]{{ macros.RESET }}
 
@@ -104,5 +105,6 @@
   Nexus:           {{ macros.CYAN }}https://nexus.{{ base_domain }}{{ macros.RESET }}
   Pi-hole Pri:     {{ macros.CYAN }}https://primary.pihole.{{ base_domain }}{{ macros.RESET }}
   Pi-hole Rep1:    {{ macros.CYAN }}https://replica1.pihole.{{ base_domain }}{{ macros.RESET }}
+  Pi-hole Rep2:    {{ macros.CYAN }}https://replica2.pihole.{{ base_domain }}{{ macros.RESET }}
 
 ================================================================================

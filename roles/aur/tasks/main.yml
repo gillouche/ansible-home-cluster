@@ -5,7 +5,7 @@
   ansible.builtin.setup:
     gather_subset:
       - min
-  when: ansible_distribution is not defined
+  when: ansible_facts['distribution'] is not defined
 
 - name: Create the `aur_builder` user
   become: true
@@ -48,40 +48,36 @@
         name: yay
         state: absent
       become: true
+      when: false # Disabled to prevent removing existing yay if we are just checking for yay-bin
 
     - name: Collect package facts (pacman)
       ansible.builtin.package_facts:
         manager: pacman
       become: true
 
-    - name: Probe yay-bin presence via pacman -Q (fallback check)
-      ansible.builtin.command: pacman -Q yay-bin
-      register: aur_helper_yay_q
-      changed_when: false
-      failed_when: false
+    - name: Probe yay-bin binary presence directly
+      ansible.builtin.stat:
+        path: /usr/bin/yay
+      register: aur_helper_yay_stat
       become: true
-
-    - name: Debug AUR decision booleans (verbosity 1)
-      ansible.builtin.debug:
-        msg: "ansible_pkg_mgr={{ ansible_pkg_mgr | default('') }},
-          force={{ aur_helper_force_build | default(false) }},
-          packages_has_yay_bin={{ 'yay-bin' in (ansible_facts.packages | default({})) }},
-          pacman_Q_rc={{ aur_helper_yay_q.rc | default('n/a') }},
-          should_build={{ aur_helper_should_build | default('unset') }},
-          target_user={{ target_user }},
-          ansible_user={{ ansible_user | default('n/a') }}"
-        verbosity: 1
 
     - name: Determine if yay-bin is installed and if build is required
       ansible.builtin.set_fact:
-        aur_helper_bin_installed: >-
-          {{ ('yay-bin' in (ansible_facts.packages | default({}))) or
-             ((aur_helper_yay_q.rc | default(1)) == 0) }}
         aur_helper_should_build: >-
-          {{ (not (('yay-bin' in (ansible_facts.packages | default({}))) or
-             ((aur_helper_yay_q.rc | default(1)) == 0))) or
+          {{ not (('yay-bin' in (ansible_facts.packages | default({}))) or
+             ('yay' in (ansible_facts.packages | default({}))) or
+             (aur_helper_yay_stat.stat.exists | bool)) or
              (aur_helper_force_build | bool) }}
       become: false
+
+    - name: Ensure target architecture is supported (ARM check)
+      ansible.builtin.fail:
+        msg: >-
+          yay-bin from AUR might not support your architecture ({{ ansible_facts['architecture'] }}).
+          Consider using yay (source) if this fails.
+      when:
+        - aur_helper_should_build | bool
+        - ansible_facts['architecture'] not in ['x86_64', 'aarch64']
 
     - name: Install build prerequisites for AUR (when build is required)
       community.general.pacman:
@@ -123,12 +119,32 @@
         update: true
       become: true
       become_user: aur_builder
+      register: aur_helper_git_clone
       when: aur_helper_should_build | bool
 
-    - name: Build yay-bin
-      ansible.builtin.command: makepkg --noconfirm
+    - name: Check PKGBUILD architecture compatibility
+      ansible.builtin.shell: |
+        grep -q "'{{ ansible_facts['architecture'] }}'" PKGBUILD || grep -q "'any'" PKGBUILD
       args:
         chdir: "{{ aur_helper_work_dir_path }}"
+      register: aur_helper_arch_check
+      failed_when: false
+      changed_when: false
+      when: aur_helper_should_build | bool
+      become: true
+
+    - name: Warn if architecture not in PKGBUILD
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ ansible_facts['architecture'] }} not explicitly found in PKGBUILD 'arch' array.
+          makepkg might fail unless -A is used.
+      when: aur_helper_should_build | bool and aur_helper_arch_check.rc != 0
+
+    - name: Build yay-bin
+      ansible.builtin.command: makepkg --force --noconfirm -s{{ ' -A' if (aur_helper_arch_check.rc | default(0) != 0) else '' }}
+      args:
+        chdir: "{{ aur_helper_work_dir_path }}"
+      register: aur_helper_makepkg_output
       changed_when: true
       when: aur_helper_should_build | bool
       become: true
@@ -137,26 +153,51 @@
     - name: Find built package file (yay-bin)
       ansible.builtin.find:
         paths: "{{ aur_helper_work_dir_path }}"
-        patterns: "yay-bin-*.pkg.tar.*"
+        patterns: "yay-bin-[0-9]*.pkg.tar.*"
         file_type: file
+        excludes: "*-debug-*"
         recurse: false
         age_stamp: mtime
       register: aur_helper_yay_pkg_find
       when: aur_helper_should_build | bool
       become: true
 
-    - name: Install yay-bin with pacman
-      community.general.pacman:
-        name: "{{ (aur_helper_yay_pkg_find.files | sort(attribute='mtime', reverse=true) | map(attribute='path') | list | first) }}"
-        state: present
+    - name: Ensure package was found
+      ansible.builtin.assert:
+        that:
+          - aur_helper_yay_pkg_find.files | length > 0
+        fail_msg: "No built package found in {{ aur_helper_work_dir_path }}. makepkg might have failed or produced a different filename."
+      when: aur_helper_should_build | bool
+
+    - name: Install yay-bin with pacman (explicit command to ensure force-reinstall if needed)
+      ansible.builtin.command: >-
+        pacman -U --noconfirm --needed
+        {{ (aur_helper_yay_pkg_find.files | sort(attribute='mtime', reverse=true) | map(attribute='path') | list | first) }}
       become: true
+      register: aur_helper_install_output
+      changed_when: true
       when:
         - aur_helper_should_build | bool
         - (aur_helper_yay_pkg_find.files | default([])) | length > 0
 
     - name: Verify yay works (prints version)
-      ansible.builtin.command: /usr/bin/yay -V
+      ansible.builtin.command: yay -V
       register: aur_helper_yay_version_cmd
       changed_when: false
-      failed_when: aur_helper_yay_version_cmd.rc != 0
-      become: false
+      become: true
+      when: aur_helper_should_build | bool
+
+    - name: Final yay path check
+      ansible.builtin.command: which yay
+      register: aur_helper_yay_path_check
+      changed_when: false
+      become: true
+      failed_when: false
+      when: ansible_verbosity >= 1
+
+    - name: Debug final yay path
+      ansible.builtin.debug:
+        msg: "yay is located at: {{ aur_helper_yay_path_check.stdout }}"
+      when:
+        - ansible_verbosity >= 1
+        - aur_helper_yay_path_check.rc | default(1) == 0
