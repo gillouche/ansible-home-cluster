@@ -14,3 +14,4 @@ extra_server_args: >-
   --tls-san api.k3s.{{ base_domain }}
   --advertise-address {{ ansible_host }}
   --node-ip {{ ansible_host }}
+  {{ extra_server_args_host | default('') }}

@@ -13,7 +13,6 @@
 - name: Setup K3S server
   hosts: server
   become: true
-  serial: 1
   gather_facts: true
   tags: [k3s, k3s_cluster, k3s_server]
   pre_tasks:
