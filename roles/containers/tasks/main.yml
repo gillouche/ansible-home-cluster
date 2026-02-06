@@ -5,7 +5,8 @@
   ansible.builtin.setup:
     gather_subset:
       - min
-  when: ansible_distribution is not defined
+      - network
+  when: ansible_distribution is not defined or ansible_facts['all_ipv6_addresses'] is not defined
 
 - name: Install Podman and dependencies (Arch)
   community.general.pacman:
@@ -47,7 +48,7 @@
     sysctl_set: true
     reload: true
   become: true
-  when: ansible_facts['all_ipv6_addresses'] | length > 0
+  when: ansible_facts['all_ipv6_addresses'] | default([]) | length > 0
 
 - name: Ensure target_user can run rootless containers (subuid/subgid)
   ansible.builtin.lineinfile:

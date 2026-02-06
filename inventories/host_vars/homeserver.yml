@@ -1,4 +1,4 @@
 ---
 reverse_proxy_bind_ip: "0.0.0.0"
 monit_network_interface: "enp8s0"
-support_podman_buildx: false
+support_podman_buildx: true
