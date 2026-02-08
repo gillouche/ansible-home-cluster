@@ -1,0 +1,32 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": [
+        "config:base",
+        ":prHourlyLimitNone",
+        ":prConcurrentLimitNone"
+    ],
+    "labels": [
+        "renovate"
+    ],
+    "packageRules": [
+        {
+            "matchUpdateTypes": [
+                "minor",
+                "patch",
+                "pin",
+                "digest"
+            ],
+            "automerge": true
+        }
+    ],
+    "ansible": {
+        "fileMatch": [
+            "\\.(yaml|yml)$"
+        ]
+    },
+    "pep621": {
+        "fileMatch": [
+            "^pyproject\\.toml$"
+        ]
+    }
+}
