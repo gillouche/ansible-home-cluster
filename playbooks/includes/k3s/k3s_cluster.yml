@@ -10,6 +10,27 @@
     - role: k3s.orchestration.raspberrypi
       tags: [k3s, k3s_cluster, k3s_prep]
 
+  tasks:
+    - name: Ensure required kernel modules are loaded
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - overlay
+        - br_netfilter
+        - vxlan
+      tags: [k3s, k3s_cluster, k3s_prep]
+
+    - name: Persist kernel modules on boot
+      ansible.builtin.copy:
+        content: |
+          overlay
+          br_netfilter
+          vxlan
+        dest: /etc/modules-load.d/k3s.conf
+        mode: '0644'
+      tags: [k3s, k3s_cluster, k3s_prep]
+
 - name: Setup K3S server
   hosts: server
   become: true
