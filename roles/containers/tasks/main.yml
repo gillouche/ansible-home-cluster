@@ -20,15 +20,27 @@
   become: true
   when: (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
 
-- name: Install Podman Build Tools (podman-docker, buildah)
+- name: Install Podman Build Tools (podman-docker, buildah, qemu)
   community.general.pacman:
     name:
       - podman-docker
       - buildah
+      - qemu-user-static
+      - qemu-user-static-binfmt
     state: present
   become: true
   when:
     - (ansible_facts['distribution'] | default('') | lower) == 'archlinux'
+    - support_podman_buildx | default(false)
+  register: _qemu_install
+
+- name: Restart systemd-binfmt to register new handlers
+  ansible.builtin.systemd:
+    name: systemd-binfmt
+    state: restarted
+  become: true
+  when:
+    - _qemu_install.changed
     - support_podman_buildx | default(false)
 
 - name: Ensure IPv4 forwarding enabled for container networking
