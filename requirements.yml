@@ -15,7 +15,7 @@ collections:
   - name: community.hashi_vault
     version: "7.1.0"
   - name: community.crypto
-    version: "2.16.0"
+    version: "2.26.7"
   - name: k3s
     type: git
     source: https://github.com/gillouche/k3s-ansible.git
