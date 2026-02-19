@@ -3,7 +3,7 @@
 # Install with: ansible-galaxy collection install -r requirements.yml
 collections:
   - name: community.general
-    version: "12.1.0"
+    version: "12.3.0"
   - name: ansible.posix
     version: "2.1.0"
   - name: ansible.utils
