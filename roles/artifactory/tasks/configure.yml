@@ -297,6 +297,115 @@
   when: _nexus_repos.json | selectattr('name', 'equalto', 'cargo-proxy') | list | length == 0
   become: false
 
+- name: Create PyPI Hosted repository
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/pypi/hosted"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "pypi-hosted"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+        writePolicy: ALLOW
+    status_code: [200, 201]
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'pypi-hosted') | list | length == 0
+  become: false
+
+- name: Create Helm Hosted repository
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/helm/hosted"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "helm-hosted"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+        writePolicy: ALLOW
+    status_code: [200, 201]
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'helm-hosted') | list | length == 0
+  become: false
+
+- name: Create Cargo Hosted repository
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/cargo/hosted"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "cargo-hosted"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+        writePolicy: ALLOW
+    status_code: [200, 201, 400]
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'cargo-hosted') | list | length == 0
+  become: false
+
+- name: Create NPM Proxy repository
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/npm/proxy"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "npm-proxy"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      proxy:
+        remoteUrl: "https://registry.npmjs.org"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+    status_code: [200, 201]
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'npm-proxy') | list | length == 0
+  become: false
+
+- name: Create NPM Hosted repository
+  ansible.builtin.uri:
+    url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/repositories/npm/hosted"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "npm-hosted"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+        writePolicy: ALLOW
+    status_code: [200, 201]
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'npm-hosted') | list | length == 0
+  become: false
+
 - name: Get list of roles
   ansible.builtin.uri:
     url: "http://localhost:{{ artifactory_nexus_port }}/service/rest/v1/security/roles"
