@@ -17,6 +17,7 @@
                 packages = [
                     pkgs.python314
                     pkgs.uv
+                    pkgs.pre-commit
                 ];
 
                 shellHook = ''

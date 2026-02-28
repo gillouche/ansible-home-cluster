@@ -73,7 +73,7 @@
 
 - name: Wait for Nexus to be ready
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ artifactory_nexus_port }}/service/rest/v1/status"
+    url: "{{ artifactory_nexus_local_url }}/service/rest/v1/status"
     status_code: 200
     validate_certs: false
   register: _nexus_status
@@ -107,7 +107,7 @@
 
 - name: Try to authenticate with current password
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/security/anonymous"
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password_current }}"
     force_basic_auth: true
@@ -127,7 +127,7 @@
 
 - name: Try to authenticate with default password
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/security/anonymous"
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password_current }}"
     force_basic_auth: true
@@ -150,7 +150,7 @@
 
 - name: Final attempt to authenticate
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ artifactory_nexus_port }}/service/rest/v1/security/anonymous"
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/security/anonymous"
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password_current }}"
     force_basic_auth: true

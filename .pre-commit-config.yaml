@@ -27,7 +27,7 @@ repos:
     hooks:
       - id: ansible-lint
         name: ansible-lint
-        entry: uv run ansible-lint
+        entry: env -u PYTHONPATH uv run ansible-lint
         language: system
         types: [yaml]
         # Only run on ansible files (playbooks, roles, etc.)

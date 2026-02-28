@@ -39,7 +39,7 @@
   pre_tasks:
     - name: Ensure systemd preset directory exists
       ansible.builtin.file:
-        path: /etc/systemd/system-preset
+        path: /etc/systemd/system-presets
         state: directory
         mode: '0755'
 
@@ -47,7 +47,7 @@
       ansible.builtin.copy:
         content: |
           enable k3s.service
-        dest: /etc/systemd/system-preset/90-k3s.preset
+        dest: /etc/systemd/system-presets/90-k3s.preset
         mode: '0644'
 
     - name: Set token fact from k3s_cluster_token
@@ -103,7 +103,7 @@
   pre_tasks:
     - name: Ensure systemd preset directory exists
       ansible.builtin.file:
-        path: /etc/systemd/system-preset
+        path: /etc/systemd/system-presets
         state: directory
         mode: '0755'
 
@@ -111,7 +111,7 @@
       ansible.builtin.copy:
         content: |
           enable k3s-agent.service
-        dest: /etc/systemd/system-preset/90-k3s.preset
+        dest: /etc/systemd/system-presets/90-k3s.preset
         mode: '0644'
 
     - name: Ensure systemd is reloaded before agent setup

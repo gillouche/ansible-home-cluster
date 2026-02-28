@@ -9,6 +9,10 @@ artifactory_nexus_home: "{{ user_home_root | default('/home') }}/nexus"
 artifactory_nexus_data_dir: "/mnt/data/nexus"
 artifactory_nexus_port: "{{ global_nexus_port | default(8081) }}"
 artifactory_nexus_container_name: "nexus"
+# FQDN used for all Nexus REST API calls (goes through reverse proxy)
+artifactory_nexus_url: "https://nexus.gillouche.homelab"
+# Localhost URL only for container health checks (bypasses reverse proxy)
+artifactory_nexus_local_url: "http://127.0.0.1:{{ artifactory_nexus_port }}"
 artifactory_nexus_publish_user: "publish"
 artifactory_nexus_publish_user_password: "password"
 artifactory_nexus_admin_user: "admin"

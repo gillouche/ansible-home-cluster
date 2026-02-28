@@ -10,7 +10,7 @@
       ansible.builtin.systemd:
         name: k3s
         state: started
-        enabled: false
+        enabled: true
 
     - name: Wait for K3s Service to be Active
       ansible.builtin.systemd:
@@ -46,7 +46,7 @@
       ansible.builtin.systemd:
         name: k3s-agent
         state: started
-        enabled: false
+        enabled: true
 
     - name: Wait for K3s Agent Service to be Active
       ansible.builtin.systemd:
