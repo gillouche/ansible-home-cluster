@@ -430,6 +430,7 @@
     - { name: "ghcr-proxy", url: "https://ghcr.io" }
     - { name: "gcr-proxy", url: "https://gcr.io" }
     - { name: "cgr-proxy", url: "https://cgr.dev" }
+    - { name: "nvcr-proxy", url: "https://nvcr.io" }
   when: _nexus_repos.json | selectattr('name', 'equalto', item.name) | list | length == 0
   become: false
   no_log: true
@@ -456,6 +457,7 @@
           - ghcr-proxy
           - gcr-proxy
           - cgr-proxy
+          - nvcr-proxy
       docker:
         v1Enabled: true
         forceBasicAuth: false
@@ -772,6 +774,7 @@
     - { name: "ghcr-proxy", url: "https://ghcr.io", index_type: "REGISTRY" }
     - { name: "gcr-proxy", url: "https://gcr.io", index_type: "REGISTRY" }
     - { name: "cgr-proxy", url: "https://cgr.dev", index_type: "REGISTRY" }
+    - { name: "nvcr-proxy", url: "https://nvcr.io", index_type: "REGISTRY" }
   become: false
   no_log: true
 
