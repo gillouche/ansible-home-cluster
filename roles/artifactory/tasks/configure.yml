@@ -211,33 +211,16 @@
   when: _nexus_repos.json | selectattr('name', 'equalto', 'pypi-proxy') | list | length == 0
   become: false
 
-- name: Create Helm Proxy repository
+- name: Delete stale helm-proxy repository (deprecated charts.helm.sh/stable)
   ansible.builtin.uri:
-    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/helm/proxy"
-    method: POST
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/helm-proxy"
+    method: DELETE
     user: "{{ artifactory_nexus_admin_user }}"
     password: "{{ artifactory_nexus_admin_password_working }}"
     force_basic_auth: true
     validate_certs: false
-    body_format: json
-    body:
-      name: "helm-proxy"
-      online: true
-      storage:
-        blobStoreName: "default"
-        strictContentTypeValidation: true
-      proxy:
-        remoteUrl: "https://charts.helm.sh/stable"
-        contentMaxAge: 1440
-        metadataMaxAge: 1440
-      negativeCache:
-        enabled: true
-        timeToLive: 1440
-      httpClient:
-        blocked: false
-        autoBlock: true
-    status_code: [200, 201]
-  when: _nexus_repos.json | selectattr('name', 'equalto', 'helm-proxy') | list | length == 0
+    status_code: [204, 404]
+  when: _nexus_repos.json | selectattr('name', 'equalto', 'helm-proxy') | list | length > 0
   become: false
 
 - name: Create Go Proxy repository
@@ -406,6 +389,121 @@
     status_code: [200, 201]
   when: _nexus_repos.json | selectattr('name', 'equalto', 'npm-hosted') | list | length == 0
   become: false
+
+## ── Phase 1: Container Registry Proxies (GHCR, GCR, CGR) ──
+
+- name: Create Docker registry proxy repositories
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/docker/proxy"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      proxy:
+        remoteUrl: "{{ item.url }}"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+        connection:
+          retries: 2
+          timeout: 60
+      docker:
+        v1Enabled: true
+        forceBasicAuth: false
+      dockerProxy:
+        indexType: "REGISTRY"
+    status_code: [200, 201]
+  loop:
+    - { name: "ghcr-proxy", url: "https://ghcr.io" }
+    - { name: "gcr-proxy", url: "https://gcr.io" }
+    - { name: "cgr-proxy", url: "https://cgr.dev" }
+  when: _nexus_repos.json | selectattr('name', 'equalto', item.name) | list | length == 0
+  become: false
+  no_log: true
+
+- name: Update Docker Group to include all registry proxies
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/docker/group/docker-all"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "docker-all"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      group:
+        memberNames:
+          - docker-hub
+          - quay-proxy
+          - ghcr-proxy
+          - gcr-proxy
+          - cgr-proxy
+      docker:
+        v1Enabled: true
+        forceBasicAuth: false
+        httpPort: 5000
+    status_code: [200, 204]
+  become: false
+
+## ── Phase 2-5: Raw Proxy Repositories ──
+
+- name: Create raw proxy repositories
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/raw/proxy"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: false
+      proxy:
+        remoteUrl: "{{ item.url }}"
+        contentMaxAge: "{{ item.max_age | default(1440) }}"
+        metadataMaxAge: "{{ item.meta_age | default(1440) }}"
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+        connection:
+          retries: 2
+          timeout: 60
+    status_code: [200, 201]
+  loop:
+    - { name: "github-codeload", url: "https://codeload.github.com" }
+    - { name: "github-releases", url: "https://github.com" }
+    - { name: "docker-downloads", url: "https://download.docker.com" }
+    - { name: "nixos-releases", url: "https://releases.nixos.org" }
+    - { name: "chainguard-apk", url: "https://apk.cgr.dev" }
+    - { name: "nix-cache-proxy", url: "https://cache.nixos.org", max_age: -1, meta_age: -1 }
+  when: _nexus_repos.json | selectattr('name', 'equalto', item.name) | list | length == 0
+  become: false
+  no_log: true
 
 - name: Get list of roles
   ansible.builtin.uri:
@@ -589,6 +687,255 @@
     force_basic_auth: true
     validate_certs: false
     status_code: 200
+  become: false
+  no_log: true
+
+## ── Cleanup Policies (internal API — /v1/ endpoint is Pro-only) ──
+
+- name: Get existing cleanup policies
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/internal/cleanup-policies"
+    method: GET
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 200
+  register: _nexus_cleanup_policies
+  become: false
+
+- name: Create cleanup policies
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/internal/cleanup-policies"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      format: "*"
+      notes: "{{ item.notes }}"
+      criteriaLastDownloaded: "{{ item.days }}"
+    status_code: [200, 201]
+  loop:
+    - name: "proxy-cleanup"
+      days: 30
+      notes: "Remove cached proxy artifacts not downloaded in 30 days"
+  when: _nexus_cleanup_policies.json | selectattr('name', 'equalto', item.name) | list | length == 0
+  become: false
+  no_log: true
+
+## ── Assign cleanup policies to repositories ──
+
+- name: Assign cleanup policy to Docker proxy repositories
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/docker/proxy/{{ item.name }}"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      cleanup:
+        policyNames:
+          - "proxy-cleanup"
+      proxy:
+        remoteUrl: "{{ item.url }}"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+        connection:
+          retries: 2
+          timeout: 60
+      docker:
+        v1Enabled: true
+        forceBasicAuth: false
+      dockerProxy:
+        indexType: "{{ item.index_type }}"
+    status_code: [200, 204]
+  loop:
+    - { name: "docker-hub", url: "https://registry-1.docker.io", index_type: "HUB" }
+    - { name: "quay-proxy", url: "https://quay.io", index_type: "REGISTRY" }
+    - { name: "ghcr-proxy", url: "https://ghcr.io", index_type: "REGISTRY" }
+    - { name: "gcr-proxy", url: "https://gcr.io", index_type: "REGISTRY" }
+    - { name: "cgr-proxy", url: "https://cgr.dev", index_type: "REGISTRY" }
+  become: false
+  no_log: true
+
+- name: Assign cleanup policy to docker-hosted repository
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/docker/hosted/docker-hosted"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "docker-hosted"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+        writePolicy: ALLOW
+      cleanup:
+        policyNames:
+          - "proxy-cleanup"
+      docker:
+        v1Enabled: false
+        forceBasicAuth: true
+    status_code: [200, 204]
+  become: false
+  no_log: true
+
+- name: Assign cleanup policy to package proxy repositories
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/{{ item.format }}/proxy/{{ item.name }}"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: true
+      cleanup:
+        policyNames:
+          - "proxy-cleanup"
+      proxy:
+        remoteUrl: "{{ item.url }}"
+        contentMaxAge: 1440
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+    status_code: [200, 204]
+  loop:
+    - { name: "pypi-proxy", format: "pypi", url: "https://pypi.org" }
+    - { name: "go-proxy", format: "go", url: "https://proxy.golang.org" }
+    - { name: "cargo-proxy", format: "cargo", url: "https://crates.io" }
+    - { name: "npm-proxy", format: "npm", url: "https://registry.npmjs.org" }
+  become: false
+  no_log: true
+
+- name: Assign cleanup policy to raw proxy repositories
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/raw/proxy/{{ item.name }}"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "{{ item.name }}"
+      online: true
+      storage:
+        blobStoreName: "default"
+        strictContentTypeValidation: false
+      cleanup:
+        policyNames:
+          - "proxy-cleanup"
+      proxy:
+        remoteUrl: "{{ item.url }}"
+        contentMaxAge: "{{ item.max_age | default(1440) }}"
+        metadataMaxAge: "{{ item.meta_age | default(1440) }}"
+      negativeCache:
+        enabled: true
+        timeToLive: 1440
+      httpClient:
+        blocked: false
+        autoBlock: true
+        connection:
+          retries: 2
+          timeout: 60
+    status_code: [200, 204]
+  loop:
+    - { name: "github-codeload", url: "https://codeload.github.com" }
+    - { name: "github-releases", url: "https://github.com" }
+    - { name: "docker-downloads", url: "https://download.docker.com" }
+    - { name: "nixos-releases", url: "https://releases.nixos.org" }
+    - { name: "chainguard-apk", url: "https://apk.cgr.dev" }
+    - { name: "nix-cache-proxy", url: "https://cache.nixos.org", max_age: -1, meta_age: -1 }
+  become: false
+  no_log: true
+
+## ── Scheduled Tasks ──
+
+- name: Get existing scheduled tasks
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/tasks"
+    method: GET
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 200
+  register: _nexus_tasks
+  become: false
+
+- name: Create scheduled tasks
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/extdirect"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      action: "coreui_Task"
+      method: "create"
+      data:
+        - id: ""
+          typeId: "{{ item.type_id }}"
+          enabled: true
+          name: "{{ item.name }}"
+          alertEmail: ""
+          schedule: "advanced"
+          cronExpression: "{{ item.cron }}"
+          properties: "{{ item.properties | default({}) }}"
+      type: "rpc"
+      tid: 1
+    status_code: [200]
+  loop:
+    - name: "Cleanup repositories"
+      type_id: "repository.cleanup"
+      cron: "0 0 2 * * ?"
+    - name: "Docker GC"
+      type_id: "repository.docker.gc"
+      cron: "0 0 3 * * ?"
+    - name: "Compact blob store"
+      type_id: "blobstore.compact"
+      cron: "0 0 4 ? * SUN"
+      properties:
+        blobstoreName: "default"
+    - name: "Docker upload purge"
+      type_id: "repository.docker.upload-purge"
+      cron: "0 0 5 ? * SUN"
+      properties:
+        age: "24"
+  when: _nexus_tasks.json['items'] | default([]) | selectattr('name', 'equalto', item.name) | list | length == 0
   become: false
   no_log: true
 
