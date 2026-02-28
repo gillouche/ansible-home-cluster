@@ -37,6 +37,19 @@
   gather_facts: true
   tags: [k3s, k3s_cluster, k3s_server]
   pre_tasks:
+    - name: Ensure systemd preset directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system-preset
+        state: directory
+        mode: '0755'
+
+    - name: Ensure systemd preset allows k3s to be enabled on boot
+      ansible.builtin.copy:
+        content: |
+          enable k3s.service
+        dest: /etc/systemd/system-preset/90-k3s.preset
+        mode: '0644'
+
     - name: Set token fact from k3s_cluster_token
       ansible.builtin.set_fact:
         token: "{{ k3s_cluster_token }}"
@@ -55,6 +68,7 @@
         name: k3s
         enabled: true
         state: started
+        daemon_reload: true
       tags: [k3s, k3s_cluster, k3s_server]
 
 - name: Fetch K3s Token
@@ -87,6 +101,19 @@
   become: true
   tags: [k3s, k3s_cluster, k3s_agent]
   pre_tasks:
+    - name: Ensure systemd preset directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system-preset
+        state: directory
+        mode: '0755'
+
+    - name: Ensure systemd preset allows k3s-agent to be enabled on boot
+      ansible.builtin.copy:
+        content: |
+          enable k3s-agent.service
+        dest: /etc/systemd/system-preset/90-k3s.preset
+        mode: '0644'
+
     - name: Ensure systemd is reloaded before agent setup
       ansible.builtin.systemd:
         daemon_reload: true
@@ -99,6 +126,7 @@
         name: k3s-agent
         enabled: true
         state: started
+        daemon_reload: true
       tags: [k3s, k3s_cluster, k3s_agent]
 
 - name: Label K3s nodes
