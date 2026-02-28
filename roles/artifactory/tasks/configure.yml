@@ -1,4 +1,30 @@
 ---
+- name: Get currently active security realms
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/security/realms/active"
+    method: GET
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 200
+  register: _nexus_active_realms
+  become: false
+
+- name: Enable Docker Bearer Token Realm for Docker v2 API authentication
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/security/realms/active"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: "{{ (_nexus_active_realms.json + ['DockerToken']) | unique }}"
+    status_code: [200, 204]
+  when: "'DockerToken' not in _nexus_active_realms.json"
+  become: false
+
 - name: Enable Anonymous Access
   ansible.builtin.uri:
     url: "{{ artifactory_nexus_url }}/service/rest/v1/security/anonymous"
@@ -452,6 +478,7 @@
         strictContentTypeValidation: true
       group:
         memberNames:
+          - docker-hosted
           - docker-hub
           - quay-proxy
           - ghcr-proxy

@@ -22,6 +22,7 @@ load_balancer_haproxy_frontends:
 
       # ACLs for Nexus
       - "acl is_nexus hdr(host) -i nexus.{{ base_domain }}"
+      - "acl is_docker_v2 path_beg /v2/"
 
       # ACLs for Firefly
       - "acl is_firefly hdr_dom(host) -i firefly"
@@ -38,7 +39,10 @@ load_balancer_haproxy_frontends:
       - "use_backend pihole_replica2 if is_pihole_replica2"
       - "use_backend pihole_backend if is_pihole_cluster"
 
-      # Routing Logic for Nexus
+      # Routing Logic for Nexus Docker v2 API (strip repo-name prefix, route to docker-all on port 5000)
+      - "http-request replace-path ^/v2/(docker-hub|ghcr-proxy|quay-proxy|gcr-proxy|cgr-proxy|nvcr-proxy|docker-hosted)/(.*) /v2/\\2 if is_nexus is_docker_v2"
+      - "use_backend nexus_docker_backend if is_nexus is_docker_v2"
+      # Routing Logic for Nexus Web UI (everything else)
       - "use_backend nexus_backend if is_nexus"
 
       # Routing Logic for Firefly
@@ -86,7 +90,16 @@ load_balancer_haproxy_backends:
         addr: "{{ hostvars[groups['server'][2]].ansible_host }}"
         port: 9000
 
-  # Nexus Backend
+  # Nexus Docker v2 Backend (docker-all group on port 5000)
+  - name: nexus_docker_backend
+    mode: http
+    servers:
+      - name: nexus_docker
+        addr: "{{ hostvars[groups['artifactory'][0]].ansible_host }}"
+        port: 5000
+        opts: "check"
+
+  # Nexus Web UI Backend
   - name: nexus_backend
     mode: http
     servers:
