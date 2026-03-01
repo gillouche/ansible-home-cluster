@@ -911,6 +911,20 @@
   become: false
   no_log: true
 
+- name: Invalidate cache for proxy repositories with metadata revalidation
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/{{ item }}/invalidate-cache"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200, 204]
+  loop:
+    - chainguard-apk
+  become: false
+  no_log: true
+
 ## ── Scheduled Tasks ──
 
 - name: Get existing scheduled tasks
