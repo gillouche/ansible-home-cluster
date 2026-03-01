@@ -1,4 +1,18 @@
 ---
+- name: Remove Longhorn admission webhooks before maintenance
+  hosts: homeserver
+  gather_facts: false
+  become: true
+  tags: [reboot, reboot_servers]
+  tasks:
+    - name: Delete Longhorn webhook configurations
+      ansible.builtin.command: >
+        k3s kubectl delete {{ item }} --ignore-not-found
+      loop:
+        - validatingwebhookconfiguration longhorn-webhook-validator
+        - mutatingwebhookconfiguration longhorn-webhook-mutator
+      changed_when: false
+
 - name: Reboot homeserver (Primary Control Plane)
   hosts: homeserver
   gather_facts: true
@@ -17,6 +31,9 @@
         msg: "Rebooting homeserver (Maintenance)"
         reboot_timeout: "{{ reboot_timeout }}"
 
+    - name: Ensure flannel subnet.env exists
+      ansible.builtin.include_tasks: k3s_flannel_fix.yml
+
     - name: Wait for K3s API port (6443)
       ansible.builtin.wait_for:
         port: 6443
@@ -33,6 +50,21 @@
       retries: 30
       delay: 10
       changed_when: false
+
+    - name: Clean up stale pods on homeserver
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pods --all-namespaces --field-selector spec.nodeName=homeserver,status.phase=Failed \
+          -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' \
+          | while read -r ns name; do
+              [ -n "$ns" ] && kubectl delete pod "$name" -n "$ns" --force --grace-period=0
+            done
+      args:
+        executable: /bin/bash
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
 
 - name: Reboot homeserver2 (Secondary Control Plane)
   hosts: homeserver2
@@ -52,6 +84,9 @@
         msg: "Rebooting homeserver2 (Maintenance)"
         reboot_timeout: "{{ reboot_timeout }}"
 
+    - name: Ensure flannel subnet.env exists
+      ansible.builtin.include_tasks: k3s_flannel_fix.yml
+
     - name: Wait for K3s API port (6443)
       ansible.builtin.wait_for:
         port: 6443
@@ -68,6 +103,74 @@
       retries: 30
       delay: 10
       changed_when: false
+
+    - name: Clean up stale pods on homeserver2
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pods --all-namespaces --field-selector spec.nodeName=homeserver2,status.phase=Failed \
+          -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' \
+          | while read -r ns name; do
+              [ -n "$ns" ] && kubectl delete pod "$name" -n "$ns" --force --grace-period=0
+            done
+      args:
+        executable: /bin/bash
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+
+- name: Reboot homeserver3 (Tertiary Control Plane)
+  hosts: homeserver3
+  gather_facts: true
+  become: true
+  tags: [reboot, reboot_servers]
+  vars:
+    reboot_timeout: 1200
+  tasks:
+    - name: Stop K3s service gracefully
+      ansible.builtin.service:
+        name: k3s
+        state: stopped
+
+    - name: Reboot host
+      ansible.builtin.reboot:
+        msg: "Rebooting homeserver3 (Maintenance)"
+        reboot_timeout: "{{ reboot_timeout }}"
+
+    - name: Ensure flannel subnet.env exists
+      ansible.builtin.include_tasks: k3s_flannel_fix.yml
+
+    - name: Wait for K3s API port (6443)
+      ansible.builtin.wait_for:
+        port: 6443
+        host: "{{ ansible_host }}"
+        delay: 10
+        timeout: 300
+
+    - name: Validate homeserver3 is Ready
+      ansible.builtin.command: kubectl get node homeserver3 --no-headers
+      delegate_to: localhost
+      become: false
+      register: node_status
+      until: "'Ready' in node_status.stdout"
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Clean up stale pods on homeserver3
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pods --all-namespaces --field-selector spec.nodeName=homeserver3,status.phase=Failed \
+          -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' \
+          | while read -r ns name; do
+              [ -n "$ns" ] && kubectl delete pod "$name" -n "$ns" --force --grace-period=0
+            done
+      args:
+        executable: /bin/bash
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
 
     - name: Validate Critical Applications are Available
       ansible.builtin.command: >

@@ -39,8 +39,18 @@ load_balancer_haproxy_frontends:
       - "use_backend pihole_replica2 if is_pihole_replica2"
       - "use_backend pihole_backend if is_pihole_cluster"
 
-      # Routing Logic for Nexus Docker v2 API (strip repo-name prefix, route to docker-all on port 5000)
-      - "http-request replace-path ^/v2/(docker-hub|ghcr-proxy|quay-proxy|gcr-proxy|cgr-proxy|nvcr-proxy|docker-hosted)/(.*) /v2/\\2 if is_nexus is_docker_v2"
+      # Routing Logic for Nexus Docker v2 API
+      # IMPORTANT: HAProxy processes ALL http-request rules BEFORE any use_backend,
+      # so we tag the request with an internal header BEFORE the path rewrite
+      # invalidates the path-based ACL. Named ACL is_route_hosted checks the header.
+      - "acl is_docker_hosted path_beg /v2/docker-hosted/"
+      - "acl is_route_hosted hdr(X-Nexus-Route) -i hosted"
+      - "http-request set-header X-Nexus-Route hosted if is_nexus is_docker_hosted"
+      - "http-request replace-path ^/v2/docker-hosted/(.*) /v2/\\1 if is_nexus is_docker_hosted"
+      - "http-request replace-path ^/v2/(docker-hub|ghcr-proxy|quay-proxy|gcr-proxy|cgr-proxy|nvcr-proxy)/(.*) /v2/\\2 if is_nexus is_docker_v2"
+      # docker-hosted gets its own backend (push requires a hosted repo, not a group)
+      - "use_backend nexus_docker_hosted_backend if is_nexus is_route_hosted"
+      # All other Docker repos route to docker-all group on port 5000
       - "use_backend nexus_docker_backend if is_nexus is_docker_v2"
       # Routing Logic for Nexus Web UI (everything else)
       - "use_backend nexus_backend if is_nexus"
@@ -90,7 +100,23 @@ load_balancer_haproxy_backends:
         addr: "{{ hostvars[groups['server'][2]].ansible_host }}"
         port: 9000
 
-  # Nexus Docker v2 Backend (docker-all group on port 5000)
+  # Nexus Docker hosted Backend (port 5001 — for push operations)
+  # Nexus returns Location headers without the docker-hosted/ prefix
+  # (e.g. /v2/base/img/blobs/uploads/<uuid>).  Docker follows these URLs
+  # for subsequent PATCH/PUT blob-upload requests.  Without rewriting,
+  # those requests miss the path_beg /v2/docker-hosted/ ACL and fall
+  # through to the group backend (port 5000) which rejects pushes on OSS.
+  - name: nexus_docker_hosted_backend
+    mode: http
+    extra:
+      - "http-response replace-header Location ^(https?://[^/]+)?/v2/(.+)$ \\1/v2/docker-hosted/\\2"
+    servers:
+      - name: nexus_docker_hosted
+        addr: "{{ hostvars[groups['artifactory'][0]].ansible_host }}"
+        port: 5001
+        opts: "check"
+
+  # Nexus Docker v2 Backend (docker-all group on port 5000 — for pull operations)
   - name: nexus_docker_backend
     mode: http
     servers:

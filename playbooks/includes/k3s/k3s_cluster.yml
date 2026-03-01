@@ -50,6 +50,13 @@
         dest: /etc/systemd/system-presets/90-k3s.preset
         mode: '0644'
 
+    - name: Ensure /run/flannel is recreated on every boot
+      ansible.builtin.copy:
+        content: |
+          d /run/flannel 0755 root root -
+        dest: /etc/tmpfiles.d/flannel.conf
+        mode: '0644'
+
     - name: Set token fact from k3s_cluster_token
       ansible.builtin.set_fact:
         token: "{{ k3s_cluster_token }}"
@@ -133,6 +140,15 @@
   hosts: server[0]
   become: true
   tags: [k3s, k3s_cluster, k3s_labels]
+  pre_tasks:
+    - name: Remove Longhorn admission webhooks to prevent API blocking
+      ansible.builtin.command: >
+        k3s kubectl delete {{ item }} --ignore-not-found
+      loop:
+        - validatingwebhookconfiguration longhorn-webhook-validator
+        - mutatingwebhookconfiguration longhorn-webhook-mutator
+      changed_when: false
+      failed_when: false
   roles:
     - role: k3s_labels
       tags: [k3s, k3s_cluster, k3s_labels]

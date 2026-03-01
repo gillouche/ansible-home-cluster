@@ -1,0 +1,50 @@
+---
+# Ensure /run/flannel/subnet.env exists after reboot.
+# /run is a tmpfs cleared on every boot. k3s's embedded flannel should
+# recreate subnet.env, but sometimes fails silently. Without this file
+# the CNI plugin cannot configure pod networking and all pods stay stuck
+# at ContainerCreating.
+
+- name: Check if /run/flannel/subnet.env exists
+  ansible.builtin.stat:
+    path: /run/flannel/subnet.env
+  register: _flannel_subnet_env
+
+- name: Recover flannel subnet.env if missing
+  when: not _flannel_subnet_env.stat.exists
+  block:
+    - name: Get node pod CIDR from Kubernetes API
+      ansible.builtin.command: >
+        kubectl get node {{ inventory_hostname }}
+        -o jsonpath='{.spec.podCIDR}'
+      delegate_to: localhost
+      become: false
+      register: _pod_cidr
+      changed_when: false
+
+    - name: Derive flannel subnet from pod CIDR
+      ansible.builtin.set_fact:
+        _flannel_subnet: "{{ _pod_cidr.stdout }}"
+        _flannel_network: "{{ k3s_cluster_cidr }}"
+
+    - name: Ensure /run/flannel directory exists
+      ansible.builtin.file:
+        path: /run/flannel
+        state: directory
+        mode: '0755'
+
+    - name: Write /run/flannel/subnet.env
+      ansible.builtin.copy:
+        content: |
+          FLANNEL_NETWORK={{ _flannel_network }}
+          FLANNEL_SUBNET={{ _flannel_subnet }}
+          FLANNEL_MTU=1450
+          FLANNEL_IPMASQ=true
+        dest: /run/flannel/subnet.env
+        mode: '0644'
+
+    - name: Restart k3s to pick up restored subnet.env
+      ansible.builtin.systemd:
+        name: k3s
+        state: restarted
+        daemon_reload: true
