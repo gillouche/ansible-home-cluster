@@ -514,8 +514,8 @@
         contentMaxAge: "{{ item.max_age | default(1440) | int }}"
         metadataMaxAge: "{{ item.meta_age | default(1440) | int }}"
       negativeCache:
-        enabled: true
-        timeToLive: 1440
+        enabled: "{{ item.neg_cache | default(true) }}"
+        timeToLive: "{{ item.neg_ttl | default(1440) | int }}"
       httpClient:
         blocked: false
         autoBlock: true
@@ -528,7 +528,7 @@
     - { name: "github-releases", url: "https://github.com" }
     - { name: "docker-downloads", url: "https://download.docker.com" }
     - { name: "nixos-releases", url: "https://releases.nixos.org" }
-    - { name: "chainguard-apk", url: "https://apk.cgr.dev", meta_age: 0 }
+    - { name: "chainguard-apk", url: "https://apk.cgr.dev", meta_age: 0, neg_cache: false }
     - { name: "nix-cache-proxy", url: "https://cache.nixos.org", max_age: -1, meta_age: -1 }
   when: _nexus_repos.json | selectattr('name', 'equalto', item.name) | list | length == 0
   become: false
@@ -892,8 +892,8 @@
         contentMaxAge: "{{ item.max_age | default(1440) | int }}"
         metadataMaxAge: "{{ item.meta_age | default(1440) | int }}"
       negativeCache:
-        enabled: true
-        timeToLive: 1440
+        enabled: "{{ item.neg_cache | default(true) }}"
+        timeToLive: "{{ item.neg_ttl | default(1440) | int }}"
       httpClient:
         blocked: false
         autoBlock: true
@@ -906,7 +906,7 @@
     - { name: "github-releases", url: "https://github.com" }
     - { name: "docker-downloads", url: "https://download.docker.com" }
     - { name: "nixos-releases", url: "https://releases.nixos.org" }
-    - { name: "chainguard-apk", url: "https://apk.cgr.dev", meta_age: 0 }
+    - { name: "chainguard-apk", url: "https://apk.cgr.dev", meta_age: 0, neg_cache: false }
     - { name: "nix-cache-proxy", url: "https://cache.nixos.org", max_age: -1, meta_age: -1 }
   become: false
   no_log: true
