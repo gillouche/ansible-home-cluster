@@ -1,16 +1,18 @@
 ---
-- name: Remove Longhorn admission webhooks before maintenance
+- name: Remove blocking admission webhooks before maintenance
   hosts: homeserver
   gather_facts: false
   become: true
   tags: [reboot, reboot_servers]
   tasks:
-    - name: Delete Longhorn webhook configurations
+    - name: Delete blocking webhook configurations
       ansible.builtin.command: >
         k3s kubectl delete {{ item }} --ignore-not-found
       loop:
         - validatingwebhookconfiguration longhorn-webhook-validator
         - mutatingwebhookconfiguration longhorn-webhook-mutator
+        - validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
+        - mutatingwebhookconfiguration gatekeeper-mutating-webhook-configuration
       changed_when: false
 
 - name: Reboot homeserver (Primary Control Plane)

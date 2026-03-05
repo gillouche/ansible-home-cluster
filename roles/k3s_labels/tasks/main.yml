@@ -56,6 +56,20 @@
       {{ results | to_json }}
   run_once: true
 
+- name: Remove blocking admission webhooks before applying labels
+  ansible.builtin.command: >
+    k3s kubectl delete {{ item }} --ignore-not-found
+  loop:
+    - validatingwebhookconfiguration longhorn-webhook-validator
+    - mutatingwebhookconfiguration longhorn-webhook-mutator
+    - validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
+    - mutatingwebhookconfiguration gatekeeper-mutating-webhook-configuration
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  changed_when: false
+  failed_when: false
+
 - name: Apply K3s node labels from inventory
   ansible.builtin.command: k3s kubectl label node {{ item.host }} {{ item.key }}={{ item.value }} --overwrite
   delegate_to: "{{ groups['server'][0] }}"
@@ -63,6 +77,10 @@
   loop: "{{ k3s_labels_to_apply | from_json }}"
   become: true
   changed_when: false
+  retries: 3
+  delay: 5
+  register: _label_result
+  until: _label_result.rc == 0
 
 - name: Prepare K3s node taints list
   ansible.builtin.set_fact:
@@ -85,3 +103,7 @@
   loop: "{{ k3s_taints_to_apply | from_json }}"
   become: true
   changed_when: false
+  retries: 3
+  delay: 5
+  register: _taint_result
+  until: _taint_result.rc == 0

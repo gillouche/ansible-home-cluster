@@ -43,6 +43,13 @@
         dest: /run/flannel/subnet.env
         mode: '0644'
 
+    - name: Save recovered subnet.env to persistent storage
+      ansible.builtin.copy:
+        src: /run/flannel/subnet.env
+        dest: /etc/flannel/subnet.env
+        remote_src: true
+        mode: '0644'
+
     - name: Restart k3s to pick up restored subnet.env
       ansible.builtin.systemd:
         name: k3s
