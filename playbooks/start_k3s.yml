@@ -1,0 +1,11 @@
+---
+# ==============================================================================
+# K3s Cluster Recovery / Start
+# ==============================================================================
+# Usage: ansible-playbook playbooks/start_k3s.yml
+#
+# Starts control planes first (with flannel recovery), then agents.
+# Uncordons all nodes and re-enables ArgoCD auto-sync.
+
+- name: K3s cluster recovery
+  import_playbook: includes/maintenance/k3s_start.yml

@@ -1,0 +1,211 @@
+---
+# ==============================================================================
+# Graceful K3s Cluster Shutdown
+# ==============================================================================
+# Order: pre-flight checks -> pause ArgoCD -> delete webhooks ->
+#         drain & stop agents -> drain & stop control planes (reverse order)
+#
+# After this playbook completes, all k3s services are stopped and it is safe
+# to power off / reboot all servers.
+
+# ------------------------------------------------------------------------------
+# 1. Pre-flight checks & preparation
+# ------------------------------------------------------------------------------
+- name: "K3s Stop: Pre-flight checks and preparation"
+  hosts: server[0]
+  gather_facts: false
+  become: true
+  tags: [k3s_stop, k3s_stop_preflight]
+  tasks:
+    - name: Verify all nodes are Ready
+      ansible.builtin.shell: |
+        set -o pipefail
+        k3s kubectl get nodes --no-headers | grep -c 'NotReady' || true
+      args:
+        executable: /bin/bash
+      register: _not_ready_count
+      changed_when: false
+
+    - name: Warn about NotReady nodes
+      ansible.builtin.debug:
+        msg: "WARNING: {{ _not_ready_count.stdout | trim }} node(s) are NotReady before shutdown"
+      when: (_not_ready_count.stdout | trim | int) > 0
+
+    - name: Verify Postgres datastore is reachable
+      ansible.builtin.wait_for:
+        host: "{{ k3s_db_host }}"
+        port: "{{ k3s_db_port }}"
+        timeout: 10
+      changed_when: false
+
+    - name: Pause ArgoCD auto-sync on all Applications
+      ansible.builtin.shell: |
+        set -o pipefail
+        k3s kubectl get applications -n argocd -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+          | while read -r app; do
+              [ -n "$app" ] && k3s kubectl patch application "$app" -n argocd --type merge \
+                -p '{"spec":{"syncPolicy":{"automated":null}}}' 2>/dev/null || true
+            done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Delete blocking webhook configurations
+      ansible.builtin.command: >
+        k3s kubectl delete {{ item }} --ignore-not-found
+      loop:
+        - validatingwebhookconfiguration longhorn-webhook-validator
+        - mutatingwebhookconfiguration longhorn-webhook-mutator
+        - validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
+        - mutatingwebhookconfiguration gatekeeper-mutating-webhook-configuration
+      changed_when: false
+
+# ------------------------------------------------------------------------------
+# 2. Flush ARP cache on all nodes
+# ------------------------------------------------------------------------------
+- name: "K3s Stop: Flush ARP cache"
+  hosts: k3s_cluster
+  gather_facts: false
+  tags: [k3s_stop, k3s_stop_arp]
+  tasks:
+    - name: Flush ARP cache
+      ansible.builtin.command: ip neigh flush all
+      become: true
+      changed_when: true
+
+# ------------------------------------------------------------------------------
+# 3. Drain & stop all agents
+# ------------------------------------------------------------------------------
+- name: "K3s Stop: Drain and stop agents"
+  hosts: agent
+  gather_facts: false
+  become: true
+  serial: 3
+  tags: [k3s_stop, k3s_stop_agents]
+  tasks:
+    - name: Drain agent node
+      ansible.builtin.include_tasks: k3s_drain_node.yml
+      vars:
+        node_name: "{{ inventory_hostname }}"
+        drain_timeout: 120
+
+    - name: Stop k3s-agent service
+      ansible.builtin.service:
+        name: k3s-agent
+        state: stopped
+
+# ------------------------------------------------------------------------------
+# 3. Drain & stop control planes (reverse order)
+# ------------------------------------------------------------------------------
+- name: "K3s Stop: Drain and stop homeserver3 (Tertiary)"
+  hosts: homeserver3
+  gather_facts: false
+  become: true
+  tags: [k3s_stop, k3s_stop_servers]
+  tasks:
+    - name: Drain homeserver3
+      ansible.builtin.include_tasks: k3s_drain_node.yml
+      vars:
+        node_name: "{{ inventory_hostname }}"
+        drain_timeout: 120
+
+    - name: Wait for Longhorn volumes to detach from this node
+      ansible.builtin.shell: |
+        set -o pipefail
+        FILTER='@.status.currentNodeID=="{{ inventory_hostname }}"'
+        k3s kubectl get volumes.longhorn.io -n longhorn-system \
+          -o jsonpath="{range .items[?($FILTER)]}{.metadata.name}{\"\n\"}{end}" \
+          2>/dev/null | head -1
+      args:
+        executable: /bin/bash
+      register: _longhorn_vols
+      until: (_longhorn_vols.stdout | trim) == ""
+      retries: 12
+      delay: 5
+      changed_when: false
+      failed_when: false
+
+    - name: Stop k3s service
+      ansible.builtin.service:
+        name: k3s
+        state: stopped
+
+    - name: Kill stale containerd-shim processes
+      ansible.builtin.shell: |
+        killall -9 containerd-shim containerd-shim-runc-v2 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: "K3s Stop: Drain and stop homeserver2 (Secondary)"
+  hosts: homeserver2
+  gather_facts: false
+  become: true
+  tags: [k3s_stop, k3s_stop_servers]
+  tasks:
+    - name: Drain homeserver2
+      ansible.builtin.include_tasks: k3s_drain_node.yml
+      vars:
+        node_name: "{{ inventory_hostname }}"
+        drain_timeout: 120
+
+    - name: Wait for Longhorn volumes to detach from this node
+      ansible.builtin.shell: |
+        set -o pipefail
+        FILTER='@.status.currentNodeID=="{{ inventory_hostname }}"'
+        k3s kubectl get volumes.longhorn.io -n longhorn-system \
+          -o jsonpath="{range .items[?($FILTER)]}{.metadata.name}{\"\n\"}{end}" \
+          2>/dev/null | head -1
+      args:
+        executable: /bin/bash
+      register: _longhorn_vols
+      until: (_longhorn_vols.stdout | trim) == ""
+      retries: 12
+      delay: 5
+      changed_when: false
+      failed_when: false
+
+    - name: Stop k3s service
+      ansible.builtin.service:
+        name: k3s
+        state: stopped
+
+    - name: Kill stale containerd-shim processes
+      ansible.builtin.shell: |
+        killall -9 containerd-shim containerd-shim-runc-v2 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+- name: "K3s Stop: Drain and stop homeserver (Primary)"
+  hosts: homeserver
+  gather_facts: false
+  become: true
+  tags: [k3s_stop, k3s_stop_servers]
+  tasks:
+    - name: Drain homeserver
+      ansible.builtin.include_tasks: k3s_drain_node.yml
+      vars:
+        node_name: "{{ inventory_hostname }}"
+        drain_timeout: 120
+      # drain will likely fail since this is the last API server
+      # k3s_drain_node.yml already has failed_when: false
+
+    - name: Stop k3s service
+      ansible.builtin.service:
+        name: k3s
+        state: stopped
+
+    - name: Kill stale containerd-shim processes
+      ansible.builtin.shell: |
+        killall -9 containerd-shim containerd-shim-runc-v2 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Cluster is now fully stopped
+      ansible.builtin.debug:
+        msg: >-
+          All k3s services have been stopped. It is now safe to power off
+          or reboot all servers. Use start_k3s.yml to bring the cluster back.

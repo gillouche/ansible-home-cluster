@@ -1,0 +1,27 @@
+---
+# Drain and cordon a k3s node before shutdown/reboot.
+# Required variables:
+#   - node_name: the Kubernetes node name to drain
+#   - drain_timeout: timeout in seconds (default: 300)
+
+- name: "Drain node {{ node_name }}"
+  ansible.builtin.command: >
+    kubectl drain {{ node_name }}
+    --ignore-daemonsets
+    --delete-emptydir-data
+    --disable-eviction
+    --timeout={{ drain_timeout | default(300) }}s
+    --force
+  delegate_to: localhost
+  become: false
+  register: _drain_result
+  changed_when: "'evicting pod' in _drain_result.stdout | default('')"
+  failed_when: false
+
+- name: "Warn if drain timed out on {{ node_name }}"
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: drain of {{ node_name }} exited with rc={{ _drain_result.rc }}.
+      Node is cordoned. Remaining pods will be force-killed on service stop.
+      stderr: {{ _drain_result.stderr | default('') | regex_replace('Warning: ignoring DaemonSet.*\n?', '') | trim }}
+  when: _drain_result.rc != 0

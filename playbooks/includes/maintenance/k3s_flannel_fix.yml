@@ -1,9 +1,22 @@
 ---
-# Ensure /run/flannel/subnet.env exists after reboot.
-# /run is a tmpfs cleared on every boot. k3s's embedded flannel should
-# recreate subnet.env, but sometimes fails silently. Without this file
-# the CNI plugin cannot configure pod networking and all pods stay stuck
-# at ContainerCreating.
+# Ensure flannel networking is fully functional after reboot/crash.
+#
+# Three things can go wrong:
+# 1. /run/flannel/subnet.env is missing (/run is tmpfs, cleared on boot)
+# 2. flannel.1 VXLAN interface is not created (flannel failed to initialize,
+#    often caused by stale cni0 bridge with leftover veth interfaces)
+# 3. Stale containerd-shim processes from a crash hold onto network namespaces,
+#    preventing flannel from creating the VXLAN interface
+#
+# Additionally, Longhorn webhooks with failPolicy=Fail block k3s node
+# annotation updates when the webhook pods aren't running yet, preventing
+# flannel from initializing (chicken-and-egg problem after crash/reboot).
+#
+# K3s uses embedded flannel with bundled CNI binaries — there is no
+# /etc/cni/net.d/10-flannel.conflist. The flannel.1 VXLAN interface
+# is the only reliable indicator that flannel is working.
+
+# ---- Step 1: Restore subnet.env if missing ----
 
 - name: Check if /run/flannel/subnet.env exists
   ansible.builtin.stat:
@@ -13,45 +26,127 @@
 - name: Recover flannel subnet.env if missing
   when: not _flannel_subnet_env.stat.exists
   block:
-    - name: Get node pod CIDR from Kubernetes API
-      ansible.builtin.command: >
-        kubectl get node {{ inventory_hostname }}
-        -o jsonpath='{.spec.podCIDR}'
-      delegate_to: localhost
-      become: false
-      register: _pod_cidr
-      changed_when: false
+    - name: Check persistent flannel subnet.env
+      ansible.builtin.stat:
+        path: /etc/flannel/subnet.env
+      register: _flannel_persistent
 
-    - name: Derive flannel subnet from pod CIDR
-      ansible.builtin.set_fact:
-        _flannel_subnet: "{{ _pod_cidr.stdout }}"
-        _flannel_network: "{{ k3s_cluster_cidr }}"
+    - name: Restore subnet.env from persistent storage
+      when: _flannel_persistent.stat.exists
+      block:
+        - name: Ensure /run/flannel directory exists
+          ansible.builtin.file:
+            path: /run/flannel
+            state: directory
+            mode: '0755'
 
-    - name: Ensure /run/flannel directory exists
-      ansible.builtin.file:
-        path: /run/flannel
-        state: directory
-        mode: '0755'
+        - name: Copy persistent subnet.env to /run/flannel
+          ansible.builtin.copy:
+            src: /etc/flannel/subnet.env
+            dest: /run/flannel/subnet.env
+            remote_src: true
+            mode: '0644'
 
-    - name: Write /run/flannel/subnet.env
-      ansible.builtin.copy:
-        content: |
-          FLANNEL_NETWORK={{ _flannel_network }}
-          FLANNEL_SUBNET={{ _flannel_subnet }}
-          FLANNEL_MTU=1450
-          FLANNEL_IPMASQ=true
-        dest: /run/flannel/subnet.env
-        mode: '0644'
+    - name: Recover subnet.env from Kubernetes API
+      when: not (_flannel_persistent.stat.exists | default(false))
+      block:
+        - name: Get node pod CIDR from Kubernetes API
+          ansible.builtin.command: >
+            kubectl get node {{ inventory_hostname }}
+            -o jsonpath='{.spec.podCIDR}'
+          delegate_to: localhost
+          become: false
+          register: _pod_cidr
+          changed_when: false
 
-    - name: Save recovered subnet.env to persistent storage
-      ansible.builtin.copy:
-        src: /run/flannel/subnet.env
-        dest: /etc/flannel/subnet.env
-        remote_src: true
-        mode: '0644'
+        - name: Ensure /run/flannel directory exists
+          ansible.builtin.file:
+            path: /run/flannel
+            state: directory
+            mode: '0755'
 
-    - name: Restart k3s to pick up restored subnet.env
+        - name: Write /run/flannel/subnet.env
+          ansible.builtin.copy:
+            content: |
+              FLANNEL_NETWORK={{ k3s_cluster_cidr }}
+              FLANNEL_SUBNET={{ _pod_cidr.stdout }}
+              FLANNEL_MTU=1450
+              FLANNEL_IPMASQ=true
+            dest: /run/flannel/subnet.env
+            mode: '0644'
+
+        - name: Save recovered subnet.env to persistent storage
+          ansible.builtin.copy:
+            src: /run/flannel/subnet.env
+            dest: /etc/flannel/subnet.env
+            remote_src: true
+            mode: '0644'
+
+# ---- Step 2: Check if flannel.1 VXLAN interface exists ----
+
+- name: Check if flannel.1 VXLAN interface exists
+  ansible.builtin.command: ip link show flannel.1
+  register: _flannel_iface
+  changed_when: false
+  failed_when: false
+
+# ---- Step 3: Clean up stale state and restart if flannel.1 is missing ----
+
+- name: Recover flannel.1 interface if missing
+  when: _flannel_iface.rc != 0
+  block:
+    - name: Stop k3s before cleaning up stale state
       ansible.builtin.systemd:
         name: k3s
-        state: restarted
+        state: stopped
+
+    - name: Kill stale containerd-shim processes from previous crash
+      ansible.builtin.shell: |
+        killall -9 containerd-shim containerd-shim-runc-v2 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Delete stale cni0 bridge interface
+      ansible.builtin.command: ip link delete cni0
+      changed_when: true
+      failed_when: false
+
+    - name: Clean up stale CNI network allocations
+      ansible.builtin.file:
+        path: /var/lib/cni/networks
+        state: absent
+
+    - name: Delete blocking webhook configurations before k3s start
+      ansible.builtin.command: >
+        kubectl delete {{ item }} --ignore-not-found
+      loop:
+        - validatingwebhookconfiguration longhorn-webhook-validator
+        - mutatingwebhookconfiguration longhorn-webhook-mutator
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      failed_when: false
+
+    - name: Start k3s with clean state
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
         daemon_reload: true
+
+    - name: Wait for flannel.1 interface to appear
+      ansible.builtin.command: ip link show flannel.1
+      register: _flannel_iface_retry
+      until: _flannel_iface_retry.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+      failed_when: false
+
+    - name: Warn if flannel.1 still missing after recovery
+      ansible.builtin.debug:
+        msg: >-
+          CRITICAL: flannel.1 interface did not appear on
+          {{ inventory_hostname }} after cleaning CNI state and
+          restarting k3s. Pod networking will be broken.
+      when: (_flannel_iface_retry.rc | default(1)) != 0

@@ -1,0 +1,11 @@
+---
+# ==============================================================================
+# Graceful K3s Cluster Shutdown
+# ==============================================================================
+# Usage: ansible-playbook playbooks/stop_k3s.yml
+#
+# Drains all workloads, stops agents first, then control planes.
+# After completion it is safe to power off or reboot servers.
+
+- name: Graceful K3s cluster shutdown
+  import_playbook: includes/maintenance/k3s_stop.yml

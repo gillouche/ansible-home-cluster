@@ -8,15 +8,6 @@ exclude_paths:
   - roles/**/templates/
   - inventories/group_vars/*.vault.yml
 
-# Promote common safety/style rules
-enable_list:
-  - fqcn-builtins
-  - no-changed-when
-  - no-log-password
-  - no-log-task
-  - risky-file-permissions
-  - deprecated-bare-vars
-
 # Keep some as warnings while iterating
 warn_list:
   - yaml

@@ -1,24 +1,30 @@
 ---
 # ==============================================================================
-# Restore K3s Cluster
+# K3s Cluster Recovery / Start
 # ==============================================================================
-# Verifies infrastructure dependencies (etcd, Postgres) are healthy,
-# starts control planes with flannel recovery, starts agents,
-# uncordons all nodes, and re-enables ArgoCD.
+# Order: verify infrastructure -> start control planes (serial) ->
+#         validate control plane health -> start agents -> uncordon all ->
+#         re-enable ArgoCD -> final validation
+#
+# NOTE: Etcd (for Patroni) and Postgres run as Podman containers with their
+# own systemd units (container-etcd, container-postgres). They are independent
+# of k3s and should already be running. This playbook verifies that before
+# starting k3s.
 
 # ------------------------------------------------------------------------------
-# 1. Verify infrastructure dependencies
+# 0. Verify infrastructure (Etcd + Postgres) is healthy
 # ------------------------------------------------------------------------------
-- name: "Restore K3s: Verify infrastructure dependencies"
+- name: "K3s Start: Verify infrastructure dependencies"
   hosts: server
   gather_facts: false
   become: true
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_infra]
   tasks:
     - name: Ensure etcd container is running
       ansible.builtin.systemd:
         name: container-etcd
         state: started
+      register: _etcd_service
 
     - name: Verify etcd is healthy
       ansible.builtin.uri:
@@ -33,12 +39,13 @@
       ansible.builtin.systemd:
         name: container-postgres
         state: started
+      register: _pg_service
 
-- name: "Restore K3s: Verify Postgres VIP is reachable"
+- name: "K3s Start: Verify Postgres VIP is reachable"
   hosts: localhost
   connection: local
   gather_facts: false
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_infra]
   tasks:
     - name: Wait for Postgres VIP to respond
       ansible.builtin.wait_for:
@@ -48,22 +55,34 @@
         timeout: 60
 
 # ------------------------------------------------------------------------------
-# 2. Start control planes (serial, one at a time)
+# 1. Flush ARP cache on all nodes
 # ------------------------------------------------------------------------------
-- name: "Restore K3s: Start homeserver (Primary Control Plane)"
+- name: "K3s Start: Flush ARP cache"
+  hosts: k3s_cluster
+  gather_facts: false
+  tags: [k3s_start, k3s_start_arp]
+  tasks:
+    - name: Flush ARP cache
+      ansible.builtin.command: ip neigh flush all
+      become: true
+      changed_when: true
+
+# ------------------------------------------------------------------------------
+# 2. Start control planes one by one
+# ------------------------------------------------------------------------------
+- name: "K3s Start: Start homeserver (Primary Control Plane)"
   hosts: homeserver
   gather_facts: false
   become: true
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_servers]
   tasks:
     - name: Ensure flannel subnet.env exists
-      ansible.builtin.include_tasks: ../maintenance/k3s_flannel_fix.yml
+      ansible.builtin.include_tasks: k3s_flannel_fix.yml
 
     - name: Start k3s service
       ansible.builtin.systemd:
         name: k3s
         state: started
-        enabled: true
         daemon_reload: true
 
     - name: Wait for K3s API port (6443)
@@ -74,29 +93,28 @@
         timeout: 300
 
     - name: Validate homeserver is Ready
-      ansible.builtin.include_tasks: ../maintenance/k3s_validate_node.yml
+      ansible.builtin.include_tasks: k3s_validate_node.yml
       vars:
         node_name: "{{ inventory_hostname }}"
 
     - name: Uncordon homeserver
-      ansible.builtin.include_tasks: ../maintenance/k3s_uncordon_node.yml
+      ansible.builtin.include_tasks: k3s_uncordon_node.yml
       vars:
         node_name: "{{ inventory_hostname }}"
 
-- name: "Restore K3s: Start homeserver2 (Secondary Control Plane)"
+- name: "K3s Start: Start homeserver2 (Secondary Control Plane)"
   hosts: homeserver2
   gather_facts: false
   become: true
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_servers]
   tasks:
     - name: Ensure flannel subnet.env exists
-      ansible.builtin.include_tasks: ../maintenance/k3s_flannel_fix.yml
+      ansible.builtin.include_tasks: k3s_flannel_fix.yml
 
     - name: Start k3s service
       ansible.builtin.systemd:
         name: k3s
         state: started
-        enabled: true
         daemon_reload: true
 
     - name: Wait for K3s API port (6443)
@@ -107,29 +125,28 @@
         timeout: 300
 
     - name: Validate homeserver2 is Ready
-      ansible.builtin.include_tasks: ../maintenance/k3s_validate_node.yml
+      ansible.builtin.include_tasks: k3s_validate_node.yml
       vars:
         node_name: "{{ inventory_hostname }}"
 
     - name: Uncordon homeserver2
-      ansible.builtin.include_tasks: ../maintenance/k3s_uncordon_node.yml
+      ansible.builtin.include_tasks: k3s_uncordon_node.yml
       vars:
         node_name: "{{ inventory_hostname }}"
 
-- name: "Restore K3s: Start homeserver3 (Tertiary Control Plane)"
+- name: "K3s Start: Start homeserver3 (Tertiary Control Plane)"
   hosts: homeserver3
   gather_facts: false
   become: true
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_servers]
   tasks:
     - name: Ensure flannel subnet.env exists
-      ansible.builtin.include_tasks: ../maintenance/k3s_flannel_fix.yml
+      ansible.builtin.include_tasks: k3s_flannel_fix.yml
 
     - name: Start k3s service
       ansible.builtin.systemd:
         name: k3s
         state: started
-        enabled: true
         daemon_reload: true
 
     - name: Wait for K3s API port (6443)
@@ -140,24 +157,39 @@
         timeout: 300
 
     - name: Validate homeserver3 is Ready
-      ansible.builtin.include_tasks: ../maintenance/k3s_validate_node.yml
+      ansible.builtin.include_tasks: k3s_validate_node.yml
       vars:
         node_name: "{{ inventory_hostname }}"
 
     - name: Uncordon homeserver3
-      ansible.builtin.include_tasks: ../maintenance/k3s_uncordon_node.yml
+      ansible.builtin.include_tasks: k3s_uncordon_node.yml
       vars:
         node_name: "{{ inventory_hostname }}"
 
 # ------------------------------------------------------------------------------
-# 3. Post control-plane: delete blocking webhooks
+# 2. Post control-plane validation
 # ------------------------------------------------------------------------------
-- name: "Restore K3s: Delete blocking webhooks"
+- name: "K3s Start: Validate control plane health"
   hosts: server[0]
   gather_facts: false
   become: true
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_servers]
   tasks:
+    - name: Verify all control planes are Ready
+      ansible.builtin.command: k3s kubectl get node {{ item }} --no-headers
+      loop: "{{ groups['server'] }}"
+      register: _cp_status
+      until: "'Ready' in _cp_status.stdout and 'NotReady' not in _cp_status.stdout"
+      retries: 15
+      delay: 10
+      changed_when: false
+
+    - name: Wait for CoreDNS to be available
+      ansible.builtin.command: >
+        k3s kubectl wait --for=condition=available --timeout=300s
+        deployment/coredns -n kube-system
+      changed_when: false
+
     - name: Delete blocking webhook configurations
       ansible.builtin.command: >
         k3s kubectl delete {{ item }} --ignore-not-found
@@ -169,41 +201,40 @@
       changed_when: false
 
 # ------------------------------------------------------------------------------
-# 4. Start agents
+# 3. Start agents
 # ------------------------------------------------------------------------------
-- name: "Restore K3s: Start agents"
+- name: "K3s Start: Start agent nodes"
   hosts: agent
   gather_facts: false
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_agents]
   tasks:
     - name: Start k3s-agent service
       ansible.builtin.systemd:
         name: k3s-agent
         state: started
-        enabled: true
         daemon_reload: true
       become: true
 
 # ------------------------------------------------------------------------------
-# 5. Uncordon all agents
+# 4. Uncordon all agents (always run, even if a node is NotReady)
 # ------------------------------------------------------------------------------
-- name: "Restore K3s: Uncordon agents"
+- name: "K3s Start: Uncordon agents"
   hosts: agent
   gather_facts: false
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_agents]
   tasks:
     - name: Uncordon agent
-      ansible.builtin.include_tasks: ../maintenance/k3s_uncordon_node.yml
+      ansible.builtin.include_tasks: k3s_uncordon_node.yml
       vars:
         node_name: "{{ inventory_hostname }}"
 
 # ------------------------------------------------------------------------------
-# 6. Validate agents (non-fatal per node)
+# 5. Validate agents (non-fatal per node)
 # ------------------------------------------------------------------------------
-- name: "Restore K3s: Validate agents"
+- name: "K3s Start: Validate agents"
   hosts: agent
   gather_facts: false
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_agents]
   tasks:
     - name: Check if agent is Ready
       ansible.builtin.command: kubectl get node {{ inventory_hostname }} --no-headers
@@ -221,13 +252,13 @@
       when: _agent_status.rc != 0 or 'NotReady' in (_agent_status.stdout | default(''))
 
 # ------------------------------------------------------------------------------
-# 7. Final validation & ArgoCD re-enable
+# 6. Final cluster validation & ArgoCD re-enable
 # ------------------------------------------------------------------------------
-- name: "Restore K3s: Final validation"
+- name: "K3s Start: Final validation and ArgoCD re-enable"
   hosts: server[0]
   gather_facts: false
   become: true
-  tags: [restore_k3s]
+  tags: [k3s_start, k3s_start_validation]
   tasks:
     - name: Verify all nodes are Ready (warn only)
       ansible.builtin.shell: |
@@ -280,8 +311,8 @@
       changed_when: false
       failed_when: false
 
-    - name: Cluster restore complete
+    - name: Cluster recovery complete
       ansible.builtin.debug:
         msg: >-
-          K3s cluster restored. All nodes Ready, critical apps available,
-          ArgoCD auto-sync re-enabled.
+          K3s cluster is fully operational. All nodes are Ready,
+          critical applications are available, and ArgoCD auto-sync is re-enabled.

@@ -1,0 +1,29 @@
+---
+# Validate that a k3s node is Ready and clean up stale pods.
+# Required variables:
+#   - node_name: the Kubernetes node name to validate
+
+- name: "Validate node is Ready {{ node_name }}"
+  ansible.builtin.command: kubectl get node {{ node_name }} --no-headers
+  delegate_to: localhost
+  become: false
+  register: _node_status
+  until: "'Ready' in _node_status.stdout and 'NotReady' not in _node_status.stdout"
+  retries: 30
+  delay: 10
+  changed_when: false
+
+- name: "Clean up stale pods on node {{ node_name }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl get pods --all-namespaces --field-selector spec.nodeName={{ node_name }},status.phase=Failed \
+      -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' \
+      | while read -r ns name; do
+          [ -n "$ns" ] && kubectl delete pod "$name" -n "$ns" --force --grace-period=0
+        done
+  args:
+    executable: /bin/bash
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  failed_when: false

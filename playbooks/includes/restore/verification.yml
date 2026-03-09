@@ -10,7 +10,7 @@
   tasks:
     - name: Test K3s API endpoint
       ansible.builtin.uri:
-        url: "https://{{ load_balancer_virtual_ip | default('192.168.0.253') }}:6443/healthz"
+        url: "https://{{ k3s_api_vip | default('192.168.0.249') }}:6443/healthz"
         method: GET
         validate_certs: false
         status_code: [200, 401, 403]

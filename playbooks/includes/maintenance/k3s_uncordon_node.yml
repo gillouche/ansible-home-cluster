@@ -1,0 +1,14 @@
+---
+# Uncordon a k3s node after restart/recovery.
+# Required variables:
+#   - node_name: the Kubernetes node name to uncordon
+
+- name: "Uncordon node {{ node_name }}"
+  ansible.builtin.command: kubectl uncordon {{ node_name }}
+  delegate_to: localhost
+  become: false
+  register: _uncordon_result
+  changed_when: "'uncordoned' in _uncordon_result.stdout | default('')"
+  failed_when:
+    - _uncordon_result.rc != 0
+    - "'already uncordoned' not in _uncordon_result.stderr | default('')"
