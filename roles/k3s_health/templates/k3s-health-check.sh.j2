@@ -1,21 +1,43 @@
 #!/bin/bash
 # K3s containerd health check — restarts k3s if containerd is unresponsive.
+# Logs escalation warning if restart doesn't recover containerd.
 # Deployed by Ansible (k3s_health role).
 
 COOLDOWN_FILE="/tmp/k3s-health-restart-cooldown"
+RESTART_MARKER="/tmp/k3s-health-restart-attempted"
 COOLDOWN_SECONDS=300
+POST_RESTART_GRACE=180
+
+# Check if containerd is responsive
+if k3s ctr --connect-timeout 5s containers list >/dev/null 2>&1; then
+    # Healthy — clear the restart marker if it exists
+    rm -f "$RESTART_MARKER"
+    exit 0
+fi
+
+# Containerd is unresponsive
+now=$(date +%s)
 
 # Respect cooldown to avoid restart loops
 if [ -f "$COOLDOWN_FILE" ]; then
-    last_restart=$(cat "$COOLDOWN_FILE")
-    now=$(date +%s)
-    if (( now - last_restart < COOLDOWN_SECONDS )); then
+    last_action=$(cat "$COOLDOWN_FILE")
+    if (( now - last_action < COOLDOWN_SECONDS )); then
         exit 0
     fi
 fi
 
-if ! k3s ctr --connect-timeout 5s containers list >/dev/null 2>&1; then
-    logger -t k3s-health "containerd unresponsive, restarting {{ k3s_service_name }}"
-    date +%s > "$COOLDOWN_FILE"
-    systemctl restart {{ k3s_service_name }}
+# If we already restarted k3s and containerd is still broken, log critical warning
+if [ -f "$RESTART_MARKER" ]; then
+    restart_time=$(cat "$RESTART_MARKER")
+    if (( now - restart_time > POST_RESTART_GRACE )); then
+        logger -t k3s-health -p user.crit "CRITICAL: containerd still unresponsive after k3s restart, manual reboot required"
+        date +%s > "$COOLDOWN_FILE"
+    fi
+    exit 0
 fi
+
+# First attempt: restart k3s
+logger -t k3s-health "containerd unresponsive, restarting {{ k3s_service_name }}"
+date +%s > "$COOLDOWN_FILE"
+date +%s > "$RESTART_MARKER"
+systemctl restart {{ k3s_service_name }}
