@@ -1,0 +1,41 @@
+---
+- name: Set k3s service name based on node role
+  ansible.builtin.set_fact:
+    k3s_service_name: "{{ 'k3s' if inventory_hostname in groups.get('server', []) else 'k3s-agent' }}"
+
+- name: Deploy k3s health check script
+  ansible.builtin.template:
+    src: k3s-health-check.sh.j2
+    dest: /usr/local/bin/k3s-health-check.sh
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
+- name: Deploy k3s health check service unit
+  ansible.builtin.template:
+    src: k3s-health-check.service.j2
+    dest: /etc/systemd/system/k3s-health-check.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd for k3s health
+
+- name: Deploy k3s health check timer unit
+  ansible.builtin.template:
+    src: k3s-health-check.timer.j2
+    dest: /etc/systemd/system/k3s-health-check.timer
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd for k3s health
+
+- name: Enable and start k3s health check timer
+  ansible.builtin.systemd:
+    name: k3s-health-check.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true

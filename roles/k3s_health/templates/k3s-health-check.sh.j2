@@ -1,0 +1,21 @@
+#!/bin/bash
+# K3s containerd health check — restarts k3s if containerd is unresponsive.
+# Deployed by Ansible (k3s_health role).
+
+COOLDOWN_FILE="/tmp/k3s-health-restart-cooldown"
+COOLDOWN_SECONDS=300
+
+# Respect cooldown to avoid restart loops
+if [ -f "$COOLDOWN_FILE" ]; then
+    last_restart=$(cat "$COOLDOWN_FILE")
+    now=$(date +%s)
+    if (( now - last_restart < COOLDOWN_SECONDS )); then
+        exit 0
+    fi
+fi
+
+if ! k3s ctr --connect-timeout 5s containers list >/dev/null 2>&1; then
+    logger -t k3s-health "containerd unresponsive, restarting {{ k3s_service_name }}"
+    date +%s > "$COOLDOWN_FILE"
+    systemctl restart {{ k3s_service_name }}
+fi

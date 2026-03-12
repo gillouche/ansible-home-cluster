@@ -1,0 +1,9 @@
+[Unit]
+Description=Run k3s health check every 2 minutes
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=120
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,6 @@
+[Unit]
+Description=K3s containerd health check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/k3s-health-check.sh
