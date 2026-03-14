@@ -1,6 +1,11 @@
 [Unit]
-Description=K3s containerd health check
+Description=K3s health check (containerd, kubelet, stuck pods)
+After=k3s.service k3s-agent.service
+Wants={{ k3s_service_name }}.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/k3s-health-check.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=k3s-health

@@ -1,24 +1,57 @@
 #!/bin/bash
-# K3s containerd health check — restarts k3s if containerd is unresponsive.
-# Logs escalation warning if restart doesn't recover containerd.
+# K3s health check — restarts k3s if containerd or kubelet is unhealthy.
+# Checks: containerd responsiveness, kubelet health endpoint, stuck pods.
 # Deployed by Ansible (k3s_health role).
 
+set -euo pipefail
+
+SERVICE_NAME="{{ k3s_service_name }}"
+HOSTNAME=$(hostname)
 COOLDOWN_FILE="/tmp/k3s-health-restart-cooldown"
 RESTART_MARKER="/tmp/k3s-health-restart-attempted"
 COOLDOWN_SECONDS=300
 POST_RESTART_GRACE=180
+STUCK_POD_THRESHOLD=600
 
-# Check if containerd is responsive
-if k3s ctr --connect-timeout 5s containers list >/dev/null 2>&1; then
-    # Healthy — clear the restart marker if it exists
+healthy=true
+reason=""
+
+if ! k3s ctr --connect-timeout 5s containers list >/dev/null 2>&1; then
+    healthy=false
+    reason="containerd unresponsive"
+fi
+
+if $healthy; then
+    kubelet_status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:10248/healthz 2>/dev/null || echo "000")
+    if [ "$kubelet_status" != "200" ]; then
+        healthy=false
+        reason="kubelet healthz returned $kubelet_status"
+    fi
+fi
+
+if $healthy; then
+    stuck_pods=$(k3s kubectl get pods --all-namespaces --field-selector "spec.nodeName=$HOSTNAME,status.phase=Pending" -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.creationTimestamp}{"\n"}{end}' 2>/dev/null || true)
+    if [ -n "$stuck_pods" ]; then
+        now=$(date +%s)
+        while IFS=' ' read -r pod_name created; do
+            [ -z "$pod_name" ] && continue
+            created_epoch=$(date -d "$created" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$created" +%s 2>/dev/null || echo 0)
+            if (( created_epoch > 0 && now - created_epoch > STUCK_POD_THRESHOLD )); then
+                healthy=false
+                reason="pod $pod_name stuck in Pending for over $((STUCK_POD_THRESHOLD / 60))m on this node"
+                break
+            fi
+        done <<< "$stuck_pods"
+    fi
+fi
+
+if $healthy; then
     rm -f "$RESTART_MARKER"
     exit 0
 fi
 
-# Containerd is unresponsive
 now=$(date +%s)
 
-# Respect cooldown to avoid restart loops
 if [ -f "$COOLDOWN_FILE" ]; then
     last_action=$(cat "$COOLDOWN_FILE")
     if (( now - last_action < COOLDOWN_SECONDS )); then
@@ -26,18 +59,16 @@ if [ -f "$COOLDOWN_FILE" ]; then
     fi
 fi
 
-# If we already restarted k3s and containerd is still broken, log critical warning
 if [ -f "$RESTART_MARKER" ]; then
     restart_time=$(cat "$RESTART_MARKER")
     if (( now - restart_time > POST_RESTART_GRACE )); then
-        logger -t k3s-health -p user.crit "CRITICAL: containerd still unresponsive after k3s restart, manual reboot required"
+        logger -t k3s-health -p user.crit "CRITICAL: $reason — still unhealthy after $SERVICE_NAME restart on $HOSTNAME, manual intervention required"
         date +%s > "$COOLDOWN_FILE"
     fi
     exit 0
 fi
 
-# First attempt: restart k3s
-logger -t k3s-health "containerd unresponsive, restarting {{ k3s_service_name }}"
+logger -t k3s-health -p user.warning "$reason on $HOSTNAME, restarting $SERVICE_NAME"
 date +%s > "$COOLDOWN_FILE"
 date +%s > "$RESTART_MARKER"
-systemctl restart {{ k3s_service_name }}
+systemctl restart "$SERVICE_NAME"
