@@ -288,9 +288,25 @@
         executable: /bin/bash
       changed_when: false
 
+    - name: Merge k3s context into main kubeconfig
+      ansible.builtin.shell: |
+        set -euo pipefail
+        MAIN="{{ ansible_env.HOME }}/.kube/config"
+        K3S="{{ ansible_env.HOME }}/.kube/k3s.yaml"
+        if [ -f "$MAIN" ]; then
+          KUBECONFIG="$MAIN:$K3S" kubectl config view --flatten > "$MAIN.merged"
+          chmod 600 "$MAIN.merged"
+          mv "$MAIN.merged" "$MAIN"
+        else
+          cp "$K3S" "$MAIN"
+          chmod 600 "$MAIN"
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: true
+
     - name: Show success message
       ansible.builtin.debug:
         msg: >-
-          Kubeconfig saved to {{ ansible_env.HOME }}/.kube/k3s.yaml (context: k3s).
-          To use it, run: export KUBECONFIG={{ ansible_env.HOME }}/.kube/config:{{ ansible_env.HOME }}/.kube/k3s.yaml
-          or add that line to your shell profile.
+          Kubeconfig merged into {{ ansible_env.HOME }}/.kube/config (context: k3s).
+          Switch with: kubectl config use-context k3s
