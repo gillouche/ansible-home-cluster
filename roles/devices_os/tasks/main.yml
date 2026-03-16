@@ -41,6 +41,24 @@
     state: present
   become: true
 
+- name: Disable pam_faillock account lockout
+  ansible.builtin.lineinfile:
+    path: /etc/security/faillock.conf
+    regexp: '^#?\s*deny\s*='
+    line: 'deny = 0'
+    create: true
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+
+- name: Reset any existing faillock entries for target user
+  ansible.builtin.command:
+    cmd: "faillock --user {{ target_user }} --reset"
+  become: true
+  changed_when: false
+  failed_when: false
+
 - name: Stability and Auto-Recovery Settings (RPi Only)
   become: true
   when: "'rpi' in inventory_hostname"

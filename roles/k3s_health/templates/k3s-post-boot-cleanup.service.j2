@@ -1,0 +1,14 @@
+[Unit]
+Description=K3s post-boot cleanup (delete stale CreateContainerError pods)
+After={{ k3s_service_name }}.service
+Wants={{ k3s_service_name }}.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/k3s-post-boot-cleanup.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=k3s-health
+
+[Install]
+WantedBy=multi-user.target

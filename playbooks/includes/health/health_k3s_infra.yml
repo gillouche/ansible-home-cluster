@@ -68,6 +68,51 @@
       failed_when: false
       changed_when: false
 
+    - name: Get Patroni cluster status
+      ansible.builtin.command: >
+        podman exec {{ postgres_container_name }}
+        curl -s http://localhost:{{ postgres_patroni_port | default(8008) }}/cluster
+      register: _patroni_cluster_raw
+      become: true
+      changed_when: false
+      failed_when: false
+      run_once: true # noqa: run-once
+      delegate_to: "{{ groups['postgres'][0] }}"
+
+    - name: Parse and report Patroni cluster state # noqa: run-once
+      ansible.builtin.set_fact:
+        _patroni_cluster: "{{ _patroni_cluster_raw.stdout | from_json }}"
+      when:
+        - _patroni_cluster_raw.rc | default(1) == 0
+        - _patroni_cluster_raw.stdout | default('') | length > 0
+      run_once: true # noqa: run-once
+      delegate_to: "{{ groups['postgres'][0] }}"
+
+    - name: Check for broken replicas # noqa: run-once
+      ansible.builtin.set_fact:
+        _broken_replicas: >-
+          {{ (_patroni_cluster.members | default([]))
+             | rejectattr('role', 'equalto', 'leader')
+             | selectattr('state', 'defined')
+             | selectattr('state', 'ne', 'running')
+             | list }}
+      when: _patroni_cluster is defined
+      run_once: true
+      delegate_to: "{{ groups['postgres'][0] }}"
+
+    - name: Warn about broken Patroni replicas # noqa: run-once
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Patroni replicas need attention:
+          {{ _broken_replicas | map(attribute='name') | join(', ') }}
+          (states: {{ _broken_replicas | map(attribute='state') | join(', ') }}).
+          Run: ansible-playbook playbooks/restore.yml -t postgres_heal
+      when:
+        - _broken_replicas is defined
+        - _broken_replicas | length > 0
+      run_once: true
+      delegate_to: "{{ groups['postgres'][0] }}"
+
 - name: "Postgres VIP Health Check"
   hosts: localhost
   gather_facts: false

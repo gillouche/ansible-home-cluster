@@ -5,10 +5,10 @@ all:
       ansible_host: 192.168.0.76
       ansible_ssh_user: alarm
       target_user: alarm
-    rpi4b8g2:
-      ansible_host: 192.168.0.77
-      ansible_ssh_user: alarm
-      target_user: alarm
+#    rpi4b8g2:
+#      ansible_host: 192.168.0.77
+#      ansible_ssh_user: alarm
+#      target_user: alarm
     rpi4b8g3:
       ansible_host: 192.168.0.78
       ansible_ssh_user: alarm
@@ -62,7 +62,7 @@ all:
     devices:
       hosts:
         rpi4b8g1:
-        rpi4b8g2:
+#        rpi4b8g2:
         rpi4b8g3:
         rpi4b8g4:
         rpi5b8g1:
@@ -78,7 +78,7 @@ all:
     watchdog:
       hosts:
         rpi4b8g1:
-        rpi4b8g2:
+#        rpi4b8g2:
         rpi4b8g3:
         rpi4b8g4:
         rpi5b8g1:
@@ -280,17 +280,17 @@ all:
                 storage.longhorn.io/eligible: "false"
                 hardware.reliability: consumer
                 workload.tier: playground
-            rpi4b8g2:
-              k3s_node_labels:
-                node-class: rpi4
-                reliability: best-effort
-                topology.kubernetes.io/zone: rpi
-                node.longhorn.io/create-default-disk: "false"
-                node-role.kubernetes.io/worker: "true"
-                topology.kubernetes.io/node-group: rpi
-                storage.longhorn.io/eligible: "false"
-                hardware.reliability: consumer
-                workload.tier: playground
+#            rpi4b8g2:
+#              k3s_node_labels:
+#                node-class: rpi4
+#                reliability: best-effort
+#                topology.kubernetes.io/zone: rpi
+#                node.longhorn.io/create-default-disk: "false"
+#                node-role.kubernetes.io/worker: "true"
+#                topology.kubernetes.io/node-group: rpi
+#                storage.longhorn.io/eligible: "false"
+#                hardware.reliability: consumer
+#                workload.tier: playground
             rpi4b8g3:
               k3s_node_labels:
                 node-class: rpi4

@@ -1,0 +1,34 @@
+#!/bin/bash
+# Post-boot cleanup: delete pods stuck in CreateContainerError from a previous boot.
+# Runs once after k3s starts to clear stale pod objects that containerd can't recover.
+# Deployed by Ansible (k3s_health role).
+
+set -euo pipefail
+
+SERVICE_NAME="{{ k3s_service_name }}"
+HOSTNAME=$(hostname)
+REBOOT_MARKER="/var/lib/k3s-health/reboot-attempted"
+
+sleep 60
+
+if ! k3s kubectl cluster-info >/dev/null 2>&1; then
+    logger -t k3s-health -p user.warning "post-boot cleanup: k3s not ready yet on $HOSTNAME, skipping"
+    exit 0
+fi
+
+error_pods=$(k3s kubectl get pods --all-namespaces --field-selector "spec.nodeName=$HOSTNAME" \
+    -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name} {range .status.containerStatuses[*]}{.state.waiting.reason}{end}{"\n"}{end}' 2>/dev/null || true)
+
+deleted=0
+while IFS=' ' read -r ns pod_name wait_reason; do
+    [ -z "$pod_name" ] && continue
+    if [ "$wait_reason" = "CreateContainerError" ]; then
+        k3s kubectl delete pod "$pod_name" -n "$ns" --force --grace-period=0 2>/dev/null && deleted=$((deleted + 1))
+    fi
+done <<< "$error_pods"
+
+if (( deleted > 0 )); then
+    logger -t k3s-health -p user.notice "post-boot cleanup: deleted $deleted stale CreateContainerError pods on $HOSTNAME"
+fi
+
+rm -f "$REBOOT_MARKER"

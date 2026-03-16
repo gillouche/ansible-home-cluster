@@ -18,5 +18,5 @@ collections:
     version: "3.1.1"
   - name: k3s
     type: git
-    source: https://github.com/gillouche/k3s-ansible.git
-    version: fix-raspberrypi-boot
+    source: https://github.com/k3s-io/k3s-ansible.git
+    version: "1.2.0"

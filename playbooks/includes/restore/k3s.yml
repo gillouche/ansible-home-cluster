@@ -34,6 +34,23 @@
         name: container-postgres
         state: started
 
+    - name: Wait for Patroni API to respond
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:8008/health"
+        method: GET
+        status_code: [200, 503]
+      register: _patroni_health
+      retries: 30
+      delay: 5
+      until: _patroni_health.status in [200, 503]
+
+# ------------------------------------------------------------------------------
+# 1b. Heal Postgres replicas (auto-reinit diverged timelines)
+# ------------------------------------------------------------------------------
+- name: "Restore K3s: Heal Postgres replicas"
+  import_playbook: ../maintenance/postgres_heal.yml
+  tags: [restore_k3s, postgres_heal]
+
 - name: "Restore K3s: Verify Postgres VIP is reachable"
   hosts: localhost
   connection: local
