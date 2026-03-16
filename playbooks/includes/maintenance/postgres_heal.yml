@@ -73,9 +73,9 @@
             (
               (_my_member.state | default('') == 'start failed') or
               (_my_member.timeline | default(0) | int != hostvars[groups['postgres'][0]]['patroni_leader_timeline'] | int
-               and _my_member.state | default('') != 'running') or
+               and _my_member.timeline | default(0) | int > 0) or
               (_my_member.lag | default(0) | string != 'unknown'
-               and _my_member.lag | default(0) | int > 107374182400)
+               and _my_member.lag | default(0) | int > 10737418240)
             )
           }}
       when: not _is_leader | bool
