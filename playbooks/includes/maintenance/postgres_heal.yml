@@ -71,7 +71,7 @@
             not (_is_leader | bool) and
             _my_member | length > 0 and
             (
-              (_my_member.state | default('') == 'start failed') or
+              (_my_member.state | default('') not in ['running', 'streaming', 'in archive recovery']) or
               (_my_member.timeline | default(0) | int != hostvars[groups['postgres'][0]]['patroni_leader_timeline'] | int
                and _my_member.timeline | default(0) | int > 0) or
               (_my_member.lag | default(0) | string != 'unknown'

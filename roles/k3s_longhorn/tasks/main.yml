@@ -23,3 +23,23 @@
     enabled: true
     state: started
   become: true
+
+- name: Load kernel modules required by Longhorn
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - dm_crypt
+    - iscsi_tcp
+  become: true
+
+- name: Persist Longhorn kernel modules across reboots
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/longhorn.conf
+    content: |
+      dm_crypt
+      iscsi_tcp
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
