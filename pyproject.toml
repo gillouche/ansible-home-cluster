@@ -10,5 +10,6 @@ dependencies = [
     "bcrypt>=5.0.0",
     "hvac>=2.4.0",
     "filelock>=3.20.3",
-    "urllib3>=2.6.3"
+    "urllib3>=2.6.3",
+    "black>=26.3.1"
 ]
