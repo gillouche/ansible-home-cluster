@@ -30,6 +30,15 @@
     mode: '0755'
   become: true
 
+- name: Deploy k3s containerd cleanup script
+  ansible.builtin.template:
+    src: k3s-containerd-cleanup.sh.j2
+    dest: /usr/local/bin/k3s-containerd-cleanup.sh
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+
 - name: Deploy k3s health check service unit
   ansible.builtin.template:
     src: k3s-health-check.service.j2
@@ -60,6 +69,16 @@
   become: true
   notify: Reload systemd for k3s health
 
+- name: Deploy k3s containerd cleanup service unit
+  ansible.builtin.template:
+    src: k3s-containerd-cleanup.service.j2
+    dest: /etc/systemd/system/k3s-containerd-cleanup.service
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  notify: Reload systemd for k3s health
+
 - name: Enable and start k3s health check timer
   ansible.builtin.systemd:
     name: k3s-health-check.timer
@@ -71,6 +90,13 @@
 - name: Enable k3s post-boot cleanup service
   ansible.builtin.systemd:
     name: k3s-post-boot-cleanup.service
+    enabled: true
+    daemon_reload: true
+  become: true
+
+- name: Enable k3s containerd cleanup service
+  ansible.builtin.systemd:
+    name: k3s-containerd-cleanup.service
     enabled: true
     daemon_reload: true
   become: true

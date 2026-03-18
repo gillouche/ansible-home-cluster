@@ -1,0 +1,25 @@
+#!/bin/bash
+# Pre-start containerd cleanup: removes stale container name reservations
+# that cause CreateContainerError after unclean shutdowns/reboots.
+# Runs before k3s starts via systemd ExecStartPre or a dependency service.
+# Deployed by Ansible (k3s_health role).
+
+set -euo pipefail
+
+STATE_DIR="/var/lib/k3s-health"
+REBOOT_MARKER="$STATE_DIR/reboot-attempted"
+POD_DELETE_MARKER="$STATE_DIR/pod-delete-attempted"
+
+K3S_CONTAINERD_STATE="/var/lib/rancher/k3s/agent/containerd"
+
+if [ -f "$REBOOT_MARKER" ]; then
+    logger -t k3s-health -p user.notice "Post-reboot containerd cleanup: clearing stale container state"
+
+    if [ -d "$K3S_CONTAINERD_STATE/io.containerd.grpc.v1.cri" ]; then
+        rm -rf "$K3S_CONTAINERD_STATE/io.containerd.grpc.v1.cri/containers" 2>/dev/null || true
+        rm -rf "$K3S_CONTAINERD_STATE/io.containerd.grpc.v1.cri/sandboxes" 2>/dev/null || true
+        logger -t k3s-health -p user.notice "Cleared containerd CRI container/sandbox state"
+    fi
+
+    rm -f "$REBOOT_MARKER" "$POD_DELETE_MARKER"
+fi

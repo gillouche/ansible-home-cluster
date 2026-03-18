@@ -1,0 +1,15 @@
+[Unit]
+Description=K3s pre-start containerd cleanup (clear stale container state)
+Before={{ k3s_service_name }}.service
+RequiredBy={{ k3s_service_name }}.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/k3s-containerd-cleanup.sh
+RemainAfterExit=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=k3s-health
+
+[Install]
+WantedBy=multi-user.target
