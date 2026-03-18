@@ -14,7 +14,7 @@ COOLDOWN_FILE="$STATE_DIR/restart-cooldown"
 RESTART_MARKER="$STATE_DIR/restart-attempted"
 REBOOT_MARKER="$STATE_DIR/reboot-attempted"
 POD_DELETE_MARKER="$STATE_DIR/pod-delete-attempted"
-COOLDOWN_SECONDS=300
+COOLDOWN_SECONDS=120
 POST_RESTART_GRACE=180
 STUCK_POD_THRESHOLD=600
 CREATE_ERROR_MIN_COUNT=3
@@ -81,7 +81,11 @@ fi
 
 if [ "$action" = "fix_create_error" ]; then
     if [ ! -f "$POD_DELETE_MARKER" ]; then
-        logger -t k3s-health -p user.warning "$reason on $HOSTNAME, force-deleting stuck pods and restarting $SERVICE_NAME"
+        logger -t k3s-health -p user.warning "$reason on $HOSTNAME, restarting $SERVICE_NAME and cleaning up stuck pods"
+        date +%s > "$POD_DELETE_MARKER"
+        date +%s > "$COOLDOWN_FILE"
+        systemctl restart "$SERVICE_NAME"
+        sleep 30
         k3s kubectl get pods --all-namespaces --field-selector "spec.nodeName=$HOSTNAME" \
             -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name} {range .status.containerStatuses[*]}{.state.waiting.reason}{end}{"\n"}{end}' 2>/dev/null \
             | grep "CreateContainerError" \
@@ -89,14 +93,11 @@ if [ "$action" = "fix_create_error" ]; then
                 [ -z "$pod_name" ] && continue
                 k3s kubectl delete pod "$pod_name" -n "$ns" --force --grace-period=0 2>/dev/null || true
             done
-        date +%s > "$POD_DELETE_MARKER"
-        date +%s > "$COOLDOWN_FILE"
-        systemctl restart "$SERVICE_NAME"
         exit 0
     fi
 
     if [ ! -f "$REBOOT_MARKER" ]; then
-        logger -t k3s-health -p user.crit "$reason on $HOSTNAME after pod deletion + restart, rebooting node"
+        logger -t k3s-health -p user.crit "$reason on $HOSTNAME after restart + cleanup, rebooting node"
         date +%s > "$COOLDOWN_FILE"
         date +%s > "$REBOOT_MARKER"
         reboot
