@@ -1,6 +1,7 @@
 #!/bin/bash
 # K3s health check — detects and recovers from common k3s/containerd failures.
-# Checks: containerd responsiveness, kubelet health endpoint, stuck Pending pods,
+# Checks: containerd responsiveness, kubelet health endpoint, API server reachability,
+#         node heartbeat freshness, node Ready status, stuck Pending pods,
 #         CreateContainerError pods (stale containerd name reservations).
 # Recovery escalation: force-delete pods -> restart k3s -> reboot -> alert.
 # Deployed by Ansible (k3s_health role).
@@ -18,6 +19,7 @@ COOLDOWN_SECONDS=120
 POST_RESTART_GRACE=180
 STUCK_POD_THRESHOLD=600
 CREATE_ERROR_MIN_COUNT=3
+HEARTBEAT_STALE_THRESHOLD=180
 
 mkdir -p "$STATE_DIR"
 
@@ -35,6 +37,37 @@ if $healthy; then
     if [ "$kubelet_status" != "200" ]; then
         healthy=false
         reason="kubelet healthz returned $kubelet_status"
+    fi
+fi
+
+if $healthy; then
+    if ! k3s kubectl get node "$HOSTNAME" --request-timeout=5s >/dev/null 2>&1; then
+        healthy=false
+        reason="kubectl unable to reach API server from $HOSTNAME"
+    fi
+fi
+
+if $healthy; then
+    heartbeat=$(k3s kubectl get node "$HOSTNAME" \
+        -o jsonpath='{.status.conditions[?(@.type=="Ready")].lastHeartbeatTime}' \
+        --request-timeout=5s 2>/dev/null || echo "")
+    if [ -n "$heartbeat" ]; then
+        heartbeat_epoch=$(date -d "$heartbeat" +%s 2>/dev/null || echo 0)
+        now_epoch=$(date +%s)
+        if (( heartbeat_epoch > 0 && now_epoch - heartbeat_epoch > HEARTBEAT_STALE_THRESHOLD )); then
+            healthy=false
+            reason="node heartbeat stale ($((now_epoch - heartbeat_epoch))s old, threshold ${HEARTBEAT_STALE_THRESHOLD}s)"
+        fi
+    fi
+fi
+
+if $healthy; then
+    node_ready=$(k3s kubectl get node "$HOSTNAME" \
+        -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' \
+        --request-timeout=5s 2>/dev/null || echo "Unknown")
+    if [ "$node_ready" != "True" ]; then
+        healthy=false
+        reason="node $HOSTNAME reports Ready=$node_ready despite healthy kubelet"
     fi
 fi
 
