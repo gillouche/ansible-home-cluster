@@ -179,6 +179,11 @@
     - name: Ensure systemd is reloaded before agent setup
       ansible.builtin.systemd:
         daemon_reload: true
+
+    - name: Set token fact from server
+      ansible.builtin.set_fact:
+        token: "{{ hostvars[groups['server'][0]].token }}"
+      tags: [k3s, k3s_cluster, k3s_agent]
   roles:
     - role: k3s.orchestration.k3s_agent
       tags: [k3s, k3s_cluster, k3s_agent]
