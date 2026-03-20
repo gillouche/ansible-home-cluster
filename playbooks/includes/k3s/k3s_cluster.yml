@@ -133,6 +133,80 @@
         daemon_reload: true
       tags: [k3s, k3s_cluster, k3s_server]
 
+- name: Take ownership of CoreDNS from k3s (managed by ArgoCD)
+  hosts: server
+  become: true
+  gather_facts: false
+  tags: [k3s, k3s_cluster, k3s_coredns]
+  tasks:
+    - name: Remove k3s CoreDNS manifest to prevent k3s from managing it
+      ansible.builtin.file:
+        path: /var/lib/rancher/k3s/server/manifests/coredns.yaml
+        state: absent
+
+- name: Bootstrap CoreDNS HA (managed by ArgoCD)
+  hosts: server[0]
+  become: true
+  gather_facts: false
+  tags: [k3s, k3s_cluster, k3s_coredns]
+  vars:
+    coredns_bootstrap_dir: /tmp/coredns-bootstrap
+    gitops_branch: main
+    coredns_manifests:
+      - resources/networking/coredns-rbac.yaml
+      - resources/networking/coredns-service.yaml
+      - resources/networking/coredns-config.yaml
+      - resources/networking/coredns-custom.yaml
+      - resources/networking/coredns-ha.yaml
+      - resources/networking/pdb-coredns.yaml
+  tasks:
+    - name: Wait for k3s API to be ready
+      ansible.builtin.command: k3s kubectl get nodes
+      register: _k3s_api_check
+      retries: 30
+      delay: 5
+      until: _k3s_api_check.rc == 0
+      changed_when: false
+
+    - name: Check if CoreDNS is already running
+      ansible.builtin.command: >
+        k3s kubectl get deployment coredns -n kube-system
+        -o jsonpath='{.status.availableReplicas}'
+      register: _coredns_available
+      failed_when: false
+      changed_when: false
+
+    - name: Create bootstrap directory
+      ansible.builtin.file:
+        path: "{{ coredns_bootstrap_dir }}"
+        state: directory
+        mode: '0755'
+      when: _coredns_available.stdout | default('0') | int == 0
+
+    - name: Fetch CoreDNS manifests from GitOps repo
+      ansible.builtin.uri:
+        url: "https://raw.githubusercontent.com/gillouche/home-cluster-gitops/{{ gitops_branch }}/{{ item }}"
+        dest: "{{ coredns_bootstrap_dir }}/{{ item | basename }}"
+        mode: '0644'
+      loop: "{{ coredns_manifests }}"
+      when: _coredns_available.stdout | default('0') | int == 0
+
+    - name: Apply CoreDNS manifests
+      ansible.builtin.command: k3s kubectl apply -f {{ coredns_bootstrap_dir }}/
+      when: _coredns_available.stdout | default('0') | int == 0
+      changed_when: true
+
+    - name: Wait for CoreDNS to be ready
+      ansible.builtin.command: >
+        k3s kubectl rollout status deployment/coredns -n kube-system --timeout=120s
+      changed_when: false
+      when: _coredns_available.stdout | default('0') | int == 0
+
+    - name: Clean up bootstrap manifests
+      ansible.builtin.file:
+        path: "{{ coredns_bootstrap_dir }}"
+        state: absent
+
 - name: Fetch K3s Token
   hosts: server
   become: true
