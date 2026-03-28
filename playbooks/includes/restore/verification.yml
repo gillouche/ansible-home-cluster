@@ -15,6 +15,9 @@
         validate_certs: false
         status_code: [200, 401, 403]
       register: _k3s_health
+      retries: 12
+      delay: 10
+      until: _k3s_health is not failed
       ignore_errors: true
       when: "'restore_k3s' in ansible_run_tags"
       tags: [restore_k3s]

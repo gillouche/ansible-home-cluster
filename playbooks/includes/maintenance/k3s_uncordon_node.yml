@@ -12,3 +12,6 @@
   failed_when:
     - _uncordon_result.rc != 0
     - "'already uncordoned' not in _uncordon_result.stderr | default('')"
+  retries: 5
+  delay: 10
+  until: _uncordon_result.rc == 0 or 'already uncordoned' in (_uncordon_result.stderr | default(''))

@@ -17,6 +17,9 @@
   register: _drain_result
   changed_when: "'evicting pod' in _drain_result.stdout | default('')"
   failed_when: false
+  retries: 3
+  delay: 15
+  until: _drain_result.rc == 0 or 'apiserver not ready' not in (_drain_result.stderr | default(''))
 
 - name: "Warn if drain timed out on {{ node_name }}"
   ansible.builtin.debug:

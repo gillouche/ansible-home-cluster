@@ -57,6 +57,9 @@
           delegate_to: localhost
           become: false
           register: _pod_cidr
+          retries: 5
+          delay: 10
+          until: _pod_cidr.rc == 0
           changed_when: false
 
         - name: Ensure /run/flannel directory exists

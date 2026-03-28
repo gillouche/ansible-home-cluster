@@ -183,6 +183,10 @@
         - mutatingwebhookconfiguration longhorn-webhook-mutator
         - validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
         - mutatingwebhookconfiguration gatekeeper-mutating-webhook-configuration
+      register: _webhook_delete
+      retries: 5
+      delay: 10
+      until: _webhook_delete.rc == 0
       changed_when: false
 
 # ------------------------------------------------------------------------------
@@ -238,6 +242,31 @@
       when: _agent_status.rc != 0 or 'NotReady' in (_agent_status.stdout | default(''))
 
 # ------------------------------------------------------------------------------
+# 6b. Delete Longhorn webhooks (post-agent startup)
+# ------------------------------------------------------------------------------
+# Longhorn recreates its admission webhooks once the manager pods start.
+# During restore, these webhooks time out and block volume attach/detach
+# operations. Delete them again now that all nodes are up; ArgoCD will
+# recreate them once the cluster stabilises.
+- name: "Restore K3s: Delete Longhorn webhooks (post-agent)"
+  hosts: server[0]
+  gather_facts: false
+  become: true
+  tags: [restore_k3s]
+  tasks:
+    - name: Delete Longhorn webhook configurations to unblock volumes
+      ansible.builtin.command: >
+        k3s kubectl delete {{ item }} --ignore-not-found
+      loop:
+        - validatingwebhookconfiguration longhorn-webhook-validator
+        - mutatingwebhookconfiguration longhorn-webhook-mutator
+      register: _webhook_post_delete
+      retries: 5
+      delay: 10
+      until: _webhook_post_delete.rc == 0
+      changed_when: "'deleted' in _webhook_post_delete.stdout | default('')"
+
+# ------------------------------------------------------------------------------
 # 7. Final validation & ArgoCD re-enable
 # ------------------------------------------------------------------------------
 - name: "Restore K3s: Final validation"
@@ -246,6 +275,14 @@
   become: true
   tags: [restore_k3s]
   tasks:
+    - name: Wait for API server to be responsive
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      register: _api_check
+      retries: 12
+      delay: 10
+      until: _api_check.rc == 0
+      changed_when: false
+
     - name: Verify all nodes are Ready (warn only)
       ansible.builtin.shell: |
         set -o pipefail
@@ -269,6 +306,10 @@
         - { name: 'traefik', ns: 'kube-system' }
         - { name: 'argocd-server', ns: 'argocd' }
         - { name: 'argocd-repo-server', ns: 'argocd' }
+      register: _app_wait
+      retries: 3
+      delay: 15
+      until: _app_wait.rc == 0
       changed_when: false
 
     - name: Re-enable ArgoCD auto-sync on all Applications
@@ -281,6 +322,10 @@
             done
       args:
         executable: /bin/bash
+      register: _argocd_sync
+      retries: 5
+      delay: 10
+      until: _argocd_sync.rc == 0
       changed_when: false
       failed_when: false
 
