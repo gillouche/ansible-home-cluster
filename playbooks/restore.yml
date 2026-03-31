@@ -3,6 +3,11 @@
 # Cluster Restoration Orchestrator
 # ==============================================================================
 
+# 0. Dry Run: Validate prerequisites without executing
+- name: Restore Dry Run
+  import_playbook: includes/restore/dry_run.yml
+  tags: [restore_dry_run]
+
 # 1. DNS: Pi-hole
 - name: Restore DNS
   import_playbook: includes/restore/dns.yml

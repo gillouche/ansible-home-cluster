@@ -1,0 +1,32 @@
+#!/bin/bash
+set -euo pipefail
+
+logger -t k3s-storage-cleanup -p user.notice "Starting storage cleanup"
+
+if command -v k3s &>/dev/null && [ -S /run/k3s/containerd/containerd.sock ]; then
+    before=$(du -sb /var/lib/rancher/k3s/agent/containerd/io.containerd.content.v1.content 2>/dev/null | awk '{print $1}' || echo 0)
+    k3s crictl rmi --prune 2>/dev/null || true
+    after=$(du -sb /var/lib/rancher/k3s/agent/containerd/io.containerd.content.v1.content 2>/dev/null | awk '{print $1}' || echo 0)
+    freed=$(( (before - after) / 1024 / 1024 ))
+    logger -t k3s-storage-cleanup -p user.notice "Pruned unused container images: freed ${freed}MB"
+else
+    logger -t k3s-storage-cleanup -p user.notice "k3s containerd not running, skipping image prune"
+fi
+
+if command -v podman &>/dev/null; then
+    podman system prune --volumes -f 2>/dev/null || true
+    logger -t k3s-storage-cleanup -p user.notice "Pruned podman unused volumes and build cache"
+fi
+
+{% for user in k3s_storage_cleanup_users | default(['alarm']) %}
+user_home=$(getent passwd {{ user }} | cut -d: -f6)
+if [ -d "${user_home}/.local/share/containers/storage/volumes" ]; then
+    before=$(du -sb "${user_home}/.local/share/containers/storage/volumes" 2>/dev/null | awk '{print $1}' || echo 0)
+    su - {{ user }} -c "podman volume prune -f 2>/dev/null; podman system prune -f 2>/dev/null" || true
+    after=$(du -sb "${user_home}/.local/share/containers/storage/volumes" 2>/dev/null | awk '{print $1}' || echo 0)
+    freed=$(( (before - after) / 1024 / 1024 ))
+    logger -t k3s-storage-cleanup -p user.notice "Pruned {{ user }} podman volumes: freed ${freed}MB"
+fi
+{% endfor %}
+
+logger -t k3s-storage-cleanup -p user.notice "Storage cleanup complete"

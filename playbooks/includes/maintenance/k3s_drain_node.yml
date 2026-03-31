@@ -4,7 +4,7 @@
 #   - node_name: the Kubernetes node name to drain
 #   - drain_timeout: timeout in seconds (default: 300)
 
-- name: "Drain node {{ node_name }}"
+- name: "Drain node"
   ansible.builtin.command: >
     kubectl drain {{ node_name }}
     --ignore-daemonsets

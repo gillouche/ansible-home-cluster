@@ -1,0 +1,8 @@
+[Unit]
+Description=Prune unused container images, volumes, and build cache
+After=k3s.service k3s-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/k3s-storage-cleanup.sh
+TimeoutStartSec=600

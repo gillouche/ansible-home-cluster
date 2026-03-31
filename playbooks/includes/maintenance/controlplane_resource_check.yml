@@ -1,0 +1,46 @@
+---
+- name: Check available memory on control plane
+  ansible.builtin.shell: |
+    set -o pipefail
+    awk '/MemAvailable/ {printf "%.0f", $2/1024}' /proc/meminfo
+  args:
+    executable: /bin/bash
+  register: _mem_available_mb
+  changed_when: false
+
+- name: Check CPU temperature
+  ansible.builtin.shell: |
+    if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+      awk '{printf "%.1f", $1/1000}' /sys/class/thermal/thermal_zone0/temp
+    else
+      echo "N/A"
+    fi
+  register: _cpu_temp
+  changed_when: false
+
+- name: Check for recent OOM kills
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      dmesg 2>/dev/null | grep -ci 'oom.*kill\|out of memory' || echo "0"
+    executable: /bin/bash
+  register: _oom_count
+  changed_when: false
+  become: true
+
+- name: Display control plane resources
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: Memory={{ _mem_available_mb.stdout }}MB available,
+      Temp={{ _cpu_temp.stdout }}C,
+      OOM kills={{ _oom_count.stdout }}
+
+- name: Warn if memory is critically low (< 1024MB)
+  ansible.builtin.debug:
+    msg: "CRITICAL: {{ inventory_hostname }} has only {{ _mem_available_mb.stdout }}MB memory available!"
+  when: (_mem_available_mb.stdout | int) < 1024
+
+- name: Warn if temperature is critical (> 80C)
+  ansible.builtin.debug:
+    msg: "CRITICAL: {{ inventory_hostname }} temperature is {{ _cpu_temp.stdout }}C!"
+  when: _cpu_temp.stdout != "N/A" and (_cpu_temp.stdout | float) > 80.0

@@ -178,11 +178,7 @@
     - name: Delete blocking webhook configurations
       ansible.builtin.command: >
         k3s kubectl delete {{ item }} --ignore-not-found
-      loop:
-        - validatingwebhookconfiguration longhorn-webhook-validator
-        - mutatingwebhookconfiguration longhorn-webhook-mutator
-        - validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
-        - mutatingwebhookconfiguration gatekeeper-mutating-webhook-configuration
+      loop: "{{ k3s_blocking_webhooks }}"
       register: _webhook_delete
       retries: 5
       delay: 10
@@ -248,28 +244,75 @@
 # During restore, these webhooks time out and block volume attach/detach
 # operations. Delete them again now that all nodes are up; ArgoCD will
 # recreate them once the cluster stabilises.
-- name: "Restore K3s: Delete Longhorn webhooks (post-agent)"
+- name: "Restore K3s: Delete blocking webhooks (post-agent)"
   hosts: server[0]
   gather_facts: false
   become: true
   tags: [restore_k3s]
   tasks:
-    - name: Delete Longhorn webhook configurations to unblock volumes
+    - name: Delete blocking webhook configurations to unblock volumes
       ansible.builtin.command: >
         k3s kubectl delete {{ item }} --ignore-not-found
-      loop:
-        - validatingwebhookconfiguration longhorn-webhook-validator
-        - mutatingwebhookconfiguration longhorn-webhook-mutator
+      loop: "{{ k3s_blocking_webhooks }}"
       register: _webhook_post_delete
       retries: 5
       delay: 10
       until: _webhook_post_delete.rc == 0
-      changed_when: "'deleted' in _webhook_post_delete.stdout | default('')"
+      changed_when: "'deleted' in (_webhook_post_delete.stdout | default(''))"
+
+    - name: Check if ArgoCD auto-sync is already enabled (idempotency guard)
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get applications -n argocd -o json \
+            | jq -r '[.items[] | select(.spec.syncPolicy.automated != null)] | length'
+        executable: /bin/bash
+      register: _autosync_count
+      changed_when: false
+      failed_when: false
+
+    - name: Scale down all non-core deployments to prevent thundering herd
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get deployments --all-namespaces -o json \
+            | jq -r '.items[]
+              | select(.metadata.namespace != "kube-system")
+              | select(.metadata.namespace != "argocd")
+              | select(.metadata.namespace != "longhorn-system")
+              | select(.spec.replicas > 0)
+              | "\(.metadata.namespace) \(.metadata.name)"' \
+            | while read -r ns name; do
+                k3s kubectl scale deployment "$name" -n "$ns" --replicas=0 2>/dev/null || true
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      when: (_autosync_count.stdout | default('0') | int) == 0
+
+    - name: Scale down all non-core statefulsets to prevent thundering herd
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get statefulsets --all-namespaces -o json \
+            | jq -r '.items[]
+              | select(.metadata.namespace != "kube-system")
+              | select(.metadata.namespace != "argocd")
+              | select(.metadata.namespace != "longhorn-system")
+              | select(.spec.replicas > 0)
+              | "\(.metadata.namespace) \(.metadata.name)"' \
+            | while read -r ns name; do
+                k3s kubectl scale statefulset "$name" -n "$ns" --replicas=0 2>/dev/null || true
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      when: (_autosync_count.stdout | default('0') | int) == 0
 
 # ------------------------------------------------------------------------------
-# 7. Final validation & ArgoCD re-enable
+# 7. Final validation & tiered ArgoCD re-enable
 # ------------------------------------------------------------------------------
-- name: "Restore K3s: Final validation"
+- name: "Restore K3s: Pre-validation"
   hosts: server[0]
   gather_facts: false
   become: true
@@ -297,13 +340,11 @@
         msg: "WARNING: Some nodes are still NotReady: {{ _not_ready_nodes.stdout }}"
       when: _not_ready_nodes.stdout | trim | length > 0
 
-    - name: Validate critical applications are available
+    - name: Validate ArgoCD is available
       ansible.builtin.command: >
         k3s kubectl wait --for=condition=available --timeout=300s
         deployment/{{ item.name }} -n {{ item.ns }}
       loop:
-        - { name: 'coredns', ns: 'kube-system' }
-        - { name: 'traefik', ns: 'kube-system' }
         - { name: 'argocd-server', ns: 'argocd' }
         - { name: 'argocd-repo-server', ns: 'argocd' }
       register: _app_wait
@@ -312,22 +353,45 @@
       until: _app_wait.rc == 0
       changed_when: false
 
-    - name: Re-enable ArgoCD auto-sync on all Applications
-      ansible.builtin.shell: |
-        set -o pipefail
-        k3s kubectl get applications -n argocd -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
-          | while read -r app; do
-              [ -n "$app" ] && k3s kubectl patch application "$app" -n argocd --type merge \
-                -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}' 2>/dev/null || true
-            done
-      args:
-        executable: /bin/bash
-      register: _argocd_sync
-      retries: 5
-      delay: 10
-      until: _argocd_sync.rc == 0
-      changed_when: false
-      failed_when: false
+- name: "Restore K3s: Check control plane resources"
+  hosts: server
+  gather_facts: false
+  become: true
+  tags: [restore_k3s]
+  tasks:
+    - name: Check control plane health
+      ansible.builtin.include_tasks: ../maintenance/controlplane_resource_check.yml
+
+- name: "Restore K3s: Tiered ArgoCD re-enable"
+  hosts: server[0]
+  gather_facts: false
+  become: true
+  tags: [restore_k3s]
+  vars_files:
+    - ../../../inventories/group_vars/k3s_cluster/main.yml
+  tasks:
+    - name: Enable ArgoCD apps tier by tier
+      ansible.builtin.include_tasks: ../maintenance/argocd_tiered_sync.yml
+      vars:
+        tier_name: "{{ tier.name }}"
+        tier_apps: "{{ tier.apps }}"
+        tier_timeout: "{{ tier.timeout | default(300) }}"
+      loop: "{{ argocd_restore_tiers }}"
+      loop_control:
+        loop_var: tier
+        label: "{{ tier.name }}"
+
+    - name: Run health gate for tier
+      ansible.builtin.include_tasks: ../maintenance/argocd_health_gate.yml
+      vars:
+        health_checks: "{{ tier.health_checks | default([]) }}"
+        gate_timeout: "{{ tier.timeout | default(300) }}"
+        pre_actions: "{{ tier.pre_actions | default([]) }}"
+        post_actions: "{{ tier.post_actions | default([]) }}"
+      loop: "{{ argocd_restore_tiers }}"
+      loop_control:
+        loop_var: tier
+        label: "{{ tier.name }}"
 
     - name: Clean up Failed pods cluster-wide
       ansible.builtin.shell: |
@@ -342,8 +406,17 @@
       changed_when: false
       failed_when: false
 
+- name: "Restore K3s: Post-restore health check"
+  hosts: server[0]
+  gather_facts: false
+  become: true
+  tags: [restore_k3s]
+  tasks:
+    - name: Run post-restore health monitor
+      ansible.builtin.include_tasks: ../maintenance/restore_health_monitor.yml
+
     - name: Cluster restore complete
       ansible.builtin.debug:
         msg: >-
-          K3s cluster restored. All nodes Ready, critical apps available,
-          ArgoCD auto-sync re-enabled.
+          K3s cluster restored. Tiered ArgoCD re-enable complete.
+          Check ArgoCD UI for application health status.

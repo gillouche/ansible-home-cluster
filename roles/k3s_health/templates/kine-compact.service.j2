@@ -1,0 +1,8 @@
+[Unit]
+Description=Compact k3s kine database to remove stale rows
+After=container-postgres.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kine-compact.sh
+TimeoutStartSec=600

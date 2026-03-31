@@ -6,8 +6,10 @@ extra_server_args: >-
   --disable traefik
   --flannel-backend=vxlan
   --kubelet-arg=system-reserved=cpu=1000m,memory=2Gi
-  --kubelet-arg=kube-reserved=cpu=1000m,memory=2Gi
+  --kubelet-arg=kube-reserved=cpu=1000m,memory=3Gi
   --kubelet-arg=max-pods=110
+  --kube-apiserver-arg=max-requests-inflight=200
+  --kube-apiserver-arg=max-mutating-requests-inflight=100
   --datastore-endpoint={{ datastore_endpoint }}
   --tls-san {{ k3s_api_vip }}
   --tls-san {{ api_endpoint }}

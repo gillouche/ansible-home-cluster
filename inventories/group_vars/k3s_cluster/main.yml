@@ -34,3 +34,165 @@ k3s_vrrp_auth_pass: "{{ vault_k3s_vrrp_auth_pass | default('k3s-vrrp-secret') }}
 k3s_lb_vip_prefixlen: 24
 k3s_lb_virtual_router_id: 65
 k3s_lb_vrrp_interface: "{{ monit_network_interface | default('end0') }}"
+
+k3s_crashloop_operators:
+  - { name: chaos-controller-manager, namespace: chaos-mesh }
+  - { name: chaos-dashboard, namespace: chaos-mesh }
+  - { name: spark-operator-controller, namespace: data-lake }
+  - { name: keda-operator, namespace: keda }
+  - { name: argo-rollouts, namespace: argo-rollouts }
+  - { name: tempo-compactor, namespace: monitoring }
+  - { name: tempo-distributor, namespace: monitoring }
+  - { name: tempo-metrics-generator, namespace: monitoring }
+  - { name: tempo-querier, namespace: monitoring }
+  - { name: tempo-query-frontend, namespace: monitoring }
+  - { name: csi-attacher, namespace: longhorn-system }
+  - { name: csi-provisioner, namespace: longhorn-system }
+  - { name: csi-resizer, namespace: longhorn-system }
+  - { name: csi-snapshotter, namespace: longhorn-system }
+  - { name: longhorn-driver-deployer, namespace: longhorn-system }
+
+k3s_crashloop_statefulsets:
+  - { name: tempo-ingester, namespace: monitoring }
+
+k3s_blocking_webhooks:
+  - validatingwebhookconfiguration longhorn-webhook-validator
+  - mutatingwebhookconfiguration longhorn-webhook-mutator
+  - validatingwebhookconfiguration chaos-mesh-validation
+  - validatingwebhookconfiguration chaos-mesh-validation-auth
+  - mutatingwebhookconfiguration chaos-mesh-mutation
+
+argocd_restore_tiers:
+  - name: "T0: Core Infrastructure"
+    apps:
+      - cluster-tls
+      - coredns-custom
+      - reflector
+    health_checks:
+      - type: deployment_available
+        items:
+          - { name: coredns, namespace: kube-system }
+          - { name: sealed-secrets-controller, namespace: kube-system }
+    timeout: 180
+
+  - name: "T1: Storage"
+    apps:
+      - longhorn
+      - longhorn-prereqs
+    health_checks:
+      - type: longhorn_nodes_ready
+    post_actions:
+      - delete_blocking_webhooks
+    timeout: 300
+
+  - name: "T2: Network & Access"
+    apps:
+      - traefik
+      - authelia
+      - cluster-policies
+      - argocd-ingress
+    health_checks:
+      - type: deployment_available
+        items:
+          - { name: traefik, namespace: kube-system }
+    timeout: 180
+
+  - name: "T3: Operators"
+    apps:
+      - cloudnative-pg
+      - vpa
+      - keda
+      - amdgpu-device-plugin
+      - nvidia-device-plugin
+      - event-exporter-prereq
+      - event-exporter
+      - data-lake-resources
+    health_checks:
+      - type: deployment_available
+        items:
+          - { name: cloudnative-pg, namespace: cnpg-system }
+    timeout: 180
+
+  - name: "T4: Policy"
+    apps:
+      - gatekeeper
+      - gatekeeper-templates
+      - gatekeeper-constraints
+    health_checks:
+      - type: deployment_available
+        items:
+          - { name: gatekeeper-audit, namespace: gatekeeper-system }
+    timeout: 180
+
+  - name: "T5: Databases"
+    apps:
+      - postgres-shared
+    pre_actions:
+      - cnpg_cleanup_stale
+    health_checks:
+      - type: cnpg_cluster_healthy
+        items:
+          - { name: shared-db, namespace: database }
+    timeout: 600
+
+  - name: "T6: Object Storage"
+    apps:
+      - seaweedfs
+    health_checks:
+      - type: pod_running
+        items:
+          - { name: seaweedfs-master-0, namespace: seaweedfs }
+    timeout: 300
+
+  - name: "T7: Observability"
+    apps:
+      - monitoring
+      - monitoring-rbac
+      - monitoring-extra-dashboards
+      - kube-state-metrics
+      - blackbox-exporter
+      - node-problem-detector
+      - goldilocks
+      - loki
+      - tempo
+    health_checks:
+      - type: pod_running
+        items:
+          - { name: prometheus-monitoring-kube-prometheus-prometheus-0, namespace: monitoring }
+    timeout: 300
+
+  - name: "T8: CI/CD & Ingresses"
+    apps:
+      - arc-controller
+      - infra-ingresses
+      - argo-rollouts
+    health_checks: []
+    timeout: 180
+
+  - name: "T9: Runners"
+    apps:
+      - container-factory-runner
+      - longhorn-replica-rebalancer-runner
+      - overwatchd-runner
+      - playground-runner
+    health_checks: []
+    timeout: 120
+
+  - name: "T10: Data Lake"
+    apps:
+      - polaris
+      - spark-operator
+      - trino
+    health_checks: []
+    timeout: 120
+
+  - name: "T11: User Applications"
+    apps: "__remaining__"
+    health_checks: []
+    timeout: 180
+
+  - name: "T12: Chaos Testing"
+    apps:
+      - chaos-mesh
+    health_checks: []
+    timeout: 60

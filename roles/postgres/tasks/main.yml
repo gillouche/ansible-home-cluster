@@ -191,6 +191,9 @@
         parameters:
           unix_socket_directories: "/var/run/postgresql, /tmp"
           port: "{{ postgres_port | int }}"
+          max_connections: "{{ postgres_max_connections | default(200) }}"
+          statement_timeout: "{{ postgres_statement_timeout | default('60s') }}"
+          idle_in_transaction_session_timeout: "{{ postgres_idle_in_transaction_timeout | default('120s') }}"
         pg_hba:
           - local   all             all                                   trust
           - host    all             all             127.0.0.1/32            md5
@@ -206,6 +209,10 @@
       bootstrap:
         dcs:
           postgresql:
+            parameters:
+              max_connections: "{{ postgres_max_connections | default(200) }}"
+              statement_timeout: "{{ postgres_statement_timeout | default('60s') }}"
+              idle_in_transaction_session_timeout: "{{ postgres_idle_in_transaction_timeout | default('120s') }}"
             pg_hba:
               - local   all             all                                   trust
               - host    all             all             127.0.0.1/32            md5
@@ -243,6 +250,7 @@
     image: "{{ postgres_image }}"
     state: created
     recreate: "{{ _postgres_container_recreate | default(false) }}"
+    shm_size: "{{ postgres_shm_size | default('256m') }}"
     generate_systemd:
       path: /etc/systemd/system/
       restart_policy: always
@@ -377,6 +385,99 @@
   when: is_postgres_leader
   changed_when: false
   register: _patroni_current_config
+
+- name: Update Patroni DCS configuration with performance parameters (Leader only)
+  ansible.builtin.shell:
+    cmd: >
+      podman exec {{ postgres_container_name }}
+      patronictl edit-config --force
+      --set 'postgresql.parameters.max_connections={{ postgres_max_connections | default(200) }}'
+      --set 'postgresql.parameters.statement_timeout={{ postgres_statement_timeout | default("60s") }}'
+      --set 'postgresql.parameters.idle_in_transaction_session_timeout={{ postgres_idle_in_transaction_timeout | default("120s") }}'
+  become: true
+  when:
+    - is_postgres_leader
+    - >-
+        'max_connections: ' + (postgres_max_connections | default(200) | string)
+        not in _patroni_current_config.stdout
+  changed_when: true
+  register: _patroni_perf_config_update
+
+- name: Apply max_connections via ALTER SYSTEM (survives restarts)
+  ansible.builtin.command:
+    cmd: >
+      podman exec {{ postgres_container_name }}
+      psql -U postgres -c "ALTER SYSTEM SET max_connections = '{{ postgres_max_connections | default(200) }}';"
+  become: true
+  register: _alter_system_maxconn
+  changed_when: "'ALTER SYSTEM' in _alter_system_maxconn.stdout | default('')"
+  when: is_postgres_leader
+  retries: 3
+  delay: 5
+  until: _alter_system_maxconn.rc == 0
+
+- name: Check current max_connections runtime value
+  ansible.builtin.command:
+    cmd: >
+      podman exec {{ postgres_container_name }}
+      psql -U postgres -tAc "SHOW max_connections;"
+  become: true
+  register: _current_maxconn
+  changed_when: false
+  when: is_postgres_leader
+
+- name: Check if Postgres has pending restart (Leader only)
+  ansible.builtin.command: >
+    podman exec {{ postgres_container_name }}
+    curl -s http://localhost:{{ postgres_patroni_port }}/patroni
+  become: true
+  register: _patroni_status_raw
+  changed_when: false
+  when: is_postgres_leader
+
+- name: Set restart needed fact
+  ansible.builtin.set_fact:
+    _postgres_restart_needed: >-
+      {{
+        (is_postgres_leader | default(false)) and
+        (
+          ((_patroni_status_raw.stdout | default('{}') | from_json).get('pending_restart', false)) or
+          ((_current_maxconn.stdout | default('') | trim) != (postgres_max_connections | default(200) | string))
+        )
+      }}
+
+- name: Restart Postgres via Patroni if config change pending (Leader only)
+  ansible.builtin.shell:
+    cmd: |
+      set -eo pipefail
+      for member in $(podman exec {{ postgres_container_name }} \
+        patronictl list -f json 2>/dev/null | \
+        python3 -c "import json,sys; [print(m['Member']) for m in json.loads(sys.stdin.read()) if m.get('Role') != 'Leader']"); do
+        podman exec {{ postgres_container_name }} \
+          curl -s -XPOST "http://${member}:{{ postgres_patroni_port }}/restart" \
+          -d '{"restart_pending": true}' -H "Content-Type: application/json" || true
+        sleep 10
+      done
+      podman exec {{ postgres_container_name }} \
+        curl -s -XPOST "http://localhost:{{ postgres_patroni_port }}/restart" \
+        -d '{"restart_pending": true}' -H "Content-Type: application/json"
+    executable: /bin/bash
+  become: true
+  when: _postgres_restart_needed | bool
+  changed_when: true
+  register: _patroni_restart_result
+  failed_when: false
+
+- name: Wait for Patroni cluster to stabilize after restart
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ postgres_patroni_port }}/health"
+    status_code: [200]
+  register: _patroni_post_restart
+  retries: 30
+  delay: 5
+  until: _patroni_post_restart.status == 200
+  become: false
+  when: _patroni_restart_result is defined and _patroni_restart_result.changed
 
 - name: Update Patroni DCS configuration with new pg_hba rules (Leader only)
   ansible.builtin.shell:
@@ -527,6 +628,32 @@
       when: _authelia_db_exists.stdout != "1"
       register: _create_authelia_db
       changed_when: "'CREATE DATABASE' in _create_authelia_db.stdout"
+
+    - name: Configure statement_timeout on k3s database
+      ansible.builtin.command:
+        cmd: >
+          podman exec {{ postgres_container_name }}
+          psql -U postgres -d {{ postgres_db_name }} -c
+          "ALTER DATABASE {{ postgres_db_name }} SET statement_timeout = '{{ postgres_statement_timeout | default('60s') }}';"
+      register: _set_stmt_timeout
+      changed_when: "'ALTER DATABASE' in _set_stmt_timeout.stdout"
+      retries: 3
+      delay: 5
+      until: _set_stmt_timeout.rc == 0
+
+    - name: Configure idle_in_transaction_session_timeout on k3s database
+      ansible.builtin.command:
+        cmd: >
+          podman exec {{ postgres_container_name }}
+          psql -U postgres -d {{ postgres_db_name }} -c
+          "ALTER DATABASE {{ postgres_db_name }}
+          SET idle_in_transaction_session_timeout =
+          '{{ postgres_idle_in_transaction_timeout | default('120s') }}';"
+      register: _set_idle_timeout
+      changed_when: "'ALTER DATABASE' in _set_idle_timeout.stdout"
+      retries: 3
+      delay: 5
+      until: _set_idle_timeout.rc == 0
 
     - name: Check if postgres superuser has correct password
       ansible.builtin.command:

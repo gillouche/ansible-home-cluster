@@ -36,15 +36,13 @@
       changed_when: false
       failed_when: false
 
-    - name: Delete blocking webhook configurations
+    - name: Delete blocking webhook configurations (best-effort, k3s may be down)
       ansible.builtin.command: >
         k3s kubectl delete {{ item }} --ignore-not-found
-      loop:
-        - validatingwebhookconfiguration longhorn-webhook-validator
-        - mutatingwebhookconfiguration longhorn-webhook-mutator
-        - validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
-        - mutatingwebhookconfiguration gatekeeper-mutating-webhook-configuration
-      changed_when: false
+      loop: "{{ k3s_blocking_webhooks }}"
+      register: _result
+      failed_when: false
+      changed_when: "'deleted' in (_result.stdout | default(''))"
 
 # ------------------------------------------------------------------------------
 # 2. Drain, stop, and reboot agents
@@ -66,6 +64,13 @@
       ansible.builtin.service:
         name: k3s-agent
         state: stopped
+      register: _agent_stop
+      failed_when: false
+
+    - name: Warn if agent stop failed
+      ansible.builtin.debug:
+        msg: "WARNING: Failed to stop k3s-agent on {{ inventory_hostname }}: {{ _agent_stop.msg | default('unknown') }}"
+      when: _agent_stop is failed
 
 - name: "Reboot: Reboot agents"
   hosts: agent
@@ -86,21 +91,26 @@
       changed_when: true
 
 # ------------------------------------------------------------------------------
-# 3. Drain & reboot control planes (one by one)
+# 3. Disable k3s, reboot all control planes in parallel
 # ------------------------------------------------------------------------------
-- name: "Reboot: Drain and reboot homeserver (Primary Control Plane)"
-  hosts: homeserver
+- name: "Reboot: Disable k3s, stop, and reboot all control planes"
+  hosts: server
   gather_facts: true
   become: true
   tags: [reboot, reboot_servers]
   vars:
     reboot_timeout: 1200
   tasks:
-    - name: Drain homeserver
+    - name: Drain {{ inventory_hostname }}
       ansible.builtin.include_tasks: k3s_drain_node.yml
       vars:
         node_name: "{{ inventory_hostname }}"
         drain_timeout: 120
+
+    - name: Disable k3s to prevent auto-start after reboot
+      ansible.builtin.systemd:
+        name: k3s
+        enabled: false
 
     - name: Stop K3s service gracefully
       ansible.builtin.service:
@@ -109,7 +119,7 @@
 
     - name: Reboot host
       ansible.builtin.reboot:
-        msg: "Rebooting homeserver (Maintenance)"
+        msg: "Rebooting {{ inventory_hostname }} (Maintenance)"
         reboot_timeout: "{{ reboot_timeout }}"
 
     - name: Flush ARP cache after reboot
@@ -133,163 +143,171 @@
     - name: Ensure flannel subnet.env exists
       ansible.builtin.include_tasks: k3s_flannel_fix.yml
 
-    - name: Wait for K3s API port (6443)
-      ansible.builtin.wait_for:
-        port: 6443
-        host: "{{ ansible_host }}"
-        delay: 10
-        timeout: 300
-
-    - name: Validate and clean up homeserver
-      ansible.builtin.include_tasks: k3s_validate_node.yml
-      vars:
-        node_name: "{{ inventory_hostname }}"
-
-    - name: Uncordon homeserver
-      ansible.builtin.include_tasks: k3s_uncordon_node.yml
-      vars:
-        node_name: "{{ inventory_hostname }}"
-
-- name: "Reboot: Drain and reboot homeserver2 (Secondary Control Plane)"
-  hosts: homeserver2
-  gather_facts: true
-  become: true
-  tags: [reboot, reboot_servers]
-  vars:
-    reboot_timeout: 1200
-  tasks:
-    - name: Drain homeserver2
-      ansible.builtin.include_tasks: k3s_drain_node.yml
-      vars:
-        node_name: "{{ inventory_hostname }}"
-        drain_timeout: 120
-
-    - name: Stop K3s service gracefully
-      ansible.builtin.service:
-        name: k3s
-        state: stopped
-
-    - name: Reboot host
-      ansible.builtin.reboot:
-        msg: "Rebooting homeserver2 (Maintenance)"
-        reboot_timeout: "{{ reboot_timeout }}"
-
-    - name: Flush ARP cache after reboot
-      ansible.builtin.command: ip neigh flush all
-      changed_when: true
-
-    - name: Verify etcd is healthy after reboot
-      ansible.builtin.uri:
-        url: "http://{{ ansible_host }}:2379/health"
-        status_code: 200
-      register: _etcd_health
-      retries: 15
-      delay: 2
-      until: _etcd_health.status == 200
-
-    - name: Verify postgres container is running after reboot
-      ansible.builtin.systemd:
-        name: container-postgres
-        state: started
-
-    - name: Ensure flannel subnet.env exists
-      ansible.builtin.include_tasks: k3s_flannel_fix.yml
-
-    - name: Wait for K3s API port (6443)
-      ansible.builtin.wait_for:
-        port: 6443
-        host: "{{ ansible_host }}"
-        delay: 10
-        timeout: 300
-
-    - name: Validate and clean up homeserver2
-      ansible.builtin.include_tasks: k3s_validate_node.yml
-      vars:
-        node_name: "{{ inventory_hostname }}"
-
-    - name: Uncordon homeserver2
-      ansible.builtin.include_tasks: k3s_uncordon_node.yml
-      vars:
-        node_name: "{{ inventory_hostname }}"
-
-- name: "Reboot: Drain and reboot homeserver3 (Tertiary Control Plane)"
-  hosts: homeserver3
-  gather_facts: true
-  become: true
-  tags: [reboot, reboot_servers]
-  vars:
-    reboot_timeout: 1200
-  tasks:
-    - name: Drain homeserver3
-      ansible.builtin.include_tasks: k3s_drain_node.yml
-      vars:
-        node_name: "{{ inventory_hostname }}"
-        drain_timeout: 120
-
-    - name: Stop K3s service gracefully
-      ansible.builtin.service:
-        name: k3s
-        state: stopped
-
-    - name: Reboot host
-      ansible.builtin.reboot:
-        msg: "Rebooting homeserver3 (Maintenance)"
-        reboot_timeout: "{{ reboot_timeout }}"
-
-    - name: Flush ARP cache after reboot
-      ansible.builtin.command: ip neigh flush all
-      changed_when: true
-
-    - name: Verify etcd is healthy after reboot
-      ansible.builtin.uri:
-        url: "http://{{ ansible_host }}:2379/health"
-        status_code: 200
-      register: _etcd_health
-      retries: 15
-      delay: 2
-      until: _etcd_health.status == 200
-
-    - name: Verify postgres container is running after reboot
-      ansible.builtin.systemd:
-        name: container-postgres
-        state: started
-
-    - name: Ensure flannel subnet.env exists
-      ansible.builtin.include_tasks: k3s_flannel_fix.yml
-
-    - name: Wait for K3s API port (6443)
-      ansible.builtin.wait_for:
-        port: 6443
-        host: "{{ ansible_host }}"
-        delay: 10
-        timeout: 300
-
-    - name: Validate and clean up homeserver3
-      ansible.builtin.include_tasks: k3s_validate_node.yml
-      vars:
-        node_name: "{{ inventory_hostname }}"
-
-    - name: Uncordon homeserver3
-      ansible.builtin.include_tasks: k3s_uncordon_node.yml
-      vars:
-        node_name: "{{ inventory_hostname }}"
-
 # ------------------------------------------------------------------------------
-# 4. Uncordon all agents (always run, even if a node is NotReady)
+# 3a. Start k3s sequentially on control planes
 # ------------------------------------------------------------------------------
-- name: "Reboot: Uncordon agents"
-  hosts: agent
+- name: "Reboot: Start k3s on control planes"
+  hosts: server
   gather_facts: false
-  become: false
-  tags: [reboot, reboot_agents]
+  become: true
+  serial: 1
+  tags: [reboot, reboot_servers]
   tasks:
-    - name: Uncordon agent
-      ansible.builtin.include_tasks: k3s_uncordon_node.yml
+    - name: Start k3s service on {{ inventory_hostname }}
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+        daemon_reload: true
+
+    - name: Wait for K3s API port (6443) on {{ inventory_hostname }}
+      ansible.builtin.wait_for:
+        port: 6443
+        host: "{{ ansible_host }}"
+        delay: 10
+        timeout: 300
+
+    - name: Delete blocking webhook configurations
+      ansible.builtin.command: >
+        k3s kubectl delete {{ item }} --ignore-not-found
+      loop: "{{ k3s_blocking_webhooks }}"
+      register: _result
+      failed_when: false
+      changed_when: "'deleted' in (_result.stdout | default(''))"
+      run_once: true  # noqa: run-once[task]
+
+    - name: Check if ArgoCD auto-sync is already enabled (idempotency guard)
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get applications -n argocd -o json \
+            | jq -r '[.items[] | select(.spec.syncPolicy.automated != null)] | length'
+        executable: /bin/bash
+      register: _autosync_count
+      changed_when: false
+      failed_when: false
+      run_once: true  # noqa: run-once[task]
+
+    - name: Scale down all non-core deployments to prevent thundering herd
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get deployments --all-namespaces -o json \
+            | jq -r '.items[]
+              | select(.metadata.namespace != "kube-system")
+              | select(.metadata.namespace != "argocd")
+              | select(.metadata.namespace != "longhorn-system")
+              | select(.spec.replicas > 0)
+              | "\(.metadata.namespace) \(.metadata.name)"' \
+            | while read -r ns name; do
+                k3s kubectl scale deployment "$name" -n "$ns" --replicas=0 2>/dev/null || true
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      run_once: true  # noqa: run-once[task]
+      when: (_autosync_count.stdout | default('0') | int) == 0
+
+    - name: Scale down all non-core statefulsets to prevent thundering herd
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get statefulsets --all-namespaces -o json \
+            | jq -r '.items[]
+              | select(.metadata.namespace != "kube-system")
+              | select(.metadata.namespace != "argocd")
+              | select(.metadata.namespace != "longhorn-system")
+              | select(.spec.replicas > 0)
+              | "\(.metadata.namespace) \(.metadata.name)"' \
+            | while read -r ns name; do
+                k3s kubectl scale statefulset "$name" -n "$ns" --replicas=0 2>/dev/null || true
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      run_once: true  # noqa: run-once[task]
+      when: (_autosync_count.stdout | default('0') | int) == 0
+
+    - name: Validate and clean up {{ inventory_hostname }}
+      ansible.builtin.include_tasks: k3s_validate_node.yml
       vars:
         node_name: "{{ inventory_hostname }}"
 
 # ------------------------------------------------------------------------------
-# 5. Validate agents after reboot (non-fatal per node)
+# 3b. Stabilize cluster before uncordoning
+# ------------------------------------------------------------------------------
+- name: "Reboot: Stabilize cluster"
+  hosts: server[0]
+  gather_facts: false
+  become: true
+  tags: [reboot, reboot_servers]
+  tasks:
+    - name: Verify all control planes are Ready
+      ansible.builtin.shell: |
+        set -o pipefail
+        k3s kubectl get nodes -l node-role.kubernetes.io/control-plane --no-headers \
+          | grep -c 'Ready' || echo 0
+      args:
+        executable: /bin/bash
+      register: _cp_ready
+      retries: 30
+      delay: 10
+      until: (_cp_ready.stdout | trim | int) >= 3
+      changed_when: false
+
+    - name: Delete blocking webhook configurations
+      ansible.builtin.command: >
+        k3s kubectl delete {{ item }} --ignore-not-found
+      loop: "{{ k3s_blocking_webhooks }}"
+      register: _result
+      retries: 5
+      delay: 10
+      until: _result.rc == 0
+      changed_when: false
+
+    - name: Scale down crash-prone operators to prevent API storm
+      ansible.builtin.command: >
+        k3s kubectl scale deployment {{ item.name }}
+        -n {{ item.namespace }} --replicas=0
+      loop: "{{ k3s_crashloop_operators }}"
+      loop_control:
+        label: "{{ item.namespace }}/{{ item.name }}"
+      register: _scale_down
+      failed_when: false
+      changed_when: "'scaled' in (_scale_down.stdout | default(''))"
+
+    - name: Scale down crash-prone statefulsets to prevent API storm
+      ansible.builtin.command: >
+        k3s kubectl scale statefulset {{ item.name }}
+        -n {{ item.namespace }} --replicas=0
+      loop: "{{ k3s_crashloop_statefulsets | default([]) }}"
+      loop_control:
+        label: "{{ item.namespace }}/{{ item.name }}"
+      register: _scale_down_sts
+      failed_when: false
+      changed_when: "'scaled' in (_scale_down_sts.stdout | default(''))"
+
+# ------------------------------------------------------------------------------
+# 3c. Uncordon ALL nodes (server[0] does it for everyone to avoid gaps)
+# ------------------------------------------------------------------------------
+- name: "Reboot: Uncordon all nodes"
+  hosts: server[0]
+  gather_facts: false
+  become: true
+  tags: [reboot, reboot_servers, reboot_agents]
+  tasks:
+    - name: Uncordon all nodes
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+            | while read -r node; do
+                k3s kubectl uncordon "$node" 2>/dev/null || true
+              done
+        executable: /bin/bash
+      changed_when: false
+
+# ------------------------------------------------------------------------------
+# 4. Validate agents after reboot (non-fatal per node)
 # ------------------------------------------------------------------------------
 - name: "Reboot: Validate agents"
   hosts: agent
@@ -313,6 +331,126 @@
       when: _agent_status.rc != 0 or 'NotReady' in (_agent_status.stdout | default(''))
 
 # ------------------------------------------------------------------------------
+# 5. Clean up all stale resources from before reboot
+# ------------------------------------------------------------------------------
+- name: "Reboot: Clean up stale resources"
+  hosts: server[0]
+  gather_facts: false
+  become: true
+  tags: [reboot, reboot_validation]
+  tasks:
+    - name: Delete pods in Pending/Unknown/Failed state
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          for phase in Pending Unknown Failed; do
+            k3s kubectl get pods --all-namespaces --field-selector="status.phase=$phase" \
+              -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' \
+              | while read -r ns name; do
+                  [ -n "$ns" ] && k3s kubectl delete pod "$name" -n "$ns" --force --grace-period=0 2>/dev/null || true
+                done
+          done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Delete stale VolumeAttachments not attached
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get volumeattachments -o json \
+            | jq -r '.items[] | select(.status.attached == false) | .metadata.name' \
+            | while read -r va; do
+                k3s kubectl patch volumeattachment "$va" -p '{"metadata":{"finalizers":null}}' --type merge 2>/dev/null
+                k3s kubectl delete volumeattachment "$va" --force --grace-period=0 2>/dev/null || true
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Clean stale Longhorn snapshot-controller attachment tickets
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get volumeattachments.longhorn.io -n longhorn-system -o json \
+            | jq -r '.items[] | select(.spec.attachmentTickets | to_entries | length > 1) | .metadata.name' \
+            | while read -r vol; do
+                tickets=$(k3s kubectl get volumeattachments.longhorn.io "$vol" -n longhorn-system -o json \
+                  | jq -r '[.spec.attachmentTickets | to_entries[] | select(.value.type == "snapshot-controller") | .key] | .[]')
+                for ticket in $tickets; do
+                  k3s kubectl patch volumeattachments.longhorn.io "$vol" -n longhorn-system \
+                    --type json -p "[{\"op\":\"remove\",\"path\":\"/spec/attachmentTickets/$ticket\"}]" 2>/dev/null || true
+                done
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Delete failed Jobs
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get jobs --all-namespaces -o json \
+            | jq -r '.items[] | select(.status.failed != null and .status.failed > 0) | "\(.metadata.namespace) \(.metadata.name)"' \
+            | while read -r ns name; do
+                [ -n "$ns" ] && k3s kubectl delete job "$name" -n "$ns" --ignore-not-found 2>/dev/null || true
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Delete stopped Longhorn replicas (orphans from failed rebuilds)
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get replicas.longhorn.io -n longhorn-system -o json \
+            | jq -r '.items[] | select(.status.currentState == "stopped") | .metadata.name' \
+            | while read -r r; do
+                k3s kubectl delete replica "$r" -n longhorn-system --force --grace-period=0 2>/dev/null || true
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Delete orphaned Longhorn snapshots referencing deleted volumes
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get snapshots.longhorn.io -n longhorn-system -o json \
+            | jq -r '[.items[] | .spec.volume] | unique | .[]' \
+            | while read -r vol; do
+                if ! k3s kubectl get volume "$vol" -n longhorn-system &>/dev/null; then
+                  k3s kubectl delete snapshots.longhorn.io -n longhorn-system \
+                    -l "longhornvolume=$vol" --force --grace-period=0 2>/dev/null || true
+                fi
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+- name: "Reboot: Compact kine table on Patroni leader"
+  hosts: server
+  gather_facts: false
+  become: true
+  tags: [reboot, reboot_validation]
+  tasks:
+    - name: Check if this node is Patroni leader
+      ansible.builtin.command: podman exec postgres psql -U postgres -d kubernetes -tAc "SELECT pg_is_in_recovery();"
+      register: _pg_recovery
+      changed_when: false
+      failed_when: false
+
+    - name: Compact kine table (leader only)
+      ansible.builtin.command: >
+        podman exec postgres psql -U postgres -d kubernetes -c
+        "SET statement_timeout = '300s';
+        WITH latest AS (SELECT name, max(id) as max_id FROM kine GROUP BY name)
+        DELETE FROM kine k USING latest l WHERE k.name = l.name AND k.id < l.max_id;"
+      when: _pg_recovery.stdout | trim == 'f'
+      changed_when: false
+      failed_when: false
+
+# ------------------------------------------------------------------------------
 # 6. Final cluster validation & ArgoCD re-enable
 # ------------------------------------------------------------------------------
 - name: "Reboot: Final validation and ArgoCD re-enable"
@@ -321,16 +459,6 @@
   become: true
   tags: [reboot, reboot_validation]
   tasks:
-    - name: Delete blocking webhook configurations
-      ansible.builtin.command: >
-        k3s kubectl delete {{ item }} --ignore-not-found
-      loop:
-        - validatingwebhookconfiguration longhorn-webhook-validator
-        - mutatingwebhookconfiguration longhorn-webhook-mutator
-        - validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
-        - mutatingwebhookconfiguration gatekeeper-mutating-webhook-configuration
-      changed_when: false
-
     - name: Verify all nodes are Ready (warn only)
       ansible.builtin.shell: |
         set -o pipefail
@@ -338,6 +466,9 @@
       args:
         executable: /bin/bash
       register: _not_ready_nodes
+      retries: 5
+      delay: 10
+      until: _not_ready_nodes.rc == 0
       changed_when: false
 
     - name: Warn about NotReady nodes
@@ -354,20 +485,34 @@
         - { name: 'traefik', ns: 'kube-system' }
         - { name: 'argocd-server', ns: 'argocd' }
         - { name: 'argocd-repo-server', ns: 'argocd' }
+      register: _result
+      retries: 5
+      delay: 10
+      until: _result.rc == 0
       changed_when: false
 
-    - name: Re-enable ArgoCD auto-sync on all Applications
-      ansible.builtin.shell: |
-        set -o pipefail
-        k3s kubectl get applications -n argocd -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
-          | while read -r app; do
-              [ -n "$app" ] && k3s kubectl patch application "$app" -n argocd --type merge \
-                -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}' 2>/dev/null || true
-            done
-      args:
-        executable: /bin/bash
-      changed_when: false
-      failed_when: false
+    - name: Enable ArgoCD apps tier by tier
+      ansible.builtin.include_tasks: argocd_tiered_sync.yml
+      vars:
+        tier_name: "{{ tier.name }}"
+        tier_apps: "{{ tier.apps }}"
+        tier_timeout: "{{ tier.timeout | default(300) }}"
+      loop: "{{ argocd_restore_tiers }}"
+      loop_control:
+        loop_var: tier
+        label: "{{ tier.name }}"
+
+    - name: Run health gate for tier
+      ansible.builtin.include_tasks: argocd_health_gate.yml
+      vars:
+        health_checks: "{{ tier.health_checks | default([]) }}"
+        gate_timeout: "{{ tier.timeout | default(300) }}"
+        pre_actions: "{{ tier.pre_actions | default([]) }}"
+        post_actions: "{{ tier.post_actions | default([]) }}"
+      loop: "{{ argocd_restore_tiers }}"
+      loop_control:
+        loop_var: tier
+        label: "{{ tier.name }}"
 
     - name: Clean up Failed pods cluster-wide
       ansible.builtin.shell: |
@@ -381,3 +526,19 @@
         executable: /bin/bash
       changed_when: false
       failed_when: false
+
+    - name: Delete stopped Longhorn replicas after tiered sync
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          k3s kubectl get replicas.longhorn.io -n longhorn-system -o json \
+            | jq -r '.items[] | select(.status.currentState == "stopped") | .metadata.name' \
+            | while read -r r; do
+                k3s kubectl delete replica "$r" -n longhorn-system --force --grace-period=0 2>/dev/null || true
+              done
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+    - name: Run post-reboot health monitor
+      ansible.builtin.include_tasks: restore_health_monitor.yml

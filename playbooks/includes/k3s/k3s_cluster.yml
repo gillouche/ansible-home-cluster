@@ -43,10 +43,10 @@
         state: directory
         mode: '0755'
 
-    - name: Ensure systemd preset allows k3s to be enabled on boot
+    - name: Ensure systemd preset prevents k3s from auto-starting on boot
       ansible.builtin.copy:
         content: |
-          enable k3s.service
+          disable k3s.service
         dest: /etc/systemd/system-presets/90-k3s.preset
         mode: '0644'
 
@@ -104,10 +104,10 @@
         daemon_reload: true
 
   post_tasks:
-    - name: Ensure k3s service is enabled and started
+    - name: Ensure k3s service is started but not enabled on boot
       ansible.builtin.systemd:
         name: k3s
-        enabled: true
+        enabled: false
         state: started
         daemon_reload: true
       tags: [k3s, k3s_cluster, k3s_server]

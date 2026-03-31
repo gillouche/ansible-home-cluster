@@ -24,6 +24,9 @@
       args:
         executable: /bin/bash
       register: _not_ready_count
+      retries: 5
+      delay: 10
+      until: _not_ready_count.rc == 0
       changed_when: false
 
     - name: Warn about NotReady nodes
@@ -59,6 +62,10 @@
         - mutatingwebhookconfiguration longhorn-webhook-mutator
         - validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
         - mutatingwebhookconfiguration gatekeeper-mutating-webhook-configuration
+      register: _result
+      retries: 5
+      delay: 10
+      until: _result.rc == 0
       changed_when: false
 
 # ------------------------------------------------------------------------------

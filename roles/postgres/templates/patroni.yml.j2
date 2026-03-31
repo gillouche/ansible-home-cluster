@@ -85,6 +85,9 @@ postgresql:
   parameters:
     unix_socket_directories: '/var/run/postgresql, /tmp'
     port: {{ postgres_port }}
+    max_connections: {{ postgres_max_connections | default(200) }}
+    statement_timeout: '{{ postgres_statement_timeout | default("60s") }}'
+    idle_in_transaction_session_timeout: '{{ postgres_idle_in_transaction_timeout | default("120s") }}'
 
 tags:
   nosqlite: true

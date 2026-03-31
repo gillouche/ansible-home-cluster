@@ -1,0 +1,91 @@
+---
+- name: "Post-Restore: API server stability check"
+  ansible.builtin.shell: |
+    set -o pipefail
+    fails=0
+    for i in $(seq 1 10); do
+      if ! k3s kubectl get --raw /healthz > /dev/null 2>&1; then
+        fails=$((fails + 1))
+      fi
+      sleep 3
+    done
+    echo "$fails"
+  args:
+    executable: /bin/bash
+  register: _api_fails
+  changed_when: false
+
+- name: Report API stability
+  ansible.builtin.debug:
+    msg: "API server: {{ _api_fails.stdout | trim }}/10 failures in last 30 seconds"
+
+- name: Warn if API is unstable
+  ansible.builtin.debug:
+    msg: "WARNING: API server has > 20% failure rate. Cluster may still be stabilizing."
+  when: (_api_fails.stdout | trim | int) > 2
+
+- name: "Post-Restore: Check Longhorn volume health"
+  ansible.builtin.shell: |
+    set -o pipefail
+    k3s kubectl get volumes.longhorn.io --no-headers \
+      -o custom-columns='NAME:.metadata.name,STATE:.status.state,ROBUSTNESS:.status.robustness' 2>/dev/null \
+      | grep -vE 'attached\s+healthy' || echo "ALL_HEALTHY"
+  args:
+    executable: /bin/bash
+  register: _lh_unhealthy
+  changed_when: false
+  failed_when: false
+  retries: 3
+  delay: 10
+  until: _lh_unhealthy.rc == 0
+
+- name: Report Longhorn volume health
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'All Longhorn volumes healthy' if 'ALL_HEALTHY' in _lh_unhealthy.stdout
+         else 'Non-healthy volumes:\n' + _lh_unhealthy.stdout }}
+
+- name: "Post-Restore: Check ArgoCD application health"
+  ansible.builtin.shell: |
+    set -o pipefail
+    k3s kubectl get applications -n argocd --no-headers \
+      -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status' 2>/dev/null \
+      | grep -vE 'Synced\s+Healthy' || echo "ALL_HEALTHY"
+  args:
+    executable: /bin/bash
+  register: _argocd_unhealthy
+  changed_when: false
+  failed_when: false
+  retries: 3
+  delay: 10
+  until: _argocd_unhealthy.rc == 0
+
+- name: Report ArgoCD application health
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'All ArgoCD applications healthy' if 'ALL_HEALTHY' in _argocd_unhealthy.stdout
+         else 'Non-healthy apps:\n' + _argocd_unhealthy.stdout }}
+
+- name: "Post-Restore: Check Longhorn node health"
+  ansible.builtin.shell: |
+    set -o pipefail
+    cols='NAME:.metadata.name,'
+    cols+='READY:.status.conditions[?(@.type=="Ready")].status,'
+    cols+='SCHED:.status.conditions[?(@.type=="Schedulable")].status'
+    k3s kubectl get nodes.longhorn.io --no-headers \
+      -o "custom-columns=$cols" 2>/dev/null \
+      | grep -v 'True.*True' || echo "ALL_READY"
+  args:
+    executable: /bin/bash
+  register: _lh_nodes
+  changed_when: false
+  failed_when: false
+  retries: 3
+  delay: 10
+  until: _lh_nodes.rc == 0
+
+- name: Report Longhorn node health
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'All Longhorn nodes ready' if 'ALL_READY' in _lh_nodes.stdout
+         else 'Non-ready Longhorn nodes:\n' + _lh_nodes.stdout }}

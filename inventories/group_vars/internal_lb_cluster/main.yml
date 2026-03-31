@@ -47,7 +47,10 @@ load_balancer_haproxy_frontends:
       - "acl is_route_hosted hdr(X-Nexus-Route) -i hosted"
       - "http-request set-header X-Nexus-Route hosted if is_nexus is_docker_hosted"
       - "http-request replace-path ^/v2/docker-hosted/(.*) /v2/\\1 if is_nexus is_docker_hosted"
-      - "http-request replace-path ^/v2/(docker-hub|ghcr-proxy|quay-proxy|gcr-proxy|cgr-proxy|nvcr-proxy)/(.*) /v2/\\2 if is_nexus is_docker_v2"
+      - >-
+        http-request replace-path
+        ^/v2/(docker-hub|ghcr-proxy|quay-proxy|gcr-proxy|cgr-proxy|nvcr-proxy)/(.*)
+        /v2/\\2 if is_nexus is_docker_v2
       # docker-hosted gets its own backend (push requires a hosted repo, not a group)
       - "use_backend nexus_docker_hosted_backend if is_nexus is_route_hosted"
       # All other Docker repos route to docker-all group on port 5000

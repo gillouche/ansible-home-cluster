@@ -95,13 +95,17 @@
 
 # ---- Step 3: Clean up stale state and restart if flannel.1 is missing ----
 
-- name: Recover flannel.1 interface if missing
+- name: Clean up stale CNI state if flannel.1 is missing
   when: _flannel_iface.rc != 0
   block:
+    - name: Check if k3s is currently running
+      ansible.builtin.service_facts:
+
     - name: Stop k3s before cleaning up stale state
       ansible.builtin.systemd:
         name: k3s
         state: stopped
+      when: ansible_facts.services['k3s.service'].state | default('') == 'running'
 
     - name: Kill stale containerd-shim processes from previous crash
       ansible.builtin.shell: |
@@ -119,37 +123,3 @@
       ansible.builtin.file:
         path: /var/lib/cni/networks
         state: absent
-
-    - name: Delete blocking webhook configurations before k3s start
-      ansible.builtin.command: >
-        kubectl delete {{ item }} --ignore-not-found
-      loop:
-        - validatingwebhookconfiguration longhorn-webhook-validator
-        - mutatingwebhookconfiguration longhorn-webhook-mutator
-      delegate_to: localhost
-      become: false
-      changed_when: false
-      failed_when: false
-
-    - name: Start k3s with clean state
-      ansible.builtin.systemd:
-        name: k3s
-        state: started
-        daemon_reload: true
-
-    - name: Wait for flannel.1 interface to appear
-      ansible.builtin.command: ip link show flannel.1
-      register: _flannel_iface_retry
-      until: _flannel_iface_retry.rc == 0
-      retries: 30
-      delay: 5
-      changed_when: false
-      failed_when: false
-
-    - name: Warn if flannel.1 still missing after recovery
-      ansible.builtin.debug:
-        msg: >-
-          CRITICAL: flannel.1 interface did not appear on
-          {{ inventory_hostname }} after cleaning CNI state and
-          restarting k3s. Pod networking will be broken.
-      when: (_flannel_iface_retry.rc | default(1)) != 0

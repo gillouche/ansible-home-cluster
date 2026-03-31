@@ -1,0 +1,57 @@
+---
+- name: Delete Longhorn replicas with no node assignment
+  ansible.builtin.shell: |
+    set -o pipefail
+    orphaned=$(k3s kubectl get replicas.longhorn.io -n longhorn-system \
+      -o jsonpath='{range .items[?(@.spec.nodeID=="")]}{.metadata.name}{"\n"}{end}')
+    if [ -n "$orphaned" ]; then
+      echo "$orphaned" | while read -r name; do
+        [ -z "$name" ] && continue
+        k3s kubectl delete replicas.longhorn.io -n longhorn-system "$name"
+      done
+    fi
+  args:
+    executable: /bin/bash
+  register: _cleanup_orphaned_replicas
+  changed_when: _cleanup_orphaned_replicas.stdout | length > 0
+  failed_when: false
+  retries: 3
+  delay: 5
+
+- name: Remove finalizers from Longhorn volumes stuck in deleting state
+  ansible.builtin.shell: |
+    set -o pipefail
+    stuck=$(k3s kubectl get volumes.longhorn.io -n longhorn-system --no-headers \
+      -o custom-columns='NAME:.metadata.name,STATE:.status.state' \
+      | grep deleting | awk '{print $1}')
+    if [ -n "$stuck" ]; then
+      echo "$stuck" | while read -r name; do
+        [ -z "$name" ] && continue
+        k3s kubectl patch volumes.longhorn.io -n longhorn-system "$name" -p '{"metadata":{"finalizers":null}}' --type=merge
+      done
+    fi
+  args:
+    executable: /bin/bash
+  register: _cleanup_stuck_volumes
+  changed_when: _cleanup_stuck_volumes.stdout | length > 0
+  failed_when: false
+  retries: 3
+  delay: 5
+
+- name: Remove finalizers from orphaned PVs stuck in Terminating state
+  ansible.builtin.shell: |
+    set -o pipefail
+    terminating=$(k3s kubectl get pv -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{"\n"}{end}')
+    if [ -n "$terminating" ]; then
+      echo "$terminating" | while read -r name; do
+        [ -z "$name" ] && continue
+        k3s kubectl patch pv "$name" -p '{"metadata":{"finalizers":null}}' --type=merge
+      done
+    fi
+  args:
+    executable: /bin/bash
+  register: _cleanup_terminating_pvs
+  changed_when: _cleanup_terminating_pvs.stdout | length > 0
+  failed_when: false
+  retries: 3
+  delay: 5
