@@ -16,26 +16,6 @@
   become: true
   tags: [reboot, reboot_preflight]
   tasks:
-    - name: Verify Postgres datastore is reachable
-      ansible.builtin.wait_for:
-        host: "{{ k3s_db_host }}"
-        port: "{{ k3s_db_port }}"
-        timeout: 10
-      changed_when: false
-
-    - name: Pause ArgoCD auto-sync on all Applications
-      ansible.builtin.shell: |
-        set -o pipefail
-        k3s kubectl get applications -n argocd -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
-          | while read -r app; do
-              [ -n "$app" ] && k3s kubectl patch application "$app" -n argocd --type merge \
-                -p '{"spec":{"syncPolicy":{"automated":null}}}' 2>/dev/null || true
-            done
-      args:
-        executable: /bin/bash
-      changed_when: false
-      failed_when: false
-
     - name: Delete blocking webhook configurations (best-effort, k3s may be down)
       ansible.builtin.command: >
         k3s kubectl delete {{ item }} --ignore-not-found
@@ -126,20 +106,6 @@
       ansible.builtin.command: ip neigh flush all
       changed_when: true
 
-    - name: Verify etcd is healthy after reboot
-      ansible.builtin.uri:
-        url: "http://{{ ansible_host }}:2379/health"
-        status_code: 200
-      register: _etcd_health
-      retries: 15
-      delay: 2
-      until: _etcd_health.status == 200
-
-    - name: Verify postgres container is running after reboot
-      ansible.builtin.systemd:
-        name: container-postgres
-        state: started
-
     - name: Ensure flannel subnet.env exists
       ansible.builtin.include_tasks: k3s_flannel_fix.yml
 
@@ -174,58 +140,6 @@
       failed_when: false
       changed_when: "'deleted' in (_result.stdout | default(''))"
       run_once: true  # noqa: run-once[task]
-
-    - name: Check if ArgoCD auto-sync is already enabled (idempotency guard)
-      ansible.builtin.shell:
-        cmd: |
-          set -o pipefail
-          k3s kubectl get applications -n argocd -o json \
-            | jq -r '[.items[] | select(.spec.syncPolicy.automated != null)] | length'
-        executable: /bin/bash
-      register: _autosync_count
-      changed_when: false
-      failed_when: false
-      run_once: true  # noqa: run-once[task]
-
-    - name: Scale down all non-core deployments to prevent thundering herd
-      ansible.builtin.shell:
-        cmd: |
-          set -o pipefail
-          k3s kubectl get deployments --all-namespaces -o json \
-            | jq -r '.items[]
-              | select(.metadata.namespace != "kube-system")
-              | select(.metadata.namespace != "argocd")
-              | select(.metadata.namespace != "longhorn-system")
-              | select(.spec.replicas > 0)
-              | "\(.metadata.namespace) \(.metadata.name)"' \
-            | while read -r ns name; do
-                k3s kubectl scale deployment "$name" -n "$ns" --replicas=0 2>/dev/null || true
-              done
-        executable: /bin/bash
-      changed_when: false
-      failed_when: false
-      run_once: true  # noqa: run-once[task]
-      when: (_autosync_count.stdout | default('0') | int) == 0
-
-    - name: Scale down all non-core statefulsets to prevent thundering herd
-      ansible.builtin.shell:
-        cmd: |
-          set -o pipefail
-          k3s kubectl get statefulsets --all-namespaces -o json \
-            | jq -r '.items[]
-              | select(.metadata.namespace != "kube-system")
-              | select(.metadata.namespace != "argocd")
-              | select(.metadata.namespace != "longhorn-system")
-              | select(.spec.replicas > 0)
-              | "\(.metadata.namespace) \(.metadata.name)"' \
-            | while read -r ns name; do
-                k3s kubectl scale statefulset "$name" -n "$ns" --replicas=0 2>/dev/null || true
-              done
-        executable: /bin/bash
-      changed_when: false
-      failed_when: false
-      run_once: true  # noqa: run-once[task]
-      when: (_autosync_count.stdout | default('0') | int) == 0
 
     - name: Validate and clean up {{ inventory_hostname }}
       ansible.builtin.include_tasks: k3s_validate_node.yml
@@ -264,27 +178,6 @@
       until: _result.rc == 0
       changed_when: false
 
-    - name: Scale down crash-prone operators to prevent API storm
-      ansible.builtin.command: >
-        k3s kubectl scale deployment {{ item.name }}
-        -n {{ item.namespace }} --replicas=0
-      loop: "{{ k3s_crashloop_operators }}"
-      loop_control:
-        label: "{{ item.namespace }}/{{ item.name }}"
-      register: _scale_down
-      failed_when: false
-      changed_when: "'scaled' in (_scale_down.stdout | default(''))"
-
-    - name: Scale down crash-prone statefulsets to prevent API storm
-      ansible.builtin.command: >
-        k3s kubectl scale statefulset {{ item.name }}
-        -n {{ item.namespace }} --replicas=0
-      loop: "{{ k3s_crashloop_statefulsets | default([]) }}"
-      loop_control:
-        label: "{{ item.namespace }}/{{ item.name }}"
-      register: _scale_down_sts
-      failed_when: false
-      changed_when: "'scaled' in (_scale_down_sts.stdout | default(''))"
 
 # ------------------------------------------------------------------------------
 # 3c. Uncordon ALL nodes (server[0] does it for everyone to avoid gaps)
@@ -428,28 +321,6 @@
       changed_when: false
       failed_when: false
 
-- name: "Reboot: Compact kine table on Patroni leader"
-  hosts: server
-  gather_facts: false
-  become: true
-  tags: [reboot, reboot_validation]
-  tasks:
-    - name: Check if this node is Patroni leader
-      ansible.builtin.command: podman exec postgres psql -U postgres -d kubernetes -tAc "SELECT pg_is_in_recovery();"
-      register: _pg_recovery
-      changed_when: false
-      failed_when: false
-
-    - name: Compact kine table (leader only)
-      ansible.builtin.command: >
-        podman exec postgres psql -U postgres -d kubernetes -c
-        "SET statement_timeout = '300s';
-        WITH latest AS (SELECT name, max(id) as max_id FROM kine GROUP BY name)
-        DELETE FROM kine k USING latest l WHERE k.name = l.name AND k.id < l.max_id;"
-      when: _pg_recovery.stdout | trim == 'f'
-      changed_when: false
-      failed_when: false
-
 # ------------------------------------------------------------------------------
 # 6. Final cluster validation & ArgoCD re-enable
 # ------------------------------------------------------------------------------
@@ -491,28 +362,13 @@
       until: _result.rc == 0
       changed_when: false
 
-    - name: Enable ArgoCD apps tier by tier
-      ansible.builtin.include_tasks: argocd_tiered_sync.yml
-      vars:
-        tier_name: "{{ tier.name }}"
-        tier_apps: "{{ tier.apps }}"
-        tier_timeout: "{{ tier.timeout | default(300) }}"
-      loop: "{{ argocd_restore_tiers }}"
-      loop_control:
-        loop_var: tier
-        label: "{{ tier.name }}"
-
-    - name: Run health gate for tier
-      ansible.builtin.include_tasks: argocd_health_gate.yml
-      vars:
-        health_checks: "{{ tier.health_checks | default([]) }}"
-        gate_timeout: "{{ tier.timeout | default(300) }}"
-        pre_actions: "{{ tier.pre_actions | default([]) }}"
-        post_actions: "{{ tier.post_actions | default([]) }}"
-      loop: "{{ argocd_restore_tiers }}"
-      loop_control:
-        loop_var: tier
-        label: "{{ tier.name }}"
+    - name: Delete blocking webhook configurations (post-sync)
+      ansible.builtin.command: >
+        k3s kubectl delete {{ item }} --ignore-not-found
+      loop: "{{ k3s_blocking_webhooks }}"
+      register: _result
+      failed_when: false
+      changed_when: "'deleted' in (_result.stdout | default(''))"
 
     - name: Clean up Failed pods cluster-wide
       ansible.builtin.shell: |
@@ -527,7 +383,7 @@
       changed_when: false
       failed_when: false
 
-    - name: Delete stopped Longhorn replicas after tiered sync
+    - name: Delete stopped Longhorn replicas
       ansible.builtin.shell:
         cmd: |
           set -o pipefail

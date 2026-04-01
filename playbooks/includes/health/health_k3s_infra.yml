@@ -12,121 +12,6 @@
         _health_facts_gathered: true
       run_once: true # noqa: run-once
 
-- name: "Etcd Cluster Health Check"
-  hosts: postgres
-  gather_facts: true
-  become: false
-  tags: [health_k3s_infra, health_etcd]
-  tasks:
-    - name: Query Etcd health status (Individual Nodes)
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ global_etcd_port | default(2379) }}/health"
-        method: GET
-        status_code: 200
-      register: _etcd_node_health
-      failed_when: false
-
-- name: "Postgres HA Health Check"
-  hosts: postgres
-  gather_facts: true
-  become: false
-  tags: [health_k3s_infra, health_postgres]
-  vars_files:
-    - ../../../roles/postgres/defaults/main.yml
-  tasks:
-    - name: Check Patroni API Health (Individual Nodes)
-      ansible.builtin.uri:
-        url: "http://127.0.0.1:{{ postgres_patroni_port | default(8008) }}/leader"
-        method: GET
-        status_code: [200, 503]
-      register: _patroni_node_health
-      failed_when: false
-
-    - name: Check Local HAProxy Port ({{ global_k3s_db_port | default(15432) }})
-      ansible.builtin.wait_for:
-        port: "{{ global_k3s_db_port | default(15432) }}"
-        host: 127.0.0.1
-        timeout: 5
-      register: _postgres_proxy_port
-      failed_when: false
-
-    - name: Check Postgres Container Port ({{ global_postgres_port | default(5432) }})
-      ansible.builtin.wait_for:
-        port: "{{ global_postgres_port | default(5432) }}"
-        host: 127.0.0.1
-        timeout: 5
-      register: _postgres_container_port
-      failed_when: false
-
-    - name: Check Postgres Ready (Command)
-      ansible.builtin.command: >-
-        podman exec {{ postgres_container_name }} pg_isready
-        -U {{ postgres_db_user }}
-        -p {{ global_postgres_port | default(5432) }}
-      register: _postgres_cmd_check
-      become: true
-      failed_when: false
-      changed_when: false
-
-    - name: Get Patroni cluster status
-      ansible.builtin.command: >
-        podman exec {{ postgres_container_name }}
-        curl -s http://localhost:{{ postgres_patroni_port | default(8008) }}/cluster
-      register: _patroni_cluster_raw
-      become: true
-      changed_when: false
-      failed_when: false
-      run_once: true # noqa: run-once
-      delegate_to: "{{ groups['postgres'][0] }}"
-
-    - name: Parse and report Patroni cluster state # noqa: run-once
-      ansible.builtin.set_fact:
-        _patroni_cluster: "{{ _patroni_cluster_raw.stdout | from_json }}"
-      when:
-        - _patroni_cluster_raw.rc | default(1) == 0
-        - _patroni_cluster_raw.stdout | default('') | length > 0
-      run_once: true # noqa: run-once
-      delegate_to: "{{ groups['postgres'][0] }}"
-
-    - name: Check for broken replicas # noqa: run-once
-      ansible.builtin.set_fact:
-        _broken_replicas: >-
-          {{ (_patroni_cluster.members | default([]))
-             | rejectattr('role', 'equalto', 'leader')
-             | selectattr('state', 'defined')
-             | selectattr('state', 'ne', 'running')
-             | list }}
-      when: _patroni_cluster is defined
-      run_once: true
-      delegate_to: "{{ groups['postgres'][0] }}"
-
-    - name: Warn about broken Patroni replicas # noqa: run-once
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: Patroni replicas need attention:
-          {{ _broken_replicas | map(attribute='name') | join(', ') }}
-          (states: {{ _broken_replicas | map(attribute='state') | join(', ') }}).
-          Run: ansible-playbook playbooks/restore.yml -t postgres_heal
-      when:
-        - _broken_replicas is defined
-        - _broken_replicas | length > 0
-      run_once: true
-      delegate_to: "{{ groups['postgres'][0] }}"
-
-- name: "Postgres VIP Health Check"
-  hosts: localhost
-  gather_facts: false
-  become: false
-  tags: [health_k3s_infra, health_postgres]
-  tasks:
-    - name: Verify Postgres connectivity via VIP
-      ansible.builtin.wait_for:
-        host: "{{ global_k3s_db_host }}"
-        port: "{{ global_k3s_db_port | default(15432) }}"
-        timeout: 5
-      register: _postgres_vip_check
-      failed_when: false
-
 - name: "K3s Cluster Health Check"
   hosts: server
   gather_facts: true
@@ -268,15 +153,12 @@
     - name: Assert K3s Platform Health
       ansible.builtin.assert:
         that:
-          - (groups['postgres'] | map('extract', hostvars, '_etcd_node_health') |
-             select('defined') | map(attribute='status', default=0) |
-             select('equalto', 200) | list | length) >=
-             ((groups['postgres'] | length / 2) | round(0, 'ceil') | int)
-          - hostvars['localhost']._postgres_vip_check.state | default('skipped') in ['started', 'skipped']
           - (groups['server'] | map('extract', hostvars, '_k3s_vip_status') |
              select('defined') | map(attribute='status', default=0) |
              intersect([200, 401]) | list | length) > 0
-        fail_msg: "CRITICAL: K3s Platform Infrastructure (Etcd, Postgres, or K3s VIP) is DOWN. Cannot proceed to workloads."
+        fail_msg: "CRITICAL: K3s VIP is DOWN. Cannot proceed to workloads."
         success_msg: "K3s Platform is healthy. Proceeding to K3s Workloads layer."
-      # noqa: ignore-errors
-      ignore_errors: "{{ 'health_k3s_apps' not in ansible_run_tags and 'all' not in ansible_run_tags }}"
+      register: _k3s_health_assert
+      failed_when:
+        - _k3s_health_assert is failed
+        - "'health_k3s_apps' in ansible_run_tags or 'all' in ansible_run_tags"

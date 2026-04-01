@@ -10,10 +10,9 @@ extra_server_args: >-
   --kubelet-arg=max-pods=110
   --kube-apiserver-arg=max-requests-inflight=200
   --kube-apiserver-arg=max-mutating-requests-inflight=100
-  --datastore-endpoint={{ datastore_endpoint }}
   --tls-san {{ k3s_api_vip }}
   --tls-san {{ api_endpoint }}
   --tls-san api.k3s.{{ base_domain }}
   --advertise-address {{ ansible_host }}
   --node-ip {{ ansible_host }}
-  {{ extra_server_args_host | default('') }}
+  --etcd-arg=quota-backend-bytes=8589934592

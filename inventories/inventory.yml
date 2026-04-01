@@ -130,23 +130,6 @@ all:
     firefly:
       hosts:
         homeserver2:
-    etcd_cluster:
-      hosts:
-        homeserver:
-        homeserver2:
-        homeserver3:
-    postgres:
-      hosts:
-        homeserver:
-        homeserver2:
-        homeserver3:
-    postgres_leader:
-      hosts:
-        homeserver2:
-    postgres_replica:
-      hosts:
-        homeserver:
-        homeserver3:
     k3s_cluster:
       children:
         server:

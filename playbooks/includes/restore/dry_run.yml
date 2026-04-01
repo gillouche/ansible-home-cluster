@@ -5,51 +5,8 @@
   become: true
   tags: [restore_dry_run]
   vars_files:
-    - ../../../inventories/group_vars/all/main.yml
     - ../../../inventories/group_vars/k3s_cluster/main.yml
   tasks:
-    - name: Check Etcd health on all servers
-      ansible.builtin.uri:
-        url: "http://{{ hostvars[item].ansible_host }}:2379/health"
-        status_code: 200
-      loop: "{{ groups['server'] | sort }}"
-      register: _etcd_checks
-      failed_when: false
-
-    - name: Report Etcd status
-      ansible.builtin.debug:
-        msg: "{{ item.item }}: {{ 'HEALTHY' if item.status == 200 else 'DOWN' }}"
-      loop: "{{ _etcd_checks.results }}"
-      loop_control:
-        label: "{{ item.item }}"
-
-    - name: Check Patroni health on all servers
-      ansible.builtin.uri:
-        url: "http://{{ hostvars[item].ansible_host }}:8008/health"
-        status_code: [200, 503]
-      loop: "{{ groups['server'] | sort }}"
-      register: _patroni_checks
-      failed_when: false
-
-    - name: Report Patroni status
-      ansible.builtin.debug:
-        msg: "{{ item.item }}: {{ 'HEALTHY' if item.status in [200, 503] else 'DOWN' }}"
-      loop: "{{ _patroni_checks.results }}"
-      loop_control:
-        label: "{{ item.item }}"
-
-    - name: Check Postgres VIP reachability
-      ansible.builtin.wait_for:
-        host: "{{ k3s_db_host }}"
-        port: "{{ k3s_db_port }}"
-        timeout: 5
-      register: _pg_vip
-      failed_when: false
-
-    - name: Report Postgres VIP
-      ansible.builtin.debug:
-        msg: "Postgres VIP {{ k3s_db_host }}:{{ k3s_db_port }}: {{ 'REACHABLE' if _pg_vip is not failed else 'UNREACHABLE' }}"
-
     - name: Check K3s API VIP reachability
       ansible.builtin.uri:
         url: "https://{{ k3s_api_vip }}:6443/healthz"
@@ -95,32 +52,13 @@
       ansible.builtin.debug:
         msg: "{{ inventory_hostname }} /mnt/ssd_nvme: {{ 'MOUNTED' if _nvme.stat.exists else 'MISSING' }}"
 
-- name: "Restore Dry Run: Report tier plan"
+- name: "Restore Dry Run: Summary"
   hosts: server[0]
   gather_facts: false
   tags: [restore_dry_run]
-  vars_files:
-    - ../../../inventories/group_vars/k3s_cluster/main.yml
   tasks:
-    - name: Display tier plan
-      ansible.builtin.debug:
-        msg: >-
-          Tier {{ ansible_loop.index0 }}: {{ item.name }}
-          | Apps: {{ item.apps | join(', ') if item.apps != '__remaining__' else 'ALL REMAINING' }}
-          | Timeout: {{ item.timeout | default(300) }}s
-          | Health checks: {{ item.health_checks | length | default(0) }}
-          | Pre-actions: {{ item.pre_actions | default([]) | join(', ') or 'none' }}
-          | Post-actions: {{ item.post_actions | default([]) | join(', ') or 'none' }}
-      loop: "{{ argocd_restore_tiers }}"
-      loop_control:
-        extended: true
-        label: "{{ item.name }}"
-
     - name: Summary
       ansible.builtin.debug:
         msg: >-
-          Dry run complete. {{ argocd_restore_tiers | length }} tiers configured.
-          Total apps across all tiers:
-          {{ argocd_restore_tiers | map(attribute='apps')
-             | select('ne', '__remaining__') | map('length') | sum }}.
+          Dry run complete. All prerequisites checked.
           Run 'ansible-playbook playbooks/restore.yml --tags restore_k3s' to execute.

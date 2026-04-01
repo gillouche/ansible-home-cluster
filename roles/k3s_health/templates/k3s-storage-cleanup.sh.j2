@@ -1,7 +1,22 @@
 #!/bin/bash
 set -euo pipefail
 
+LOG_RETENTION_DAYS={{ k3s_pod_log_retention_days | default(3) }}
+JOURNAL_MAX_SIZE={{ k3s_journal_max_size | default('500M') }}
+
 logger -t k3s-storage-cleanup -p user.notice "Starting storage cleanup"
+
+before_total=$(df --output=used / 2>/dev/null | tail -1 || echo 0)
+
+if [ -d /var/log/pods ]; then
+    freed_logs=$(find /var/log/pods -name "*.log" -mtime +${LOG_RETENTION_DAYS} -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {printf "%.0f", s/1024/1024}' || echo 0)
+    find /var/log/pods -name "*.log" -mtime +${LOG_RETENTION_DAYS} -delete 2>/dev/null || true
+    find /var/log/pods -type d -empty -delete 2>/dev/null || true
+    logger -t k3s-storage-cleanup -p user.notice "Cleaned pod logs older than ${LOG_RETENTION_DAYS} days: freed ~${freed_logs}MB"
+fi
+
+journalctl --vacuum-size=${JOURNAL_MAX_SIZE} 2>/dev/null || true
+logger -t k3s-storage-cleanup -p user.notice "Vacuumed journal to ${JOURNAL_MAX_SIZE}"
 
 if command -v k3s &>/dev/null && [ -S /run/k3s/containerd/containerd.sock ]; then
     before=$(du -sb /var/lib/rancher/k3s/agent/containerd/io.containerd.content.v1.content 2>/dev/null | awk '{print $1}' || echo 0)
@@ -9,8 +24,6 @@ if command -v k3s &>/dev/null && [ -S /run/k3s/containerd/containerd.sock ]; the
     after=$(du -sb /var/lib/rancher/k3s/agent/containerd/io.containerd.content.v1.content 2>/dev/null | awk '{print $1}' || echo 0)
     freed=$(( (before - after) / 1024 / 1024 ))
     logger -t k3s-storage-cleanup -p user.notice "Pruned unused container images: freed ${freed}MB"
-else
-    logger -t k3s-storage-cleanup -p user.notice "k3s containerd not running, skipping image prune"
 fi
 
 if command -v podman &>/dev/null; then
@@ -29,4 +42,6 @@ if [ -d "${user_home}/.local/share/containers/storage/volumes" ]; then
 fi
 {% endfor %}
 
-logger -t k3s-storage-cleanup -p user.notice "Storage cleanup complete"
+after_total=$(df --output=used / 2>/dev/null | tail -1 || echo 0)
+total_freed=$(( (before_total - after_total) / 1024 ))
+logger -t k3s-storage-cleanup -p user.notice "Storage cleanup complete: freed ~${total_freed}MB total"

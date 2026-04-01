@@ -34,20 +34,6 @@ load_balancer_virtual_ip: 192.168.0.253
 k3s_api_vip: 192.168.0.249
 k3s_lb_vip: 192.168.0.248
 
-# Shared Database Configuration
-# -----------------------------
-# These are used by both the Postgres role (to create DB) and K3s (to connect)
-global_k3s_db_host: 192.168.0.247
-global_k3s_db_port: 15432
-global_postgres_port: 5432
-global_k3s_db_name: kubernetes
-global_k3s_db_user: k3s
-# global_k3s_db_password: defined in vault
-
-# Postgres VIP (managed by keepalived)
-postgres_virtual_ip: 192.168.0.247
-postgres_vrrp_router_id: 88
-postgres_vrrp_auth_pass: "{{ vault_postgres_vrrp_auth_pass | default('changeme-postgres') }}"
 
 # Global system settings
 user_home_root: /home
@@ -67,7 +53,6 @@ pihole_transit_ip: "{{ hostvars['homeserver2'].ansible_host | default('192.168.0
 # K3s
 global_k3s_api_port: 6443
 global_k3s_traefik_port: 9000
-global_etcd_port: 2379
 
 # Apps
 global_nexus_port: 8081

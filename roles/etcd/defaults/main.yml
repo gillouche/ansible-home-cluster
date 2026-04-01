@@ -1,7 +1,0 @@
----
-etcd_version: "v3.5.11"
-etcd_container_name: "etcd"
-etcd_data_dir: "/mnt/data/etcd"
-etcd_client_port: "{{ global_etcd_port | default(2379) }}"
-etcd_peer_port: 2380
-etcd_initial_cluster_token: "etcd-cluster-postgres"

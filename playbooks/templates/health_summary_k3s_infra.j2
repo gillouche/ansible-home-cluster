@@ -7,43 +7,6 @@
 {{ macros.BOLD }}[ SECTION 2: K3S PLATFORM INFRASTRUCTURE ]{{ macros.RESET }}
 ################################################################################
 
-{{ macros.BOLD }}[ ETCD CLUSTER (Postgres Coordination) ]{{ macros.RESET }}
-{% set etcd_nodes_ready = groups['postgres'] | map('extract', hostvars, '_etcd_node_health') | select('defined') | list %}
-{% if etcd_nodes_ready | length > 0 %}
-  {{ macros.CYAN }}> Global Cluster Status:{{ macros.RESET }} {{
-    macros.ok('HEALTHY (Quorum OK)')
-    if (etcd_nodes_ready | selectattr('status', 'equalto', 200) | list | length) >= ((groups['postgres'] | length / 2) | round(0, 'ceil') | int)
-    else macros.bad('DEGRADED (No Quorum)')
-  }}
-{% for host in groups['postgres'] | sort %}
-  {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
-    Node Health:   {{ macros.ok('UP') if hostvars[host]._etcd_node_health.status | default(0) == 200 else macros.bad('DOWN') }}
-{% endfor %}
-{% endif %}
-
-{{ macros.BOLD }}[ POSTGRES HA CLUSTER (Patroni) ]{{ macros.RESET }}
-{% if hostvars['localhost']._postgres_vip_check is defined %}
-{% set pg_nodes = groups['postgres'] | sort -%}
-{% set pg_ns = namespace(healthy_count=0) -%}
-{% for host in pg_nodes -%}
-  {% if hostvars[host]._postgres_cmd_check.rc | default(-1) == 0 -%}
-    {% set pg_ns.healthy_count = pg_ns.healthy_count + 1 -%}
-  {% endif -%}
-{% endfor -%}
-  {{ macros.CYAN }}> VIP ({{ global_k3s_db_host }}):{{ macros.RESET }} {{ macros.ok('REACHABLE') if hostvars['localhost']._postgres_vip_check.state | default('') == 'started' else macros.bad('UNREACHABLE') }}
-  {{ macros.CYAN }}> Cluster Availability:{{ macros.RESET }} {{ macros.ok(pg_ns.healthy_count ~ '/' ~ pg_nodes | length ~ ' Instances UP') if pg_ns.healthy_count == pg_nodes | length else (macros.bad('DOWN') if pg_ns.healthy_count == 0 else macros.warn(pg_ns.healthy_count ~ '/' ~ pg_nodes | length ~ ' Instances UP')) }}
-{% for host in pg_nodes %}
-  {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
-    Patroni API:   {% set p = hostvars[host]._patroni_node_health.status | default(0) %}
-                   {% if p == 200 %}{{ macros.ok('HEALTHY (Leader)') }}
-                   {% elif p == 503 %}{{ macros.ok('HEALTHY (Replica)') }}
-                   {% else %}{{ macros.bad('DOWN / ERROR') }}{% endif %}
-    Local Proxy:   {{ macros.ok('OPEN (' ~ (global_k3s_db_port | default(15432)) ~ ')') if hostvars[host]._postgres_proxy_port.state | default('') == 'started' else macros.bad('CLOSED') }}
-    DB Container:  {{ macros.ok('UP (' ~ (global_postgres_port | default(5432)) ~ ')') if hostvars[host]._postgres_container_port.state | default('') == 'started' else macros.bad('DOWN') }}
-    Ready (CMD):   {{ macros.ok('YES') if hostvars[host]._postgres_cmd_check.rc | default(-1) == 0 else macros.bad('NO') }}
-{% endfor %}
-{% endif %}
-
 {{ macros.BOLD }}[ KUBERNETES SERVICE ]{{ macros.RESET }}
 {% set k3s_servers = groups['server'] | default([]) %}
 {% if k3s_servers | length > 0 and hostvars[k3s_servers[0]]._k3s_service_status is defined %}

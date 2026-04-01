@@ -1,7 +1,0 @@
----
-- name: Restart Etcd
-  ansible.builtin.systemd:
-    name: "container-{{ etcd_container_name }}"
-    state: restarted
-    daemon_reload: true
-  become: true

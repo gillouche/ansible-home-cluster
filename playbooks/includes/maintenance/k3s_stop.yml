@@ -34,25 +34,15 @@
         msg: "WARNING: {{ _not_ready_count.stdout | trim }} node(s) are NotReady before shutdown"
       when: (_not_ready_count.stdout | trim | int) > 0
 
-    - name: Verify Postgres datastore is reachable
-      ansible.builtin.wait_for:
-        host: "{{ k3s_db_host }}"
-        port: "{{ k3s_db_port }}"
-        timeout: 10
-      changed_when: false
-
-    - name: Pause ArgoCD auto-sync on all Applications
-      ansible.builtin.shell: |
-        set -o pipefail
-        k3s kubectl get applications -n argocd -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
-          | while read -r app; do
-              [ -n "$app" ] && k3s kubectl patch application "$app" -n argocd --type merge \
-                -p '{"spec":{"syncPolicy":{"automated":null}}}' 2>/dev/null || true
-            done
-      args:
+    - name: Create etcd snapshot before shutdown
+      ansible.builtin.shell:
+        cmd: k3s etcd-snapshot save --name "pre-shutdown-$(date +%Y%m%dT%H%M%S)"
         executable: /bin/bash
-      changed_when: false
+      become: true
+      delegate_to: "{{ groups['server'][0] }}"
+      run_once: true  # noqa: run-once[task]
       failed_when: false
+      changed_when: false
 
     - name: Delete blocking webhook configurations
       ansible.builtin.command: >
