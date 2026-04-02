@@ -8,6 +8,56 @@
   failed_when: _argocd_ns.rc != 0 and 'already exists' not in _argocd_ns.stderr
   changed_when: _argocd_ns.rc == 0
 
+- name: Create longhorn-system namespace
+  ansible.builtin.command: k3s kubectl create namespace longhorn-system
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  register: _longhorn_ns
+  failed_when: _longhorn_ns.rc != 0 and 'already exists' not in _longhorn_ns.stderr
+  changed_when: _longhorn_ns.rc == 0
+
+- name: Pre-create longhorn-service-account
+  ansible.builtin.command: >-
+    k3s kubectl create serviceaccount longhorn-service-account
+    -n longhorn-system --dry-run=client --save-config -o yaml
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  register: _longhorn_sa_yaml
+  changed_when: false
+
+- name: Apply longhorn-service-account
+  ansible.builtin.command: >-
+    k3s kubectl apply -f -
+  args:
+    stdin: "{{ _longhorn_sa_yaml.stdout }}"
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  changed_when: true
+
+- name: Install Prometheus CRDs
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      base="https://raw.githubusercontent.com"
+      repo="prometheus-operator/prometheus-operator"
+      ver="v0.82.2"
+      for crd in servicemonitors prometheuses \
+        prometheusrules podmonitors alertmanagers \
+        alertmanagerconfigs probes thanosrulers \
+        scrapeconfigs; do
+        k3s kubectl apply --server-side \
+          -f "${base}/${repo}/${ver}/jsonnet/prometheus-operator/${crd}-crd.json" \
+          2>/dev/null || true
+      done
+    executable: /bin/bash
+  delegate_to: "{{ groups['server'][0] }}"
+  run_once: true
+  become: true
+  changed_when: true
+
 - name: Install ArgoCD HA
   ansible.builtin.command: >-
     k3s kubectl apply -k {{ path_to_gitops_repo }}//bootstrap/argocd?ref=main
@@ -68,7 +118,7 @@
 
 - name: Apply ArgoCD sealed secret (custom admin password and OIDC)
   ansible.builtin.command: >-
-    k3s kubectl apply -f {{ path_to_gitops_repo }}//resources/argocd/sealed-argocd-secret.yaml?ref=main
+    k3s kubectl apply -f https://raw.githubusercontent.com/gillouche/home-cluster-gitops/main/resources/argocd/sealed-argocd-secret.yaml
   delegate_to: "{{ groups['server'][0] }}"
   run_once: true
   become: true

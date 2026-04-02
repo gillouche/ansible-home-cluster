@@ -16,3 +16,5 @@ extra_server_args: >-
   --advertise-address {{ ansible_host }}
   --node-ip {{ ansible_host }}
   --etcd-arg=quota-backend-bytes=8589934592
+  --etcd-arg=auto-compaction-mode=periodic
+  --etcd-arg=auto-compaction-retention=1h

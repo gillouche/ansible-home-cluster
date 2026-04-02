@@ -150,7 +150,7 @@ load_balancer_haproxy_backends:
   - name: k3s_api_backend_https
     mode: http
     balance: roundrobin
-    httpchk: "GET /healthz"
+    httpchk: "GET /livez"
     http_check_expect: "status 401"
     servers:
       - name: k3s_server1
