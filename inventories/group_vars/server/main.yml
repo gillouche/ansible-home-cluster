@@ -18,3 +18,5 @@ extra_server_args: >-
   --etcd-arg=quota-backend-bytes=8589934592
   --etcd-arg=auto-compaction-mode=periodic
   --etcd-arg=auto-compaction-retention=1h
+  --etcd-arg=heartbeat-interval=500
+  --etcd-arg=election-timeout=5000
