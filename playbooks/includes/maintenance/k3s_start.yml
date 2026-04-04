@@ -7,6 +7,30 @@
 #         enable ArgoCD auto-sync -> cleanup
 
 # ------------------------------------------------------------------------------
+# 0. Verify Postgres datastore
+# ------------------------------------------------------------------------------
+- name: "K3s Start: Verify Postgres datastore"
+  hosts: postgres
+  gather_facts: false
+  become: true
+  tags: [k3s_start, k3s_start_infra]
+  tasks:
+    - name: Ensure Postgres container is running
+      ansible.builtin.systemd:
+        name: "container-{{ postgres_container_name | default('postgres') }}"
+        state: started
+
+    - name: Verify Postgres is ready
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        pg_isready -U {{ postgres_superuser | default('postgres') }}
+      register: _pg_ready
+      retries: 15
+      delay: 2
+      until: _pg_ready.rc == 0
+      changed_when: false
+
+# ------------------------------------------------------------------------------
 # 1. Flush ARP cache on all nodes
 # ------------------------------------------------------------------------------
 - name: "K3s Start: Flush ARP cache"

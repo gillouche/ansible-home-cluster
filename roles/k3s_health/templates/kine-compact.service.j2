@@ -1,0 +1,9 @@
+[Unit]
+Description=Kine database compaction for k3s
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kine-compact.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kine-compact

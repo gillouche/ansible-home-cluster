@@ -148,7 +148,59 @@
 #      ansible.builtin.reboot:
 #        reboot_timeout: 300
 
-# 2. Clean Longhorn Storage
+# 2. Reset embedded etcd (wipe data + TLS certs for clean re-bootstrap)
+- name: Reset K3s Datastore
+  hosts: server
+  become: true
+  gather_facts: false
+  tags: [reset_datastore, reset_etcd]
+  tasks:
+    - name: Stop k3s
+      ansible.builtin.systemd:
+        name: k3s
+        state: stopped
+      failed_when: false
+
+    - name: Kill stale containerd-shim processes
+      ansible.builtin.command: killall -9 containerd-shim containerd-shim-runc-v2
+      failed_when: false
+      changed_when: false
+
+    - name: Remove old etcd data
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/rancher/k3s/server/db/etcd
+        - /var/lib/rancher/k3s/server/tls/etcd
+        - /mnt/ssd_nvme/etcd
+        - /mnt/ssd_sata/etcd
+
+- name: Reset Postgres Datastore
+  hosts: postgres
+  become: true
+  gather_facts: false
+  tags: [reset_datastore, reset_postgres]
+  vars_files:
+    - ../../../inventories/group_vars/k3s_cluster/main.yml
+  tasks:
+    - name: Drop k3s database
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        psql -U {{ postgres_superuser | default('postgres') }} -c
+        "DROP DATABASE IF EXISTS {{ k3s_db_name | default('kubernetes') }};"
+      changed_when: true
+      failed_when: false
+
+    - name: Drop k3s database user
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        psql -U {{ postgres_superuser | default('postgres') }} -c
+        "DROP ROLE IF EXISTS {{ k3s_db_user | default('k3s') }};"
+      changed_when: true
+      failed_when: false
+
+# 3. Clean Longhorn Storage
 - name: Clean Longhorn Storage
   hosts: agent_storage
   become: true

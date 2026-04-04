@@ -30,3 +30,11 @@
   roles:
     - role: artifactory
       tags: [devices, devices_infrastructure, artifactory]
+
+- name: "Setup Postgres"
+  hosts: postgres
+  gather_facts: true
+  become: true
+  roles:
+    - role: postgres
+      tags: [devices, devices_infrastructure, postgres]

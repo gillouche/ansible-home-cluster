@@ -1,4 +1,49 @@
 ---
+- name: "Setup Postgres"
+  hosts: postgres
+  gather_facts: true
+  become: true
+  tags: [k3s, k3s_infrastructure, k3s_postgres]
+  roles:
+    - role: postgres
+      tags: [k3s, k3s_infrastructure, k3s_postgres]
+
+- name: "Setup K3s database in Postgres"
+  hosts: postgres
+  gather_facts: false
+  become: true
+  tags: [k3s, k3s_infrastructure, k3s_postgres]
+  vars_files:
+    - ../../../inventories/group_vars/k3s_cluster/main.yml
+    - ../../../inventories/group_vars/k3s_cluster/vault.yml
+  tasks:
+    - name: Create k3s database user
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        psql -U {{ postgres_superuser | default('postgres') }} -tAc
+        "DO $$ BEGIN
+          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ k3s_db_user }}') THEN
+            CREATE ROLE {{ k3s_db_user }} WITH LOGIN PASSWORD '{{ k3s_db_password }}';
+          END IF;
+        END $$;"
+      changed_when: false
+
+    - name: Create k3s database
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        psql -U {{ postgres_superuser | default('postgres') }} -tAc
+        "SELECT 1 FROM pg_database WHERE datname = '{{ k3s_db_name }}'"
+      register: _db_exists
+      changed_when: false
+
+    - name: Create database if not exists
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        psql -U {{ postgres_superuser | default('postgres') }} -c
+        "CREATE DATABASE {{ k3s_db_name }} OWNER {{ k3s_db_user }};"
+      when: _db_exists.stdout | trim == ""
+      changed_when: true
+
 - name: "Setup K3s Load Balancer"
   hosts: server
   gather_facts: true

@@ -18,17 +18,22 @@
   import_playbook: includes/restore/infrastructure.yml
   tags: [restore_base, restore_infra]
 
-# 3. Applications: Authelia, Nexus, Firefly
+# 3. Applications: Nexus, Firefly
 - name: Restore Applications
   import_playbook: includes/restore/apps.yml
   tags: [restore_base, restore_apps]
 
-# 4. Platform: K3s
+# 4. Database: Postgres
+- name: Restore Postgres
+  import_playbook: includes/restore/postgres.yml
+  tags: [restore_base, restore_postgres]
+
+# 5. Platform: K3s
 - name: Restore K3s
   import_playbook: includes/restore/k3s.yml
   tags: [restore_k3s]
 
-# 5. Verification
+# 6. Verification
 - name: Post-Restore Verification
   import_playbook: includes/restore/verification.yml
   tags: [always, restore_verify]

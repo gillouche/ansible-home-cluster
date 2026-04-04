@@ -37,6 +37,40 @@
   gather_facts: true
   tags: [k3s, k3s_cluster, k3s_server]
   pre_tasks:
+    - name: Verify Postgres datastore is reachable
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        pg_isready -U {{ postgres_superuser | default('postgres') }}
+      delegate_to: "{{ groups['postgres'][0] }}"
+      register: _pg_check
+      retries: 10
+      delay: 3
+      until: _pg_check.rc == 0
+      changed_when: false
+      run_once: true  # noqa: run-once[task]
+
+    - name: Ensure k3s is stopped before setup
+      ansible.builtin.systemd:
+        name: k3s
+        state: stopped
+      failed_when: false
+
+    - name: Kill stale containerd-shim processes
+      ansible.builtin.command: killall -9 containerd-shim containerd-shim-runc-v2
+      failed_when: false
+      changed_when: false
+
+    - name: Remove old etcd data and symlinks
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          rm -rf /var/lib/rancher/k3s/server/db/etcd
+          rm -rf /mnt/ssd_nvme/etcd
+          rm -rf /mnt/ssd_sata/etcd
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
     - name: Ensure systemd preset directory exists
       ansible.builtin.file:
         path: /etc/systemd/system-presets
@@ -131,6 +165,22 @@
         name: k3s-flannel-restore
         enabled: true
         daemon_reload: true
+      tags: [k3s, k3s_cluster, k3s_server]
+
+    - name: Wait for K3s API to be ready
+      ansible.builtin.command: k3s kubectl get nodes
+      register: _api_check
+      retries: 30
+      delay: 5
+      until: _api_check.rc == 0
+      changed_when: false
+      tags: [k3s, k3s_cluster, k3s_server]
+
+    - name: Uncordon this node
+      ansible.builtin.command: >-
+        k3s kubectl uncordon {{ inventory_hostname }}
+      changed_when: true
+      failed_when: false
       tags: [k3s, k3s_cluster, k3s_server]
 
 - name: Take ownership of CoreDNS from k3s (managed by ArgoCD)
@@ -268,6 +318,15 @@
         enabled: true
         state: started
         daemon_reload: true
+      tags: [k3s, k3s_cluster, k3s_agent]
+
+    - name: Uncordon this agent node
+      ansible.builtin.command: >-
+        k3s kubectl uncordon {{ inventory_hostname }}
+      delegate_to: "{{ groups['server'][0] }}"
+      become: true
+      changed_when: true
+      failed_when: false
       tags: [k3s, k3s_cluster, k3s_agent]
 
 - name: Label K3s nodes

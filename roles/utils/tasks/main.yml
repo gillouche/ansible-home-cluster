@@ -64,6 +64,10 @@
     state: present
     name:
       - openbsd-netcat
+      - fio
+      - nvme-cli
+      - sysstat
+      - fwupd
   become: true
   when:
     - (ansible_facts['distribution'] | lower) == 'archlinux'

@@ -1,0 +1,16 @@
+---
+postgres_image: "docker.io/library/postgres:18-alpine"
+postgres_container_name: "postgres"
+postgres_host: "{{ hostvars[groups['postgres'][0]].ansible_host }}"
+postgres_port: 5432
+postgres_superuser: "postgres"
+postgres_superuser_password: "{{ vault_postgres_superuser_password | default('postgres-changeme') }}"
+postgres_data_dir: "/mnt/data/postgres"
+postgres_uid: 70
+postgres_gid: 70
+postgres_max_connections: 200
+postgres_shared_buffers: "2GB"
+postgres_effective_cache_size: "8GB"
+postgres_work_mem: "64MB"
+postgres_maintenance_work_mem: "512MB"
+postgres_wal_buffers: "64MB"

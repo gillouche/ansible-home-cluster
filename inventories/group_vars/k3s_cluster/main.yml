@@ -2,7 +2,16 @@
 systemd_dir: /etc/systemd/system
 
 # Collection variables
-use_external_database: false
+use_external_database: true
+
+k3s_postgres_host: "{{ hostvars[groups['postgres'][0]].ansible_host }}"
+k3s_postgres_port: 5432
+k3s_db_name: "kubernetes"
+k3s_db_user: "k3s"
+k3s_db_password: "{{ vault_k3s_db_password | default('k3s-db-changeme') }}"
+
+datastore_endpoint: >-
+  postgres://{{ k3s_db_user }}:{{ k3s_db_password }}@{{ k3s_postgres_host }}:{{ k3s_postgres_port }}/{{ k3s_db_name }}
 api_endpoint: "{{ k3s_api_vip }}" # Using the VIP for the endpoint
 api_port: 6443
 

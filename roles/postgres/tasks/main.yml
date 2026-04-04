@@ -1,0 +1,140 @@
+---
+- name: Ensure postgres group exists
+  ansible.builtin.group:
+    name: postgres
+    gid: "{{ postgres_gid }}"
+    state: present
+
+- name: Ensure postgres user exists
+  ansible.builtin.user:
+    name: postgres
+    uid: "{{ postgres_uid }}"
+    group: postgres
+    home: "{{ postgres_data_dir }}"
+    shell: /usr/bin/nologin
+    create_home: false
+    system: true
+
+- name: Ensure Postgres data directory exists
+  ansible.builtin.file:
+    path: "{{ postgres_data_dir }}"
+    state: directory
+    owner: "{{ postgres_uid }}"
+    group: "{{ postgres_gid }}"
+    mode: '0700'
+
+- name: Check if existing postgres container uses correct image
+  ansible.builtin.command: >-
+    podman inspect {{ postgres_container_name }}
+    --format "{{ '{{' }}.Config.Image{{ '}}' }}"
+  register: _pg_current_image
+  changed_when: false
+  failed_when: false
+
+- name: Remove postgres container if image is wrong
+  ansible.builtin.command: podman rm -f {{ postgres_container_name }}
+  when:
+    - _pg_current_image.rc == 0
+    - postgres_image not in _pg_current_image.stdout
+  changed_when: true
+
+- name: Remove stale systemd service if container was replaced
+  ansible.builtin.file:
+    path: /etc/systemd/system/container-{{ postgres_container_name }}.service
+    state: absent
+  when:
+    - _pg_current_image.rc == 0
+    - postgres_image not in _pg_current_image.stdout
+  notify: Restart postgres systemd
+
+- name: Create postgres container
+  containers.podman.podman_container:
+    name: "{{ postgres_container_name }}"
+    image: "{{ postgres_image }}"
+    state: created
+    recreate: false
+    restart_policy: "no"
+    generate_systemd:
+      path: /etc/systemd/system/
+      restart_policy: always
+      names: true
+      container_prefix: container
+    published_ports:
+      - "{{ postgres_port }}:5432/tcp"
+    env:
+      POSTGRES_USER: "{{ postgres_superuser }}"
+      POSTGRES_PASSWORD: "{{ postgres_superuser_password }}"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    volumes:
+      - "{{ postgres_data_dir }}:/var/lib/postgresql/data"
+  become: true
+  notify: Restart postgres systemd
+
+- name: Enable and start postgres systemd service
+  ansible.builtin.systemd:
+    name: "container-{{ postgres_container_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+
+- name: Wait for Postgres to be ready
+  ansible.builtin.command: >-
+    podman exec {{ postgres_container_name }}
+    pg_isready -U {{ postgres_superuser }}
+  register: _pg_ready
+  retries: 30
+  delay: 2
+  until: _pg_ready.rc == 0
+  changed_when: false
+
+- name: Apply Postgres tuning
+  ansible.builtin.command: >-
+    podman exec {{ postgres_container_name }}
+    psql -U {{ postgres_superuser }} -c
+    "{{ item }}"
+  loop:
+    - "ALTER SYSTEM SET max_connections = '{{ postgres_max_connections }}';"
+    - "ALTER SYSTEM SET shared_buffers = '{{ postgres_shared_buffers }}';"
+    - "ALTER SYSTEM SET effective_cache_size = '{{ postgres_effective_cache_size }}';"
+    - "ALTER SYSTEM SET work_mem = '{{ postgres_work_mem }}';"
+    - "ALTER SYSTEM SET maintenance_work_mem = '{{ postgres_maintenance_work_mem }}';"
+    - "ALTER SYSTEM SET wal_buffers = '{{ postgres_wal_buffers }}';"
+    - "ALTER SYSTEM SET listen_addresses = '*';"
+    - "ALTER SYSTEM SET log_min_duration_statement = 1000;"
+  changed_when: false
+
+- name: Ensure pg_hba allows LAN connections
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      PG_HBA=$(podman exec {{ postgres_container_name }} \
+        psql -U {{ postgres_superuser }} -tAc "SHOW hba_file;")
+      if ! podman exec {{ postgres_container_name }} \
+        grep -q '{{ lan_subnet | default("192.168.0.0/24") }}' \
+        "$PG_HBA"; then
+        podman exec {{ postgres_container_name }} sh -c \
+          "echo 'host all all {{ lan_subnet | default("192.168.0.0/24") }} md5' >> $PG_HBA"
+        podman exec {{ postgres_container_name }} \
+          psql -U {{ postgres_superuser }} -c "SELECT pg_reload_conf();"
+        echo "changed"
+      fi
+    executable: /bin/bash
+  register: _pg_hba
+  changed_when: "'changed' in _pg_hba.stdout"
+
+- name: Restart postgres to apply tuning
+  ansible.builtin.systemd:
+    name: "container-{{ postgres_container_name }}"
+    state: restarted
+  become: true
+
+- name: Wait for Postgres to be ready after tuning
+  ansible.builtin.command: >-
+    podman exec {{ postgres_container_name }}
+    pg_isready -U {{ postgres_superuser }}
+  register: _pg_ready_post
+  retries: 30
+  delay: 2
+  until: _pg_ready_post.rc == 0
+  changed_when: false

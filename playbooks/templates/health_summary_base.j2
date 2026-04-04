@@ -63,6 +63,16 @@
 {% endfor %}
 {% endif %}
 
+{{ macros.BOLD }}[ POSTGRES ]{{ macros.RESET }}
+{% if groups['postgres'] is defined %}
+{% for host in groups['postgres'] | sort %}
+  {{ macros.CYAN }}> {{ host }}{{ macros.RESET }}
+    Container:     {{ macros.ok(hostvars[host]._postgres_container_status.stdout | default('unknown')) if hostvars[host]._postgres_container_status is defined and hostvars[host]._postgres_container_status.stdout | default('') == 'running' else macros.bad(hostvars[host]._postgres_container_status.stdout | default('unknown')) }}
+    Connections:   {{ macros.ok('ACCEPTING') if hostvars[host]._postgres_ready is defined and hostvars[host]._postgres_ready.rc | default(1) == 0 else macros.bad('REFUSING') }}
+    Databases:     {{ hostvars[host]._postgres_databases.stdout | default('N/A') }}
+{% endfor %}
+{% endif %}
+
 {{ macros.BOLD }}[ BASE WORKLOADS (Proxy, Nexus, Firefly) ]{{ macros.RESET }}
 {% set proxy_data = groups['edge_proxy_cluster'] | map('extract', hostvars, '_proxy_wildcard_stat') | select('defined') | list %}
 {% set nexus_data = groups['artifactory'] | map('extract', hostvars, '_nexus_status') | select('defined') | list %}

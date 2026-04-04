@@ -1,2 +1,1 @@
 ---
-postgres_image: "ghcr.io/zalando/spilo-16:3.3-p1"

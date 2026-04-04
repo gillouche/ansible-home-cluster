@@ -1,0 +1,21 @@
+---
+- name: "Restore Postgres"
+  hosts: postgres
+  gather_facts: false
+  become: true
+  tags: [restore_base, restore_postgres]
+  tasks:
+    - name: Ensure Postgres container is running
+      ansible.builtin.systemd:
+        name: "container-{{ postgres_container_name | default('postgres') }}"
+        state: started
+
+    - name: Wait for Postgres to be ready
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        pg_isready -U {{ postgres_superuser | default('postgres') }}
+      register: _pg_health
+      until: _pg_health.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false

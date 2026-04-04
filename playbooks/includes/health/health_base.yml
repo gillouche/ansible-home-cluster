@@ -230,6 +230,38 @@
       register: _nexus_metrics
       failed_when: false
 
+- name: "Postgres Health Check"
+  hosts: postgres
+  gather_facts: false
+  become: true
+  tags: [health_base, health_postgres]
+  tasks:
+    - name: Check Postgres container status
+      ansible.builtin.command: >-
+        podman inspect {{ postgres_container_name | default('postgres') }}
+        --format "{{ '{{' }}.State.Status{{ '}}' }}"
+      register: _postgres_container_status
+      changed_when: false
+      failed_when: false
+
+    - name: Check Postgres is accepting connections
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        pg_isready -U {{ postgres_superuser | default('postgres') }}
+      register: _postgres_ready
+      changed_when: false
+      failed_when: false
+
+    - name: List databases
+      ansible.builtin.command: >-
+        podman exec {{ postgres_container_name | default('postgres') }}
+        psql -U {{ postgres_superuser | default('postgres') }} -tAc
+        "SELECT datname, pg_size_pretty(pg_database_size(datname))
+         FROM pg_database WHERE datistemplate = false;"
+      register: _postgres_databases
+      changed_when: false
+      failed_when: false
+
 - name: "Firefly Health Check"
   hosts: firefly
   gather_facts: true
