@@ -416,11 +416,56 @@
         regexp: 'server: https://127.0.0.1:6443'
         replace: "server: {{ k3s_external_url }}"
 
-    - name: Rename context to k3s
+    - name: Rename cluster, user, and context to k3s in fetched kubeconfig
       ansible.builtin.shell: |
-        set -o pipefail
-        if kubectl config get-contexts default --kubeconfig={{ ansible_env.HOME }}/.kube/k3s.yaml >/dev/null 2>&1; then
-          kubectl config rename-context default k3s --kubeconfig={{ ansible_env.HOME }}/.kube/k3s.yaml
+        set -euo pipefail
+        KC="{{ ansible_env.HOME }}/.kube/k3s.yaml"
+        kubectl config rename-context default k3s --kubeconfig="$KC" 2>/dev/null || true
+        kubectl config set-context k3s --cluster=k3s --user=k3s --kubeconfig="$KC"
+        kubectl config set clusters.k3s "$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster}' --kubeconfig="$KC")" --kubeconfig="$KC" 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Rebuild k3s.yaml with consistent naming
+      ansible.builtin.shell: |
+        set -euo pipefail
+        KC="{{ ansible_env.HOME }}/.kube/k3s.yaml"
+        RAW=$(cat "$KC")
+        python3 -c "
+        import yaml, sys
+        cfg = yaml.safe_load(sys.stdin)
+        for c in cfg.get('clusters', []):
+            c['name'] = 'k3s'
+        for u in cfg.get('users', []):
+            u['name'] = 'k3s'
+        for ctx in cfg.get('contexts', []):
+            ctx['name'] = 'k3s'
+            ctx['context']['cluster'] = 'k3s'
+            ctx['context']['user'] = 'k3s'
+        cfg['current-context'] = 'k3s'
+        yaml.dump(cfg, sys.stdout, default_flow_style=False)
+        " <<< "$RAW" > "$KC.tmp"
+        mv "$KC.tmp" "$KC"
+        chmod 600 "$KC"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Remove stale k3s entries from main kubeconfig
+      ansible.builtin.shell: |
+        set -euo pipefail
+        MAIN="{{ ansible_env.HOME }}/.kube/config"
+        if [ -f "$MAIN" ]; then
+          kubectl config delete-context k3s --kubeconfig="$MAIN" 2>/dev/null || true
+          kubectl config delete-cluster k3s --kubeconfig="$MAIN" 2>/dev/null || true
+          kubectl config delete-user k3s --kubeconfig="$MAIN" 2>/dev/null || true
+          kubectl config delete-context default --kubeconfig="$MAIN" 2>/dev/null || true
+          kubectl config delete-cluster default --kubeconfig="$MAIN" 2>/dev/null || true
+          kubectl config delete-user default --kubeconfig="$MAIN" 2>/dev/null || true
+          kubectl config delete-context k3s-ansible --kubeconfig="$MAIN" 2>/dev/null || true
+          kubectl config delete-cluster k3s-ansible --kubeconfig="$MAIN" 2>/dev/null || true
+          kubectl config delete-user k3s-ansible --kubeconfig="$MAIN" 2>/dev/null || true
         fi
       args:
         executable: /bin/bash
