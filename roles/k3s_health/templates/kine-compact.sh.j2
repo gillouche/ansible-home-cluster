@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PG_HOST="{{ k3s_postgres_host }}"
-PG_PORT="{{ k3s_postgres_port | default(5432) }}"
+PG_CONTAINER="{{ postgres_container_name | default('postgres') }}"
 PG_USER="{{ k3s_db_user | default('k3s') }}"
 PG_DB="{{ k3s_db_name | default('kubernetes') }}"
-export PGPASSWORD="{{ k3s_db_password | default('k3s-db-changeme') }}"
+PG_PASSWORD="{{ k3s_db_password | default('k3s-db-changeme') }}"
 MAX_TABLE_SIZE_MB=500
 LOG_TAG="kine-compact"
 
 log() { logger -t "$LOG_TAG" "$@"; }
 
-if ! psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -c "SELECT 1;" &>/dev/null; then
-  log "Cannot connect to Postgres at ${PG_HOST}:${PG_PORT}, skipping"
+psql_cmd() {
+  podman exec -e PGPASSWORD="$PG_PASSWORD" "$PG_CONTAINER" \
+    psql -U "$PG_USER" -d "$PG_DB" "$@"
+}
+
+psql_query() {
+  psql_cmd -tAc "$1" 2>/dev/null || echo "0"
+}
+
+if ! psql_cmd -c "SELECT 1;" &>/dev/null; then
+  log "Cannot connect to Postgres container ${PG_CONTAINER}, skipping"
   exit 0
 fi
 
-PSQL="psql -h $PG_HOST -p $PG_PORT -U $PG_USER -d $PG_DB -tAc"
-
-row_count=$($PSQL "SELECT count(*) FROM kine;" 2>/dev/null || echo "0")
-table_size_mb=$($PSQL "SELECT pg_total_relation_size('kine') / 1024 / 1024;" 2>/dev/null || echo "0")
-unique_keys=$($PSQL "SELECT count(DISTINCT name) FROM kine;" 2>/dev/null || echo "0")
-event_count=$($PSQL "SELECT count(*) FROM kine WHERE name LIKE '/registry/events/%';" 2>/dev/null || echo "0")
+row_count=$(psql_query "SELECT count(*) FROM kine;")
+table_size_mb=$(psql_query "SELECT pg_total_relation_size('kine') / 1024 / 1024;")
+unique_keys=$(psql_query "SELECT count(DISTINCT name) FROM kine;")
+event_count=$(psql_query "SELECT count(*) FROM kine WHERE name LIKE '/registry/events/%';")
 
 stale_rows=$(( row_count - unique_keys ))
 log "kine table: ${row_count} rows, ${table_size_mb} MB, ${stale_rows} stale, ${event_count} events"
@@ -33,7 +39,7 @@ fi
 
 if (( event_count > 50000 )); then
   log "pruning ${event_count} old events"
-  psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -c "
+  psql_cmd -c "
     SET statement_timeout = '300s';
     DELETE FROM kine WHERE name LIKE '/registry/events/%';
   " 2>/dev/null || true
@@ -42,7 +48,7 @@ fi
 log "compacting kine: ${stale_rows} stale rows to remove"
 
 for prefix in '/registry/leases/' '/registry/events/' '/registry/'; do
-  deleted=$(psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" -tAc "
+  deleted=$(psql_cmd -tAc "
     SET statement_timeout = '300s';
     WITH latest AS (
       SELECT name, max(id) as max_id
@@ -62,16 +68,14 @@ for prefix in '/registry/leases/' '/registry/events/' '/registry/'; do
   fi
 done
 
-new_size_mb=$($PSQL "SELECT pg_total_relation_size('kine') / 1024 / 1024;" 2>/dev/null || echo "0")
+new_size_mb=$(psql_query "SELECT pg_total_relation_size('kine') / 1024 / 1024;")
 
 if (( new_size_mb > MAX_TABLE_SIZE_MB * 2 )); then
   log "table still large (${new_size_mb} MB), running VACUUM FULL"
-  psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" \
-    -c "VACUUM FULL kine;" 2>/dev/null
-  final_size_mb=$($PSQL "SELECT pg_total_relation_size('kine') / 1024 / 1024;" 2>/dev/null || echo "0")
+  psql_cmd -c "VACUUM FULL kine;" 2>/dev/null
+  final_size_mb=$(psql_query "SELECT pg_total_relation_size('kine') / 1024 / 1024;")
   log "VACUUM FULL complete: ${final_size_mb} MB"
 else
-  psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" \
-    -c "VACUUM ANALYZE kine;" 2>/dev/null
+  psql_cmd -c "VACUUM ANALYZE kine;" 2>/dev/null
   log "VACUUM ANALYZE complete: ${new_size_mb} MB"
 fi

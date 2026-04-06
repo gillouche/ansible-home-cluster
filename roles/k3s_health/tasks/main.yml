@@ -146,7 +146,7 @@
     group: root
     mode: '0755'
   become: true
-  when: inventory_hostname in groups.get('server', [])
+  when: inventory_hostname in groups.get('postgres', [])
 
 - name: Deploy kine compaction service unit
   ansible.builtin.template:
@@ -156,7 +156,7 @@
     group: root
     mode: '0644'
   become: true
-  when: inventory_hostname in groups.get('server', [])
+  when: inventory_hostname in groups.get('postgres', [])
   notify: Reload systemd for k3s health
 
 - name: Deploy kine compaction timer unit
@@ -167,7 +167,7 @@
     group: root
     mode: '0644'
   become: true
-  when: inventory_hostname in groups.get('server', [])
+  when: inventory_hostname in groups.get('postgres', [])
   notify: Reload systemd for k3s health
 
 - name: Enable and start kine compaction timer
@@ -177,7 +177,7 @@
     enabled: true
     daemon_reload: true
   become: true
-  when: inventory_hostname in groups.get('server', [])
+  when: inventory_hostname in groups.get('postgres', [])
 
 - name: Create k3s systemd drop-in directory
   ansible.builtin.file:

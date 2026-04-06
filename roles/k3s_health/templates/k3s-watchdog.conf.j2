@@ -1,2 +1,6 @@
 [Service]
+{% if k3s_service_name == 'k3s' %}
+WatchdogSec=300s
+{% else %}
 WatchdogSec=120s
+{% endif %}
