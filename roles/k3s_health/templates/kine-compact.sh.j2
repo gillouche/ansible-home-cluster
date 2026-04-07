@@ -70,8 +70,8 @@ done
 
 new_size_mb=$(psql_query "SELECT pg_total_relation_size('kine') / 1024 / 1024;")
 
-if (( new_size_mb > MAX_TABLE_SIZE_MB * 2 )); then
-  log "table still large (${new_size_mb} MB), running VACUUM FULL"
+if (( new_size_mb > MAX_TABLE_SIZE_MB )); then
+  log "table large (${new_size_mb} MB > ${MAX_TABLE_SIZE_MB} MB), running VACUUM FULL"
   psql_cmd -c "VACUUM FULL kine;" 2>/dev/null
   final_size_mb=$(psql_query "SELECT pg_total_relation_size('kine') / 1024 / 1024;")
   log "VACUUM FULL complete: ${final_size_mb} MB"
