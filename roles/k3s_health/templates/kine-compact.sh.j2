@@ -5,7 +5,7 @@ PG_CONTAINER="{{ postgres_container_name | default('postgres') }}"
 PG_USER="{{ k3s_db_user | default('k3s') }}"
 PG_DB="{{ k3s_db_name | default('kubernetes') }}"
 PG_PASSWORD="{{ k3s_db_password | default('k3s-db-changeme') }}"
-MAX_TABLE_SIZE_MB=500
+MAX_TABLE_SIZE_MB=300
 LOG_TAG="kine-compact"
 
 log() { logger -t "$LOG_TAG" "$@"; }
