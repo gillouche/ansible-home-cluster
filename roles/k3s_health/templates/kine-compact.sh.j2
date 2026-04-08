@@ -68,14 +68,17 @@ for prefix in '/registry/leases/' '/registry/events/' '/registry/'; do
   fi
 done
 
+psql_cmd -c "VACUUM ANALYZE kine;" 2>/dev/null
 new_size_mb=$(psql_query "SELECT pg_total_relation_size('kine') / 1024 / 1024;")
+rows_deleted=$(( row_count - $(psql_query "SELECT count(*) FROM kine;") ))
 
-if (( new_size_mb > MAX_TABLE_SIZE_MB )); then
-  log "table large (${new_size_mb} MB > ${MAX_TABLE_SIZE_MB} MB), running VACUUM FULL"
+log "post-compaction: ${new_size_mb} MB (was ${table_size_mb} MB), deleted ${rows_deleted} rows"
+
+if (( rows_deleted > 10000 && new_size_mb >= table_size_mb - 10 )); then
+  log "running VACUUM FULL (deleted ${rows_deleted} rows but size unchanged: ${new_size_mb} MB)"
   psql_cmd -c "VACUUM FULL kine;" 2>/dev/null
   final_size_mb=$(psql_query "SELECT pg_total_relation_size('kine') / 1024 / 1024;")
   log "VACUUM FULL complete: ${final_size_mb} MB"
 else
-  psql_cmd -c "VACUUM ANALYZE kine;" 2>/dev/null
   log "VACUUM ANALYZE complete: ${new_size_mb} MB"
 fi
