@@ -1,0 +1,65 @@
+{% import "health_summary_macros.j2" as macros with context %}
+================================================================================
+{{ macros.BOLD }}                        HOMELAB: DISK HEALTH REPORT{{ macros.RESET }}
+================================================================================
+
+{% for host in groups['server'] | sort %}
+{{ macros.BOLD }}[ {{ host | upper }} ]{{ macros.RESET }}
+
+  {{ macros.CYAN }}-- Disk Layout --{{ macros.RESET }}
+{% if hostvars[host]['_disk_layout'] is defined %}
+{{ hostvars[host]['_disk_layout'].stdout | indent(4, true) }}
+{% endif %}
+
+  {{ macros.CYAN }}-- Filesystem Usage --{{ macros.RESET }}
+{% if hostvars[host]['_disk_usage'] is defined %}
+{{ hostvars[host]['_disk_usage'].stdout | indent(4, true) }}
+{% endif %}
+
+  {{ macros.CYAN }}-- SMART Health --{{ macros.RESET }}
+{% if hostvars[host]['_smart_health'] is defined and hostvars[host]['_smart_health'].stdout | default('') != '' %}
+{% for line in hostvars[host]['_smart_health'].stdout_lines | default([]) %}
+{% if '|' in line %}
+{% set parts = {} %}
+{% for kv in line.split('|') %}
+{% set key = kv.split('=', 1)[0] %}
+{% set val = kv.split('=', 1)[1] if '=' in kv else '' %}
+{% if parts.update({key: val}) %}{% endif %}
+{% endfor %}
+    {{ macros.CYAN }}{{ parts.get('DISK', '?') }}{{ macros.RESET }} ({{ parts.get('MODEL', '?') }})
+      Health:      {{
+        macros.ok(parts.get('HEALTH', '?'))
+        if 'PASSED' in parts.get('HEALTH', '') or 'OK' in parts.get('HEALTH', '')
+        else macros.bad(parts.get('HEALTH', 'UNKNOWN'))
+      }}
+      Temperature: {{ parts.get('TEMP', 'N/A') }}°C
+      Power-On:    {{ parts.get('POH', 'N/A') }} hours
+      Wear:        {{ parts.get('WEAR', 'N/A') }}{% if parts.get('WEAR', 'N/A') != 'N/A' %}%{% endif %}
+
+      Reallocated: {{
+        macros.ok(parts.get('REALLOC', 'N/A'))
+        if parts.get('REALLOC', '0') in ['0', 'N/A']
+        else macros.bad(parts.get('REALLOC', '?') ~ ' sectors')
+      }}
+{% endif %}
+{% endfor %}
+{% else %}
+    No SMART data available
+{% endif %}
+
+  {{ macros.CYAN }}-- IO Stats --{{ macros.RESET }}
+{% if hostvars[host]['_disk_iostat'] is defined and hostvars[host]['_disk_iostat'].stdout | default('') != '' %}
+{{ hostvars[host]['_disk_iostat'].stdout | indent(4, true) }}
+{% endif %}
+
+  {{ macros.CYAN }}-- Write Latency Test --{{ macros.RESET }}
+{% if hostvars[host]['_disk_latency'] is defined and hostvars[host]['_disk_latency'].stdout | default('') != '' %}
+{% for line in hostvars[host]['_disk_latency'].stdout_lines | default([]) %}
+    {{ line }}
+{% endfor %}
+{% else %}
+    No latency data
+{% endif %}
+
+{% endfor %}
+================================================================================

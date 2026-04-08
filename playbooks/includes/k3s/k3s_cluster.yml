@@ -422,7 +422,8 @@
         KC="{{ ansible_env.HOME }}/.kube/k3s.yaml"
         kubectl config rename-context default k3s --kubeconfig="$KC" 2>/dev/null || true
         kubectl config set-context k3s --cluster=k3s --user=k3s --kubeconfig="$KC"
-        kubectl config set clusters.k3s "$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster}' --kubeconfig="$KC")" --kubeconfig="$KC" 2>/dev/null || true
+        CLUSTER_DATA=$(kubectl config view --raw -o jsonpath='{.clusters[0].cluster}' --kubeconfig="$KC")
+        kubectl config set clusters.k3s "$CLUSTER_DATA" --kubeconfig="$KC" 2>/dev/null || true
       args:
         executable: /bin/bash
       changed_when: false

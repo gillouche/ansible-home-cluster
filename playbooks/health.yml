@@ -14,3 +14,7 @@
 - name: Run k3s apps health checks
   import_playbook: includes/health/health_k3s_apps.yml
   tags: [health_k3s, health_k3s_apps]
+
+- name: Run disk health checks
+  import_playbook: includes/health/health_disks.yml
+  tags: [health_disks]

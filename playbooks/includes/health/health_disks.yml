@@ -1,0 +1,105 @@
+---
+- name: "Disk Health Check"
+  hosts: server
+  gather_facts: false
+  become: true
+  tags: [health_disks]
+  tasks:
+    - name: Enable fstrim timer for SSD maintenance
+      ansible.builtin.systemd:
+        name: fstrim.timer
+        state: started
+        enabled: true
+      failed_when: false
+
+    - name: Get disk layout
+      ansible.builtin.shell: |
+        set -o pipefail
+        lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,ROTA,MODEL -n | grep -vE 'loop|VIRTUAL-DISK'
+      register: _disk_layout
+      changed_when: false
+
+    - name: Get filesystem usage
+      ansible.builtin.shell: |
+        set -o pipefail
+        df -h -x tmpfs -x devtmpfs -x overlay | grep -v '/var/lib/kubelet'
+      register: _disk_usage
+      changed_when: false
+
+    - name: Get disk IO stats (physical only)
+      ansible.builtin.shell: |
+        set -o pipefail
+        iostat -x 1 1 2>/dev/null | head -1
+        iostat -x 1 1 2>/dev/null | grep -E 'Device|nvme|sda |sdb '
+      register: _disk_iostat
+      changed_when: false
+      failed_when: false
+
+    - name: Get SMART health for physical disks
+      ansible.builtin.shell: |
+        set -o pipefail
+        for disk in $(lsblk -dnpo NAME | grep -vE 'loop|VIRTUAL'); do
+          is_virtual=$(smartctl -i "$disk" 2>/dev/null | grep -ci "virtual\|QEMU\|longhorn")
+          [ "$is_virtual" -gt 0 ] && continue
+
+          model=$(smartctl -i "$disk" 2>/dev/null | grep -iE "^(Device Model|Model Number|Product):" | head -1 | sed 's/.*: *//')
+          [ -z "$model" ] && continue
+
+          health=$(smartctl -H "$disk" 2>/dev/null | grep -iE "overall-health|Health Status" | sed 's/.*: *//')
+
+          if smartctl -A "$disk" 2>/dev/null | grep -q "ID#"; then
+            temp=$(smartctl -A "$disk" 2>/dev/null | awk '/^194 / || /Temperature_Celsius/ {print $10; exit}')
+            poh=$(smartctl -A "$disk" 2>/dev/null | awk '/^  9 / || /Power_On_Hours/ {print $10; exit}')
+            wear=$(smartctl -A "$disk" 2>/dev/null | awk '/^177 / || /Wear_Leveling/ {print $4; exit}')
+            realloc=$(smartctl -A "$disk" 2>/dev/null | awk '/^  5 / || /Reallocated_Sector/ {print $10; exit}')
+          else
+            temp=$(smartctl -A "$disk" 2>/dev/null | grep -i "^Temperature:" | awk '{print $2}')
+            poh=$(smartctl -A "$disk" 2>/dev/null | grep -i "Power On Hours" | awk '{print $4}' | tr -d ',')
+            wear=$(smartctl -A "$disk" 2>/dev/null | grep -i "Percentage Used" | awk '{print $3}' | tr -d '%')
+            realloc=""
+          fi
+
+          OUT="DISK=${disk}|MODEL=${model}|HEALTH=${health:-UNKNOWN}"
+          OUT="${OUT}|TEMP=${temp:-N/A}|POH=${poh:-N/A}"
+          OUT="${OUT}|WEAR=${wear:-N/A}|REALLOC=${realloc:-N/A}"
+          echo "$OUT"
+        done
+      register: _smart_health
+      changed_when: false
+      failed_when: false
+
+    - name: Run quick write latency test
+      ansible.builtin.shell: |
+        set -o pipefail
+        for mount in / /mnt/ssd_nvme /mnt/ssd_sata; do
+          if mountpoint -q "$mount" 2>/dev/null; then
+            result=$(dd if=/dev/zero of="${mount}/.disk_test" bs=4k count=1000 oflag=dsync 2>&1 | tail -1)
+            rm -f "${mount}/.disk_test"
+            speed=$(echo "$result" | grep -oP '[\d.]+ [kMG]?B/s' | tail -1)
+            echo "MOUNT=$mount WRITE_SPEED=${speed:-N/A}"
+          fi
+        done
+      register: _disk_latency
+      changed_when: false
+      failed_when: false
+
+- name: "Disk Health Report"
+  hosts: localhost
+  gather_facts: false
+  tags: [health_disks, health_summary]
+  tasks:
+    - name: Render disk health report # noqa: no-relative-paths
+      ansible.builtin.template:
+        src: "../../templates/health_disk_report.j2"
+        dest: /tmp/disk-health-report.txt
+        mode: '0644'
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+
+    - name: Show disk health report
+      ansible.builtin.pause:
+        prompt: "{{ lookup('file', '/tmp/disk-health-report.txt') }}"
+      delegate_to: localhost
+      vars:
+        ansible_connection: local

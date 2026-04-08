@@ -101,7 +101,21 @@
     - "ALTER SYSTEM SET maintenance_work_mem = '{{ postgres_maintenance_work_mem }}';"
     - "ALTER SYSTEM SET wal_buffers = '{{ postgres_wal_buffers }}';"
     - "ALTER SYSTEM SET listen_addresses = '*';"
-    - "ALTER SYSTEM SET log_min_duration_statement = 1000;"
+    - "ALTER SYSTEM SET log_min_duration_statement = 500;"
+    - "ALTER SYSTEM SET log_autovacuum_min_duration = 0;"
+    - "ALTER SYSTEM SET checkpoint_completion_target = 0.9;"
+    - "ALTER SYSTEM SET autovacuum_max_workers = 5;"
+    - "ALTER SYSTEM SET autovacuum_vacuum_scale_factor = 0.05;"
+    - "ALTER SYSTEM SET autovacuum_analyze_scale_factor = 0.02;"
+    - "ALTER SYSTEM SET wal_compression = 'on';"
+    - "ALTER SYSTEM SET tcp_keepalives_idle = 900;"
+    - "ALTER SYSTEM SET tcp_keepalives_interval = 100;"
+    - "ALTER SYSTEM SET track_functions = 'all';"
+    - "ALTER SYSTEM SET log_checkpoints = 'on';"
+    - "ALTER SYSTEM SET log_lock_waits = 'on';"
+    - "ALTER SYSTEM SET log_connections = 'on';"
+    - "ALTER SYSTEM SET log_disconnections = 'on';"
+    - "ALTER SYSTEM SET log_temp_files = 0;"
   changed_when: false
 
 - name: Ensure pg_hba allows LAN connections
