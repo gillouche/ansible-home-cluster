@@ -292,15 +292,23 @@
       changed_when: false
       failed_when: false
 
-    - name: Delete stopped Longhorn replicas (orphans from failed rebuilds)
+    - name: Delete stopped Longhorn replicas only when volume has 2+ running
       ansible.builtin.shell:
         cmd: |
           set -o pipefail
-          k3s kubectl get replicas.longhorn.io -n longhorn-system -o json \
-            | jq -r '.items[] | select(.status.currentState == "stopped") | .metadata.name' \
-            | while read -r r; do
-                k3s kubectl delete replica "$r" -n longhorn-system --force --grace-period=0 2>/dev/null || true
-              done
+          k3s kubectl get replicas.longhorn.io -n longhorn-system -o json | jq -r '
+            [.items[] | {name: .metadata.name, vol: .spec.volumeName, state: .status.currentState}]
+            | group_by(.vol)
+            | .[]
+            | (map(select(.state == "running")) | length) as $running
+            | map(select(.state == "stopped"))
+            | select(length > 0)
+            | select($running >= 2)
+            | .[].name
+          ' | while read -r r; do
+              [ -z "$r" ] && continue
+              k3s kubectl delete replica "$r" -n longhorn-system --force --grace-period=0 2>/dev/null || true
+            done
         executable: /bin/bash
       changed_when: false
       failed_when: false
@@ -383,15 +391,23 @@
       changed_when: false
       failed_when: false
 
-    - name: Delete stopped Longhorn replicas
+    - name: Delete stopped Longhorn replicas only when volume has 2+ running
       ansible.builtin.shell:
         cmd: |
           set -o pipefail
-          k3s kubectl get replicas.longhorn.io -n longhorn-system -o json \
-            | jq -r '.items[] | select(.status.currentState == "stopped") | .metadata.name' \
-            | while read -r r; do
-                k3s kubectl delete replica "$r" -n longhorn-system --force --grace-period=0 2>/dev/null || true
-              done
+          k3s kubectl get replicas.longhorn.io -n longhorn-system -o json | jq -r '
+            [.items[] | {name: .metadata.name, vol: .spec.volumeName, state: .status.currentState}]
+            | group_by(.vol)
+            | .[]
+            | (map(select(.state == "running")) | length) as $running
+            | map(select(.state == "stopped"))
+            | select(length > 0)
+            | select($running >= 2)
+            | .[].name
+          ' | while read -r r; do
+              [ -z "$r" ] && continue
+              k3s kubectl delete replica "$r" -n longhorn-system --force --grace-period=0 2>/dev/null || true
+            done
         executable: /bin/bash
       changed_when: false
       failed_when: false
