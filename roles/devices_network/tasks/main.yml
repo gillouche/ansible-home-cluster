@@ -14,6 +14,65 @@
   become: true
   when: devices_manage_hostsfile | default(true) | bool
 
+- name: Get active NM connection name for primary interface
+  ansible.builtin.shell: |
+    set -o pipefail
+    nmcli -t -f NAME,DEVICE con show --active | grep ':{{ monit_network_interface }}$' | cut -d: -f1
+  args:
+    executable: /bin/bash
+  register: _nm_conn_name
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Check if LAN subnet route already configured in NM
+  ansible.builtin.shell: |
+    set -o pipefail
+    nmcli -g ipv4.routes con show "{{ _nm_conn_name.stdout | trim }}" | grep -q "{{ lan_subnet }}"
+  args:
+    executable: /bin/bash
+  register: _nm_route_check
+  changed_when: false
+  failed_when: false
+  become: true
+  when:
+    - _nm_conn_name.stdout | trim | length > 0
+
+- name: Add LAN subnet route to NetworkManager connection
+  ansible.builtin.command: >
+    nmcli con modify "{{ _nm_conn_name.stdout | trim }}"
+    +ipv4.routes "{{ lan_subnet }}"
+  become: true
+  register: _nm_route_add
+  changed_when: _nm_route_add.rc == 0
+  when:
+    - _nm_conn_name.stdout | trim | length > 0
+    - _nm_route_check.rc != 0
+
+- name: Check if LAN subnet route exists in live routing table
+  ansible.builtin.shell: |
+    set -o pipefail
+    ip route show {{ lan_subnet }} dev {{ monit_network_interface }} | grep -q .
+  args:
+    executable: /bin/bash
+  register: _live_route_check
+  changed_when: false
+  failed_when: false
+  become: true
+  when:
+    - _nm_conn_name.stdout | trim | length > 0
+
+- name: Add LAN subnet route to live routing table
+  ansible.builtin.command: >
+    ip route replace {{ lan_subnet }}
+    dev {{ monit_network_interface }}
+    src {{ ansible_host }}
+  become: true
+  changed_when: true
+  when:
+    - _nm_conn_name.stdout | trim | length > 0
+    - _live_route_check.rc != 0
+
 - name: Check if NetworkManager is installed # noqa: command-instead-of-module
   ansible.builtin.command: systemctl is-active NetworkManager
   register: nm_check

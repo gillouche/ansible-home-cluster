@@ -255,6 +255,47 @@
     - name: Check control plane health
       ansible.builtin.include_tasks: ../maintenance/controlplane_resource_check.yml
 
+# ------------------------------------------------------------------------------
+# 7b. Rollout restart critical infrastructure
+# ------------------------------------------------------------------------------
+# After a node outage, pods may be running but in a degraded state (stale
+# connections, expired caches, broken watches). A rollout restart ensures
+# fresh pods for the services that gate external access and observability.
+- name: "Restore K3s: Restart critical infrastructure"
+  hosts: server[0]
+  gather_facts: false
+  become: true
+  tags: [restore_k3s]
+  tasks:
+    - name: Rollout restart critical deployments
+      ansible.builtin.command: >
+        k3s kubectl rollout restart deployment/{{ item.name }} -n {{ item.ns }}
+      loop:
+        - { name: traefik, ns: kube-system }
+        - { name: authelia, ns: security }
+        - { name: authelia-redis, ns: security }
+        - { name: argocd-server, ns: argocd }
+        - { name: argocd-repo-server, ns: argocd }
+        - { name: monitoring-grafana, ns: monitoring }
+        - { name: monitoring-kube-prometheus-operator, ns: monitoring }
+      register: _restart
+      failed_when: false
+      changed_when: "'restarted' in (_restart.stdout | default(''))"
+
+    - name: Wait for critical deployments to be available
+      ansible.builtin.command: >
+        k3s kubectl wait --for=condition=available --timeout=180s
+        deployment/{{ item.name }} -n {{ item.ns }}
+      loop:
+        - { name: traefik, ns: kube-system }
+        - { name: authelia, ns: security }
+        - { name: argocd-server, ns: argocd }
+      register: _wait
+      retries: 3
+      delay: 10
+      until: _wait.rc == 0
+      changed_when: false
+
 - name: "Restore K3s: Enable ArgoCD auto-sync and cleanup"
   hosts: server[0]
   gather_facts: false

@@ -27,7 +27,7 @@
 - name: "Post-Restore: Check Longhorn volume health"
   ansible.builtin.shell: |
     set -o pipefail
-    k3s kubectl get volumes.longhorn.io --no-headers \
+    k3s kubectl get volumes.longhorn.io -n longhorn-system --no-headers \
       -o custom-columns='NAME:.metadata.name,STATE:.status.state,ROBUSTNESS:.status.robustness' 2>/dev/null \
       | grep -vE 'attached\s+healthy' || echo "ALL_HEALTHY"
   args:
