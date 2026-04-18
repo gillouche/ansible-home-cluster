@@ -4,6 +4,7 @@ extra_server_args: >-
   --prefer-bundled-bin
   --disable traefik
   --flannel-backend=vxlan
+  --flannel-iface={{ monit_network_interface }}
   --kubelet-arg=system-reserved=cpu=1000m,memory=2Gi
   --kubelet-arg=kube-reserved=cpu=1000m,memory=3Gi
   --kubelet-arg=max-pods=110

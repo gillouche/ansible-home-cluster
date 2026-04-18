@@ -67,6 +67,28 @@
   become: true
   tags: [keepalived, infra]
 
+- name: Ensure keepalived systemd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/keepalived.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  become: true
+  tags: [keepalived, infra]
+
+- name: Order keepalived after k3s to prevent flannel VIP conflicts
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/keepalived.service.d/after-k3s.conf
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      After=k3s.service
+  become: true
+  tags: [keepalived, infra]
+
 - name: Enable keepalived
   ansible.builtin.systemd:
     name: keepalived

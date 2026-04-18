@@ -6,6 +6,21 @@
 # uncordons all nodes, and re-enables ArgoCD.
 
 # ------------------------------------------------------------------------------
+# 0. Stop keepalived to remove VIPs before flannel initializes
+# ------------------------------------------------------------------------------
+- name: "Restore K3s: Stop keepalived on all control planes"
+  hosts: server
+  gather_facts: false
+  become: true
+  tags: [restore_k3s]
+  tasks:
+    - name: Stop keepalived to remove VIPs
+      ansible.builtin.systemd:
+        name: keepalived
+        state: stopped
+      failed_when: false
+
+# ------------------------------------------------------------------------------
 # 1. Start control planes (serial, one at a time)
 # ------------------------------------------------------------------------------
 - name: "Restore K3s: Start homeserver (Primary Control Plane)"
@@ -203,6 +218,21 @@
 
 
 # ------------------------------------------------------------------------------
+# 5c. Start keepalived now that flannel has initialized with correct IPs
+# ------------------------------------------------------------------------------
+- name: "Restore K3s: Start keepalived"
+  hosts: server
+  gather_facts: false
+  become: true
+  tags: [restore_k3s]
+  tasks:
+    - name: Start keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: started
+      failed_when: false
+
+# ------------------------------------------------------------------------------
 # 6. Final validation & ArgoCD auto-sync
 # ------------------------------------------------------------------------------
 - name: "Restore K3s: Pre-validation"
@@ -332,6 +362,108 @@
             done
       args:
         executable: /bin/bash
+      changed_when: false
+      failed_when: false
+
+# ------------------------------------------------------------------------------
+# 9. Detect and fix unhealthy workloads
+# ------------------------------------------------------------------------------
+# After restore, some pods may be running but degraded (broken pipes, DNS
+# timeouts, stale connections). This step detects unhealthy deployments and
+# statefulsets in critical namespaces and restarts them.
+- name: "Restore K3s: Detect and fix unhealthy workloads"
+  hosts: server[0]
+  gather_facts: false
+  become: true
+  tags: [restore_k3s]
+  tasks:
+    - name: Find deployments with unavailable replicas in critical namespaces
+      ansible.builtin.shell: |
+        set -o pipefail
+        for ns in monitoring security argocd kube-system longhorn-system; do
+          k3s kubectl get deploy -n "$ns" --no-headers 2>/dev/null \
+            | awk -v ns="$ns" '$2 != $4 {print ns "/" $1}'
+        done
+      args:
+        executable: /bin/bash
+      register: _unhealthy_deploys
+      changed_when: false
+
+    - name: Find pods in CrashLoopBackOff or Error in critical namespaces
+      ansible.builtin.shell: |
+        set -o pipefail
+        for ns in monitoring security argocd kube-system longhorn-system; do
+          k3s kubectl get pods -n "$ns" --no-headers 2>/dev/null \
+            | grep -E 'CrashLoopBackOff|Error|ImagePullBackOff' \
+            | awk -v ns="$ns" '{print ns "/" $1}' || true
+        done
+      args:
+        executable: /bin/bash
+      register: _crashloop_pods
+      changed_when: false
+
+    - name: Find pods with high restart counts (>5) in critical namespaces
+      ansible.builtin.shell: |
+        set -o pipefail
+        for ns in monitoring security argocd kube-system longhorn-system; do
+          k3s kubectl get pods -n "$ns" --no-headers 2>/dev/null \
+            | awk -v ns="$ns" '{
+                split($2, ready, "/");
+                restarts = $4;
+                gsub(/[^0-9]/, "", restarts);
+                if (restarts+0 > 5) print ns "/" $1 " restarts=" restarts
+              }' || true
+        done
+      args:
+        executable: /bin/bash
+      register: _high_restart_pods
+      changed_when: false
+
+    - name: Restart unhealthy deployments
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo "{{ item }}" | IFS='/' read -r ns deploy
+        k3s kubectl rollout restart "deployment/$deploy" -n "$ns"
+      args:
+        executable: /bin/bash
+      loop: "{{ _unhealthy_deploys.stdout_lines | default([]) }}"
+      when: _unhealthy_deploys.stdout | trim | length > 0
+      register: _fix_deploy
+      failed_when: false
+      changed_when: "'restarted' in (_fix_deploy.stdout | default(''))"
+
+    - name: Delete CrashLoopBackOff pods
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo "{{ item }}" | IFS='/' read -r ns pod
+        k3s kubectl delete pod "$pod" -n "$ns" --force --grace-period=0
+      args:
+        executable: /bin/bash
+      loop: "{{ _crashloop_pods.stdout_lines | default([]) }}"
+      when: _crashloop_pods.stdout | trim | length > 0
+      failed_when: false
+      changed_when: true
+
+    - name: Report detected issues
+      ansible.builtin.debug:
+        msg: >-
+          Unhealthy deployments: {{ _unhealthy_deploys.stdout_lines | default([]) | length }},
+          CrashLoop pods: {{ _crashloop_pods.stdout_lines | default([]) | length }},
+          High-restart pods: {{ _high_restart_pods.stdout_lines | default([]) | length }}
+
+    - name: Wait for critical services after fixes
+      ansible.builtin.command: >
+        k3s kubectl wait --for=condition=available --timeout=120s
+        deployment/{{ item.name }} -n {{ item.ns }}
+      loop:
+        - { name: monitoring-kube-state-metrics, ns: monitoring }
+        - { name: monitoring-grafana, ns: monitoring }
+        - { name: authelia, ns: security }
+        - { name: traefik, ns: kube-system }
+      register: _wait_fixes
+      retries: 3
+      delay: 10
+      until: _wait_fixes.rc == 0
       changed_when: false
       failed_when: false
 
