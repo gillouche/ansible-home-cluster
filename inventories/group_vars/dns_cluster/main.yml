@@ -14,7 +14,7 @@ gravity_sync_enabled: true
 gravity_sync_schedule: hourly
 
 # Image pin
-pihole_image: pihole/pihole:2025.11.1
+pihole_image: pihole/pihole:2026.05.0
 
 pihole_dns_wildcard_domains:
   - "{{ base_domain }}"
