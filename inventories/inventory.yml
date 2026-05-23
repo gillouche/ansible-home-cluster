@@ -1,23 +1,6 @@
 ---
 all:
   hosts:
-    rpi4b8g1:
-      ansible_host: 192.168.0.76
-      ansible_ssh_user: alarm
-      target_user: alarm
-    rpi4b8g2:
-      ansible_host: 192.168.0.77
-      ansible_ssh_user: alarm
-      target_user: alarm
-    # need to replace SD card
-#    rpi4b8g3:
-#      ansible_host: 192.168.0.78
-#      ansible_ssh_user: alarm
-#      target_user: alarm
-    rpi4b8g4:
-      ansible_host: 192.168.0.79
-      ansible_ssh_user: alarm
-      target_user: alarm
     rpi5b8g1:
       ansible_host: 192.168.0.80
       ansible_ssh_user: alarm
@@ -62,10 +45,6 @@ all:
   children:
     devices:
       hosts:
-        rpi4b8g1:
-        rpi4b8g2:
-#        rpi4b8g3:
-        rpi4b8g4:
         rpi5b8g1:
         rpi5b16g1ssd:
         rpi5b16g2ssd:
@@ -78,10 +57,6 @@ all:
         homeserver3:
     watchdog:
       hosts:
-        rpi4b8g1:
-        rpi4b8g2:
-#        rpi4b8g3:
-        rpi4b8g4:
         rpi5b8g1:
         rpi5b16g1ssd:
         rpi5b16g2ssd:
@@ -248,50 +223,6 @@ all:
             rpi5b8g1:
               k3s_node_labels:
                 node-class: rpi5
-                reliability: best-effort
-                topology.kubernetes.io/zone: rpi
-                node.longhorn.io/create-default-disk: "false"
-                node-role.kubernetes.io/worker: "true"
-                topology.kubernetes.io/node-group: rpi
-                storage.longhorn.io/eligible: "false"
-                hardware.reliability: consumer
-                workload.tier: playground
-            rpi4b8g1:
-              k3s_node_labels:
-                node-class: rpi4
-                reliability: best-effort
-                topology.kubernetes.io/zone: rpi
-                node.longhorn.io/create-default-disk: "false"
-                node-role.kubernetes.io/worker: "true"
-                topology.kubernetes.io/node-group: rpi
-                storage.longhorn.io/eligible: "false"
-                hardware.reliability: consumer
-                workload.tier: playground
-            rpi4b8g2:
-              k3s_node_labels:
-                node-class: rpi4
-                reliability: best-effort
-                topology.kubernetes.io/zone: rpi
-                node.longhorn.io/create-default-disk: "false"
-                node-role.kubernetes.io/worker: "true"
-                topology.kubernetes.io/node-group: rpi
-                storage.longhorn.io/eligible: "false"
-                hardware.reliability: consumer
-                workload.tier: playground
-#            rpi4b8g3:
-#              k3s_node_labels:
-#                node-class: rpi4
-#                reliability: best-effort
-#                topology.kubernetes.io/zone: rpi
-#                node.longhorn.io/create-default-disk: "false"
-#                node-role.kubernetes.io/worker: "true"
-#                topology.kubernetes.io/node-group: rpi
-#                storage.longhorn.io/eligible: "false"
-#                hardware.reliability: consumer
-#                workload.tier: playground
-            rpi4b8g4:
-              k3s_node_labels:
-                node-class: rpi4
                 reliability: best-effort
                 topology.kubernetes.io/zone: rpi
                 node.longhorn.io/create-default-disk: "false"

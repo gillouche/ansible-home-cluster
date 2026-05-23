@@ -23,10 +23,10 @@
     - name: Ensure flannel subnet.env exists
       ansible.builtin.include_tasks: ../maintenance/k3s_flannel_fix.yml
 
-    - name: Start k3s service
+    - name: Restart k3s service
       ansible.builtin.systemd:
         name: k3s
-        state: started
+        state: restarted
         enabled: true
         daemon_reload: true
 
@@ -56,10 +56,10 @@
     - name: Ensure flannel subnet.env exists
       ansible.builtin.include_tasks: ../maintenance/k3s_flannel_fix.yml
 
-    - name: Start k3s service
+    - name: Restart k3s service
       ansible.builtin.systemd:
         name: k3s
-        state: started
+        state: restarted
         enabled: true
         daemon_reload: true
 
@@ -89,10 +89,10 @@
     - name: Ensure flannel subnet.env exists
       ansible.builtin.include_tasks: ../maintenance/k3s_flannel_fix.yml
 
-    - name: Start k3s service
+    - name: Restart k3s service
       ansible.builtin.systemd:
         name: k3s
-        state: started
+        state: restarted
         enabled: true
         daemon_reload: true
 
@@ -247,7 +247,7 @@
         - { name: 'argocd-server', ns: 'argocd' }
         - { name: 'argocd-repo-server', ns: 'argocd' }
       register: _app_wait
-      retries: 3
+      retries: 10
       delay: 15
       until: _app_wait.rc == 0
       changed_when: false
@@ -297,8 +297,8 @@
         - { name: authelia, ns: security }
         - { name: argocd-server, ns: argocd }
       register: _wait
-      retries: 3
-      delay: 10
+      retries: 10
+      delay: 15
       until: _wait.rc == 0
       changed_when: false
 
@@ -437,8 +437,8 @@
         - { name: authelia, ns: security }
         - { name: traefik, ns: kube-system }
       register: _wait_fixes
-      retries: 3
-      delay: 10
+      retries: 10
+      delay: 15
       until: _wait_fixes.rc == 0
       changed_when: false
       failed_when: false

@@ -12,6 +12,8 @@
       tags: [devices, devices_system, os]
     - role: utils
       tags: [devices, devices_system, utils]
+    - role: network_tuning
+      tags: [devices, devices_system, network_tuning]
     - role: aur
       tags: [devices, devices_system, aur]
     - role: firewall

@@ -44,6 +44,7 @@
       - inetutils       # telnet, hostname, etc.
       - ldns            # provides drill (DNS query tool)
       - bind            # provides dig/nslookup/host
+      - ethtool         # NIC diagnostics and tuning
   become: true
   when:
     - (ansible_facts['distribution'] | lower) == 'archlinux'

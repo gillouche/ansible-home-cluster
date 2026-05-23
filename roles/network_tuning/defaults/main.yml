@@ -1,0 +1,11 @@
+---
+network_tuning_tcp_congestion: bbr
+network_tuning_tcp_fastopen: 3
+network_tuning_rmem_max: 16777216
+network_tuning_wmem_max: 16777216
+network_tuning_tcp_rmem: "4096 131072 16777216"
+network_tuning_tcp_wmem: "4096 65536 16777216"
+network_tuning_netdev_max_backlog: 5000
+network_tuning_tcp_slow_start_after_idle: 0
+network_tuning_tcp_mtu_probing: 1
+network_tuning_tcp_tw_reuse: 1

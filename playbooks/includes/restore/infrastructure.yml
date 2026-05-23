@@ -17,15 +17,13 @@
         state: started
         enabled: true
 
-    - name: Wait for VIP to be reachable (Port 6443) # noqa: run-once[task]
+    - name: Wait for HAProxy stats to be reachable # noqa: run-once[task]
       ansible.builtin.wait_for:
-        host: "{{ load_balancer_virtual_ip | default('192.168.0.253') }}"
-        port: 6443
+        host: 127.0.0.1
+        port: 8404
         state: started
-        timeout: 60
-      delegate_to: localhost
+        timeout: 30
       run_once: true
-      become: false
 
 - name: "Restore Edge Proxy"
   hosts: edge_proxy_cluster

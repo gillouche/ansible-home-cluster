@@ -1,0 +1,46 @@
+---
+
+- name: Gather minimal facts (role safeguard when running with tags)
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+  when: ansible_distribution is not defined
+
+- name: Load BBR kernel module
+  community.general.modprobe:
+    name: tcp_bbr
+    state: present
+  become: true
+  when: network_tuning_tcp_congestion == 'bbr'
+
+- name: Ensure BBR module loads on boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/tcp-bbr.conf
+    content: "tcp_bbr\n"
+    owner: root
+    group: root
+    mode: '0644'
+  become: true
+  when: network_tuning_tcp_congestion == 'bbr'
+
+- name: Apply network stack tuning
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    sysctl_file: /etc/sysctl.d/90-network-tuning.conf
+    reload: true
+  become: true
+  loop:
+    - { name: 'net.core.rmem_max', value: '{{ network_tuning_rmem_max }}' }
+    - { name: 'net.core.wmem_max', value: '{{ network_tuning_wmem_max }}' }
+    - { name: 'net.ipv4.tcp_rmem', value: '{{ network_tuning_tcp_rmem }}' }
+    - { name: 'net.ipv4.tcp_wmem', value: '{{ network_tuning_tcp_wmem }}' }
+    - { name: 'net.core.netdev_max_backlog', value: '{{ network_tuning_netdev_max_backlog }}' }
+    - { name: 'net.ipv4.tcp_congestion_control', value: '{{ network_tuning_tcp_congestion }}' }
+    - { name: 'net.ipv4.tcp_fastopen', value: '{{ network_tuning_tcp_fastopen }}' }
+    - { name: 'net.ipv4.tcp_slow_start_after_idle', value: '{{ network_tuning_tcp_slow_start_after_idle }}' }
+    - { name: 'net.ipv4.tcp_mtu_probing', value: '{{ network_tuning_tcp_mtu_probing }}' }
+    - { name: 'net.ipv4.tcp_tw_reuse', value: '{{ network_tuning_tcp_tw_reuse }}' }
+  loop_control:
+    label: "{{ item.name }}={{ item.value }}"
