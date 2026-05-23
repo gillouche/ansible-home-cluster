@@ -1,0 +1,6 @@
+{{ ansible_managed | comment }}
+configs:
+  "{{ k3s_registries_host }}":
+    auth:
+      username: "{{ k3s_registries_username }}"
+      password: "{{ k3s_registries_password }}"

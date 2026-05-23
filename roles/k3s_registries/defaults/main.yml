@@ -1,0 +1,4 @@
+---
+k3s_registries_host: "nexus.gillouche.homelab"
+k3s_registries_username: "{{ hostvars[groups['artifactory'][0]].artifactory_nexus_publish_user }}"
+k3s_registries_password: "{{ hostvars[groups['artifactory'][0]].artifactory_nexus_publish_user_password }}"

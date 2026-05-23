@@ -9,6 +9,8 @@
       tags: [k3s, k3s_cluster, k3s_prep]
     - role: k3s.orchestration.raspberrypi
       tags: [k3s, k3s_cluster, k3s_prep]
+    - role: k3s_registries
+      tags: [k3s, k3s_cluster, k3s_prep, k3s_registries]
 
   tasks:
     - name: Ensure required kernel modules are loaded

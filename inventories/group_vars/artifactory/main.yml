@@ -2,3 +2,7 @@
 artifactory_nexus_image: "sonatype/nexus3:3.92.2-alpine"
 artifactory_nexus_port: 8081
 artifactory_nexus_data_dir: "/mnt/data/nexus"
+# Defined here (not just in role defaults) so other hosts can reach it via
+# hostvars[groups['artifactory'][0]].artifactory_nexus_publish_user — used by
+# k3s_registries to configure containerd auth for nexus.gillouche.homelab.
+artifactory_nexus_publish_user: "publish"

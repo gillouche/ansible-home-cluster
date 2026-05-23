@@ -1,0 +1,6 @@
+---
+- name: Restart k3s for registries change
+  ansible.builtin.systemd:
+    name: "{{ 'k3s' if inventory_hostname in groups['server'] | default([]) else 'k3s-agent' }}"
+    state: restarted
+  failed_when: false
