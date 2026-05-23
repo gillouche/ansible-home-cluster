@@ -732,7 +732,7 @@
   register: _nexus_cleanup_policies
   become: false
 
-- name: Create cleanup policies
+- name: Create proxy cleanup policy
   ansible.builtin.uri:
     url: "{{ artifactory_nexus_url }}/service/rest/internal/cleanup-policies"
     method: POST
@@ -742,20 +742,91 @@
     validate_certs: false
     body_format: json
     body:
-      name: "{{ item.name }}"
+      name: "proxy-cleanup"
       format: "*"
-      notes: "{{ item.notes }}"
-      criteriaLastDownloaded: "{{ item.days }}"
+      notes: "Remove cached proxy artifacts not downloaded in 30 days. Safe for proxies (Nexus refetches from upstream)."
+      criteriaLastDownloaded: 30
     status_code: [200, 201]
-  loop:
-    - name: "proxy-cleanup"
-      days: 30
-      notes: "Remove cached proxy artifacts not downloaded in 30 days"
-  when: _nexus_cleanup_policies.json | selectattr('name', 'equalto', item.name) | list | length == 0
+  when: _nexus_cleanup_policies.json | selectattr('name', 'equalto', 'proxy-cleanup') | list | length == 0
+  become: false
+  no_log: true
+
+- name: Update proxy cleanup policy (keep config in sync)
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/internal/cleanup-policies/proxy-cleanup"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "proxy-cleanup"
+      format: "*"
+      notes: "Remove cached proxy artifacts not downloaded in 30 days. Safe for proxies (Nexus refetches from upstream)."
+      criteriaLastDownloaded: 30
+    status_code: [200, 204]
+  when: _nexus_cleanup_policies.json | selectattr('name', 'equalto', 'proxy-cleanup') | list | length > 0
+  become: false
+  no_log: true
+
+# Docker hosted repos store our own builds — deletion is permanent.
+# Retain the N most recent tagged manifests per image so `latest` and recent versions are always preserved.
+- name: Create docker-hosted cleanup policy
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/internal/cleanup-policies"
+    method: POST
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "docker-hosted-retain"
+      format: "docker"
+      notes: >-
+        Hosted docker images: keep the {{ artifactory_docker_hosted_retain_count }}
+        most recent tagged manifests per image; clean only stale older ones.
+      criteriaLastDownloaded: "{{ artifactory_docker_hosted_last_downloaded_days }}"
+      retain: "{{ artifactory_docker_hosted_retain_count }}"
+      sortBy: "version"
+    status_code: [200, 201]
+  when: _nexus_cleanup_policies.json | selectattr('name', 'equalto', 'docker-hosted-retain') | list | length == 0
+  become: false
+  no_log: true
+
+- name: Update docker-hosted cleanup policy (keep config in sync)
+  ansible.builtin.uri:
+    url: "{{ artifactory_nexus_url }}/service/rest/internal/cleanup-policies/docker-hosted-retain"
+    method: PUT
+    user: "{{ artifactory_nexus_admin_user }}"
+    password: "{{ artifactory_nexus_admin_password_working }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      name: "docker-hosted-retain"
+      format: "docker"
+      notes: >-
+        Hosted docker images: keep the {{ artifactory_docker_hosted_retain_count }}
+        most recent tagged manifests per image; clean only stale older ones.
+      criteriaLastDownloaded: "{{ artifactory_docker_hosted_last_downloaded_days }}"
+      retain: "{{ artifactory_docker_hosted_retain_count }}"
+      sortBy: "version"
+    status_code: [200, 204]
+  when: _nexus_cleanup_policies.json | selectattr('name', 'equalto', 'docker-hosted-retain') | list | length > 0
   become: false
   no_log: true
 
 ## ── Assign cleanup policies to repositories ──
+##
+## Generic rule:
+##  - Proxy repos use `proxy-cleanup` (lastDownloaded only) — safe because
+##    Nexus refetches from upstream when needed.
+##  - Hosted repos use a `retain`-based policy that ALWAYS preserves the N
+##    most recent tagged manifests (so `latest` and recent versions are kept,
+##    even if not pulled in a long time). Only assets beyond the retain count
+##    and stale are eligible for cleanup.
 
 - name: Assign cleanup policy to Docker proxy repositories
   ansible.builtin.uri:
@@ -804,7 +875,7 @@
   become: false
   no_log: true
 
-- name: Assign cleanup policy to docker-hosted repository
+- name: Assign docker-hosted-retain cleanup policy to docker-hosted repository
   ansible.builtin.uri:
     url: "{{ artifactory_nexus_url }}/service/rest/v1/repositories/docker/hosted/docker-hosted"
     method: PUT
@@ -822,7 +893,7 @@
         writePolicy: ALLOW
       cleanup:
         policyNames:
-          - "proxy-cleanup"
+          - "docker-hosted-retain"
       docker:
         v1Enabled: false
         forceBasicAuth: true

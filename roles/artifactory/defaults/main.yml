@@ -18,3 +18,11 @@ artifactory_nexus_publish_user_password: "password"
 artifactory_nexus_admin_user: "admin"
 artifactory_nexus_admin_password_default: "password"
 artifactory_nexus_admin_password: "{{ artifactory_nexus_admin_password_default }}"
+
+# Cleanup policy tuning for the docker-hosted repository.
+# `retain` is the number of most-recent tagged manifests Nexus always keeps per image,
+# so `latest` and recent versions are protected even if not pulled in a long time.
+# `last_downloaded_days` is the secondary criterion applied only to manifests beyond
+# the retain window.
+artifactory_docker_hosted_retain_count: 5
+artifactory_docker_hosted_last_downloaded_days: 90
