@@ -1,9 +1,18 @@
 {{ ansible_managed | comment }}
+# Mirror endpoint must NOT match the implicit default (https://<host>/v2);
+# k3s silently drops matching mirrors and never renders the auth block.
+# Using :443 explicitly forces k3s to emit a [host."url".header] block.
+# The configs key must include the port too — k3s extracts host:port from the
+# rendered endpoint URL when looking up auth, so a bare hostname key won't match.
 mirrors:
   "{{ k3s_registries_host }}":
     endpoint:
-      - "https://{{ k3s_registries_host }}"
+      - "https://{{ k3s_registries_host }}:443"
 configs:
+  "{{ k3s_registries_host }}:443":
+    auth:
+      username: "{{ k3s_registries_username }}"
+      password: "{{ k3s_registries_password }}"
   "{{ k3s_registries_host }}":
     auth:
       username: "{{ k3s_registries_username }}"

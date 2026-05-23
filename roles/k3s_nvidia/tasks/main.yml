@@ -1,18 +1,27 @@
 ---
-- name: Create K3s Agent config directory
+- name: Ensure containerd config drop-in directory exists
   ansible.builtin.file:
-    path: /var/lib/rancher/k3s/agent/etc/containerd
+    path: /var/lib/rancher/k3s/agent/etc/containerd/config.toml.d
     state: directory
     mode: '0755'
     owner: root
     group: root
   become: true
 
-- name: Deploy K3s Containerd config template
+- name: Drop legacy config.toml.tmpl override
+  ansible.builtin.file:
+    path: /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
+    state: absent
+  become: true
+  notify: Restart k3s
+
+- name: Deploy nvidia runtime drop-in
   ansible.builtin.template:
-    src: config.toml.tmpl.j2
-    dest: /var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl
+    src: nvidia-runtime.toml.j2
+    dest: /var/lib/rancher/k3s/agent/etc/containerd/config.toml.d/nvidia.toml
     mode: '0644'
+    owner: root
+    group: root
   become: true
   notify: Restart k3s
 
