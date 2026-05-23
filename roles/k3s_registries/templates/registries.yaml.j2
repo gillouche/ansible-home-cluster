@@ -1,4 +1,8 @@
 {{ ansible_managed | comment }}
+mirrors:
+  "{{ k3s_registries_host }}":
+    endpoint:
+      - "https://{{ k3s_registries_host }}"
 configs:
   "{{ k3s_registries_host }}":
     auth:
